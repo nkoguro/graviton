@@ -678,7 +678,8 @@ typedef struct {
           (ref rect h) (cast int (* h zoom))
           (ref rect x) (cast int (- (-> gwin window_center_x) (/ (ref rect w) 2.0)))
           (ref rect y) (cast int (- (-> gwin window_center_y) (/ (ref rect h) 2.0))))
-    (SDL_RenderSetClipRect (-> gwin renderer) (& rect))))
+    (when (-> gwin renderer)
+      (SDL_RenderSetClipRect (-> gwin renderer) (& rect)))))
 
 (define-cproc window-background-sprite (window)
   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR window))
@@ -936,6 +937,8 @@ typedef struct {
 
 (define-cproc close-window (gwin::<graviton-window>)
   ::<void>
+  (unless (-> gwin window)
+    (return))
   (let* ((event::SDL_Event))
     (set! (ref event window type) SDL_WINDOWEVENT
           (ref event window windowID) (SDL_GetWindowID (-> gwin window))
