@@ -135,6 +135,22 @@ typedef struct {
   (initcode
    (initialize-libs))
 
+  (define-cfn finalize-sprite (z data::void*)
+    ::void :static
+    (when (GRV_SPRITE_P z)
+      (set! (-> (GRV_SPRITE_PTR z) window) SCM_FALSE
+            (-> (GRV_SPRITE_PTR z) image) SCM_FALSE)))
+
+  (define-cfn finalize-image (z data::void*)
+    ::void :static
+    (when (GRV_IMAGE_P z)
+      (let* ((image::GrvImage* (GRV_IMAGE_PTR z))
+             (texture::SDL_Texture* (-> image texture)))
+        (unless (== texture NULL)
+          (SDL_DestroyTexture texture))
+        (SDL_FreeSurface (-> image surface))
+        (set! (-> image surface) NULL
+              (-> image texture) NULL))))
 
   (define-cfn register-grv-window (gwin::GrvWindow*)
     ::ScmObj :static
@@ -157,10 +173,23 @@ typedef struct {
                               (break))))))
                      grv_windows)))
 
+  (define-cfn destroy-window (gwin::GrvWindow*)
+    ::void :static
+    (unregister-grv-window gwin)
+    (SDL_DestroyRenderer (-> gwin renderer))
+    (SDL_DestroyWindow (-> gwin window))
+    (set! (-> gwin window) NULL
+          (-> gwin renderer) NULL
+          (-> gwin proc) SCM_FALSE
+          (-> gwin events) SCM_NIL
+          (-> gwin sprites) SCM_NIL
+          (-> gwin background_sprite) SCM_FALSE))
+
   (define-cfn %create-image (w::int h::int)
     ::ScmObj
     (let* ((surface::SDL_Surface* (SDL_CreateRGBSurfaceWithFormat 0 w h 32 SDL_PIXELFORMAT_RGBA32))
-           (image::GrvImage* (SCM_NEW (.type GrvImage))))
+           (image::GrvImage* (SCM_NEW (.type GrvImage)))
+           (obj (MAKE_GRV_IMAGE image)))
       (when (== surface NULL)
         (Scm_Error "SDL_CreateRGBSurfaceWithFormat failed: %s" (SDL_GetError)))
       (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
@@ -170,7 +199,8 @@ typedef struct {
             (ref (-> image update_rect) y) 0
             (ref (-> image update_rect) w) 0
             (ref (-> image update_rect) h) 0)
-      (return (MAKE_GRV_IMAGE image))))
+      (Scm_RegisterFinalizer obj finalize-image NULL)
+      (return obj)))
 
   (define-cfn get-events ()
     ::ScmObj :static
@@ -578,6 +608,7 @@ typedef struct {
             (-> sprite flip) flip
             (-> sprite visible) visible)
       (let* ((sprite-obj (MAKE_GRV_SPRITE sprite)))
+        (Scm_RegisterFinalizer sprite-obj finalize-sprite NULL)
         (insert-window-sprite sprite-obj)
         (return sprite-obj))))
   )  ;; end of inline-stub
@@ -604,7 +635,8 @@ typedef struct {
             (-> gwin renderer) NULL
             (-> gwin proc) SCM_FALSE
             (-> gwin events) SCM_NIL
-            (-> gwin sprites) SCM_NIL)
+            (-> gwin sprites) SCM_NIL
+            (-> gwin background_sprite) SCM_FALSE)
 
       (set! (-> gwin window) (SDL_CreateWindow title
                                                SDL_WINDOWPOS_UNDEFINED
@@ -640,7 +672,8 @@ typedef struct {
          (rect::SDL_Rect))
     (set! (-> gwin screen_center_x) screen_center_x
           (-> gwin screen_center_y) screen_center_y
-          (-> gwin zoom) zoom)
+          (-> gwin zoom) zoom
+          (-> gwin background_sprite) SCM_FALSE)
     (set! (ref rect w) (cast int (* w zoom))
           (ref rect h) (cast int (* h zoom))
           (ref rect x) (cast int (- (-> gwin window_center_x) (/ (ref rect w) 2.0)))
@@ -863,9 +896,7 @@ typedef struct {
                 grv_windows)
       (for-each (lambda (obj)
                   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
-                    (unregister-grv-window gwin)
-                    (SDL_DestroyRenderer (-> gwin renderer))
-                    (SDL_DestroyWindow (-> gwin window))))
+                    (destroy-window gwin)))
                 will-close-windows)
       (for-each (lambda (gwin-obj)
                   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR gwin-obj))
