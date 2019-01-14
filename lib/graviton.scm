@@ -1050,9 +1050,12 @@ typedef struct {
      (handle-events window (match-lambda clause ... (else #f))))))
 
 (set-default-handler! (lambda (win)
-                        (match-events win
-                          (('key-down _ 'escape _ _ _)
-                           (close-window win)))))
+                        (for-each (match-lambda
+                                    (('key-down _ 'escape _ _ _)
+                                     (close-window win))
+                                    (_
+                                     #f))
+                                  (get-window-events win))))
 
 (define (call-with-window title size thunk)
   (let1 window (%create-window title size)
