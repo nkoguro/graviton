@@ -104,6 +104,7 @@ typedef struct {
 "
    "static ScmObj grv_windows = SCM_NIL;"
    "static bool running_event_loop = false;"
+   "static ScmObj default_handler = SCM_FALSE;"
    ) ;; end of declcode
 
   (define-cptr <graviton-window> :private
@@ -448,6 +449,65 @@ typedef struct {
                   (return true)))
               win-events)
     (return false))
+
+  (define-cfn run-window-handlers ()
+    ::void :static
+    (let* ((all-events (get-events))
+           (will-close-windows SCM_NIL))
+      (for-each (lambda (obj)
+                  (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj))
+                         (proc (-> gwin proc)))
+                    (set! (-> gwin events) (extract-window-events gwin all-events))
+                    (cond
+                      ((SCM_PROCEDUREP proc)
+                       (set! (-> gwin proc) SCM_FALSE)
+                       (Scm_ApplyRec0 proc))
+                      ((SCM_PROCEDUREP default_handler)
+                       (Scm_ApplyRec1 default_handler obj)))
+                    (when (window-close-event-exists? (-> gwin events))
+                      (set! will-close-windows (Scm_Cons obj will-close-windows)))))
+                grv_windows)
+      (for-each (lambda (obj)
+                  (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
+                    (destroy-window gwin)))
+                will-close-windows)))
+
+  (define-cfn update-window-contents ()
+    ::void :static
+    (for-each (lambda (gwin-obj)
+                (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR gwin-obj))
+                       (renderer::SDL_Renderer* (-> gwin renderer)))
+                  (SDL_SetRenderDrawBlendMode renderer SDL_BLENDMODE_BLEND)
+                  (SDL_SetRenderDrawColor renderer 0 0 0 255)
+                  (SDL_RenderClear renderer)
+                  (for-each (lambda (sprite-obj)
+                              (let* ((sprite::GrvSprite* (GRV_SPRITE_PTR sprite-obj)))
+                                (when (or (SCM_FALSEP (-> sprite image)) (not (-> sprite visible)))
+                                  (continue))
+                                (let* ((texture::SDL_Texture* (get-texture gwin (GRV_IMAGE_PTR (-> sprite image))))
+                                       (dstrect::SDL_Rect)
+                                       (spr-w::double (* (ref (-> sprite srcrect) w) (-> sprite zoom_x)))
+                                       (spr-h::double (* (ref (-> sprite srcrect) h) (-> sprite zoom_y))))
+                                  (set! (ref dstrect x) (cast int (round (+ (* (- (- (-> sprite center_x) (/ spr-w 2))
+                                                                                  (-> gwin screen_center_x))
+                                                                               (-> gwin zoom))
+                                                                            (-> gwin window_center_x))))
+                                        (ref dstrect y) (cast int (round (+ (* (- (- (-> sprite center_y) (/ spr-h 2))
+                                                                                  (-> gwin screen_center_y))
+                                                                               (-> gwin zoom))
+                                                                            (-> gwin window_center_y))))
+                                        (ref dstrect w) (cast int (round (* spr-w (-> gwin zoom))))
+                                        (ref dstrect h) (cast int (round (* spr-h (-> gwin zoom)))))
+                                  (SDL_RenderCopyEx renderer
+                                                    texture
+                                                    (& (-> sprite srcrect))
+                                                    (& dstrect)
+                                                    (-> sprite angle)
+                                                    NULL
+                                                    (-> sprite flip)))))
+                            (-> gwin sprites))
+                  (SDL_RenderPresent renderer)))
+              grv_windows))
 
   (define-cfn create-streaming-texture-from-surface (renderer::SDL_Renderer* surface::SDL_Surface*)
     ::SDL_Texture* :static
@@ -876,6 +936,10 @@ typedef struct {
 (define-cproc clear-window-sprites! (gwin::<graviton-window>)
   (set! (-> gwin sprites) SCM_NIL))
 
+(define-cproc set-default-handler! (proc)
+  ::<void>
+  (set! default_handler proc))
+
 (define-cproc run-event-loop ()
   (when running-event-loop
     (return))
@@ -883,56 +947,8 @@ typedef struct {
   (set! running-event-loop true)
   (SDL_StartTextInput)
   (while (not (SCM_NULLP grv_windows))
-    (let* ((all-events (get-events))
-           (will-close-windows SCM_NIL))
-      (for-each (lambda (obj)
-                  (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj))
-                         (proc (-> gwin proc)))
-                    (set! (-> gwin events) (extract-window-events gwin all-events))
-                    (when (SCM_PROCEDUREP proc)
-                      (set! (-> gwin proc) SCM_FALSE)
-                      (Scm_ApplyRec0 proc))
-                    (when (window-close-event-exists? (-> gwin events))
-                      (set! will-close-windows (Scm_Cons obj will-close-windows)))))
-                grv_windows)
-      (for-each (lambda (obj)
-                  (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
-                    (destroy-window gwin)))
-                will-close-windows)
-      (for-each (lambda (gwin-obj)
-                  (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR gwin-obj))
-                         (renderer::SDL_Renderer* (-> gwin renderer)))
-                    (SDL_SetRenderDrawBlendMode renderer SDL_BLENDMODE_BLEND)
-                    (SDL_SetRenderDrawColor renderer 0 0 0 255)
-                    (SDL_RenderClear renderer)
-                    (for-each (lambda (sprite-obj)
-                                (let* ((sprite::GrvSprite* (GRV_SPRITE_PTR sprite-obj)))
-                                  (when (or (SCM_FALSEP (-> sprite image)) (not (-> sprite visible)))
-                                    (continue))
-                                  (let* ((texture::SDL_Texture* (get-texture gwin (GRV_IMAGE_PTR (-> sprite image))))
-                                         (dstrect::SDL_Rect)
-                                         (spr-w::double (* (ref (-> sprite srcrect) w) (-> sprite zoom_x)))
-                                         (spr-h::double (* (ref (-> sprite srcrect) h) (-> sprite zoom_y))))
-                                    (set! (ref dstrect x) (cast int (+ (* (- (- (-> sprite center_x) (/ spr-w 2))
-                                                                             (-> gwin screen_center_x))
-                                                                          (-> gwin zoom))
-                                                                       (-> gwin window_center_x)))
-                                          (ref dstrect y) (cast int (+ (* (- (- (-> sprite center_y) (/ spr-h 2))
-                                                                             (-> gwin screen_center_y))
-                                                                          (-> gwin zoom))
-                                                                       (-> gwin window_center_y)))
-                                          (ref dstrect w) (cast int (* spr-w (-> gwin zoom)))
-                                          (ref dstrect h) (cast int (* spr-h (-> gwin zoom))))
-                                    (SDL_RenderCopyEx renderer
-                                                      texture
-                                                      (& (-> sprite srcrect))
-                                                      (& dstrect)
-                                                      (-> sprite angle)
-                                                      NULL
-                                                      (-> sprite flip)))))
-                              (-> gwin sprites))
-                    (SDL_RenderPresent renderer)))
-                grv_windows)))
+    (run-window-handlers)
+    (update-window-contents))
   (set! running-event-loop false))
 
 (define-cproc close-window (gwin::<graviton-window>)
@@ -957,6 +973,11 @@ typedef struct {
   (syntax-rules ()
     ((_ window clause ...)
      (handle-events window (match-lambda clause ... (else #f))))))
+
+(set-default-handler! (lambda (win)
+                        (match-events win
+                          (('key-down _ 'escape _ _ _)
+                           (close-window win)))))
 
 (define (call-with-window title size thunk)
   (let1 window (%create-window title size)
