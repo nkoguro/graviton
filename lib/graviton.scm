@@ -961,6 +961,8 @@ typedef struct {
           (ref event window event) SDL_WINDOWEVENT_CLOSE)
     (SDL_PushEvent (& event))))
 
+(compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
+
 (define (handle-events window handler)
   (shift cont (set-window-proc! window
                                 (lambda ()
@@ -984,8 +986,6 @@ typedef struct {
     (reset
       (thunk window)))
   (run-event-loop))
-
-(compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
 
 (define (window-background-image window)
   (values-ref (sprite-image (window-background-sprite window)) 0))
