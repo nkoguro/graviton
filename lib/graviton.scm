@@ -967,7 +967,7 @@ typedef struct {
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
 
 (define (window-background-image window)
-  (value-ref (sprite-image (window-background-sprite window)) 0))
+  (values-ref (sprite-image (window-background-sprite window)) 0))
 
 (define-method set-sprite-image! ((sprite <graviton-sprite>) (image <graviton-image>))
   (receive (w h) (image-size image)
