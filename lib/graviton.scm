@@ -1047,7 +1047,7 @@ typedef struct {
 (define-syntax match-events
   (syntax-rules ()
     ((_ window clause ...)
-     (handle-events window (match-lambda clause ... (else #f))))))
+     (handle-events window (match-lambda clause ... (_ #f))))))
 
 (set-default-handler! (lambda (win)
                         (for-each (match-lambda
