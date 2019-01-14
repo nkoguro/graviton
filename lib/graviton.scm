@@ -51,6 +51,8 @@
           set-image-rgba-pixels!
           sprite-center-position
           set-sprite-center-position!
+
+          draw-line
           ))
 
 (select-module graviton)
@@ -671,6 +673,68 @@ typedef struct {
         (Scm_RegisterFinalizer sprite-obj finalize-sprite NULL)
         (insert-window-sprite sprite-obj)
         (return sprite-obj))))
+
+  (define-cfn sign (a::int)
+    ::int :static
+    (cond
+      ((< a 0)
+       (return -1))
+      ((== a 0)
+       (return 0))
+      (else
+       (return 1))))
+
+  (define-cfn %%draw-line (surface::SDL_Surface* x0::int y0::int x1::int y1::int color::Uint32)
+    ::void :static
+    (let* ((lx::int (+ (abs (- x0 x1)) 1))
+           (ly::int (+ (abs (- y0 y1)) 1)))
+      (cond
+        ((<= lx ly)
+         (let* ((x::int (?: (< y0 y1) x0 x1))
+                (end-x::int (?: (< y0 y1) x1 x0))
+                (dx::int (sign (- end-x x)))
+                (y::int (?: (< y0 y1) y0 y1))
+                (end-y::int (?: (< y0 y1) y1 y0))
+                (dy::double (/ (cast double ly) (cast double lx)))
+                (ay::double (+ y dy)))
+           (loop
+            (let* ((rect::SDL_Rect))
+              (set! (ref rect x) x
+                    (ref rect y) y
+                    (ref rect w) 1
+                    (ref rect h) (?: (== x end-x)
+                                     (+ (- end-y y) 1)
+                                     (cast int (round (- ay y)))))
+              (when (!= (SDL_FillRect surface (& rect) color) 0)
+                (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))
+              (when (== x end-x)
+                (break))
+              (set! x (+ x dx)
+                    y (+ y (ref rect h))
+                    ay (+ ay dy))))))
+        (else
+         (let* ((x::int (?: (< x0 x1) x0 x1))
+                (end-x::int (?: (< x0 x1) x1 x0))
+                (dx::double (/ (cast double lx) (cast double ly)))
+                (ax::double (+ x dx))
+                (y::int (?: (< x0 x1) y0 y1))
+                (end-y::int (?: (< x0 x1) y1 y0))
+                (dy::int (sign (- end-y y))))
+           (loop
+            (let* ((rect::SDL_Rect))
+              (set! (ref rect x) x
+                    (ref rect y) y
+                    (ref rect w) (?: (== y end-y)
+                                     (+ (- end-x x) 1)
+                                     (cast int (round (- ax x))))
+                    (ref rect h) 1)
+              (when (!= (SDL_FillRect surface (& rect) color) 0)
+                (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))
+              (when (== y end-y)
+                (break))
+              (set! x (+ x (ref rect w))
+                    y (+ y dy)
+                    ax (+ ax dx)))))))))
   )  ;; end of inline-stub
 
 (load "graviton/enum2sym.scm")
@@ -961,6 +1025,15 @@ typedef struct {
           (ref event window event) SDL_WINDOWEVENT_CLOSE)
     (SDL_PushEvent (& event))))
 
+(define-cproc %draw-line (gimage::<graviton-image>
+                          x0::<double>
+                          y0::<double>
+                          x1::<double>
+                          y1::<double>
+                          color::<int>)
+  ::<void>
+  (%%draw-line (-> gimage surface) x0 y0 x1 y1 color))
+
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
 
 (define (handle-events window handler)
@@ -1015,3 +1088,11 @@ typedef struct {
                    (list 0 0 w h))
                  rect)
     (make-sprite window image center-x center-y z rect angle zoom-x zoom-y visible)))
+
+(define-method draw-line ((window <graviton-window>)
+                          (x0 <real>)
+                          (y0 <real>)
+                          (x1 <real>)
+                          (y1 <real>)
+                          (color <integer>))
+  (%draw-line (window-background-image window) x0 y0 x1 y1 color))
