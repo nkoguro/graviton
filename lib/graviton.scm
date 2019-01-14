@@ -674,18 +674,18 @@ typedef struct {
           (-> gwin screen_center_y) screen_center_y
           (-> gwin zoom) zoom
           (-> gwin background_sprite) SCM_FALSE)
-    (set! (ref rect w) (cast int (* w zoom))
-          (ref rect h) (cast int (* h zoom))
-          (ref rect x) (cast int (- (-> gwin window_center_x) (/ (ref rect w) 2.0)))
-          (ref rect y) (cast int (- (-> gwin window_center_y) (/ (ref rect h) 2.0))))
+    (set! (ref rect w) (cast int (round (* w zoom)))
+          (ref rect h) (cast int (round (* h zoom)))
+          (ref rect x) (cast int (round (- (-> gwin window_center_x) (/ (ref rect w) 2.0))))
+          (ref rect y) (cast int (round (- (-> gwin window_center_y) (/ (ref rect h) 2.0)))))
     (when (-> gwin renderer)
       (SDL_RenderSetClipRect (-> gwin renderer) (& rect)))))
 
 (define-cproc window-background-sprite (window)
   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR window))
          (sprite (-> gwin background_sprite))
-         (w::int (cast int (* (-> gwin screen_center_x) 2)))
-         (h::int (cast int (* (-> gwin screen_center_y) 2))))
+         (w::int (cast int (round (* (-> gwin screen_center_x) 2))))
+         (h::int (cast int (round (* (-> gwin screen_center_y) 2)))))
     (when (SCM_FALSEP sprite)
       (let* ((image (%create-image w h)))
         (set! sprite (%make-sprite window
