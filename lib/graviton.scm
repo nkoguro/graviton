@@ -684,9 +684,32 @@ typedef struct {
       (else
        (return 1))))
 
-  (define-cfn %%draw-line (surface::SDL_Surface* x0::int y0::int x1::int y1::int color::Uint32)
+  (define-cfn update-rect (gimage::GrvImage* x::int y::int w::int h::int)
     ::void :static
-    (let* ((lx::int (+ (abs (- x0 x1)) 1))
+    (let* ((rect::SDL_Rect* (& (-> gimage update_rect))))
+      (cond
+        ((SDL_RectEmpty rect)
+         (set! (-> rect x) x
+               (-> rect y) y
+               (-> rect w) w
+               (-> rect h) h))
+        (else
+         (let* ((rect-a::SDL_Rect)
+                (rect-b::SDL_Rect))
+           (set! (ref rect-a x) (-> rect x)
+                 (ref rect-a y) (-> rect y)
+                 (ref rect-a w) (-> rect w)
+                 (ref rect-a h) (-> rect h)
+                 (ref rect-b x) x
+                 (ref rect-b y) y
+                 (ref rect-b w) w
+                 (ref rect-b h) h)
+           (SDL_UnionRect (& rect-a) (& rect-b) (& (-> gimage update_rect))))))))
+
+  (define-cfn %%draw-line (gimage::GrvImage* x0::int y0::int x1::int y1::int color::Uint32)
+    ::void :static
+    (let* ((surface::SDL_Surface* (-> gimage surface))
+           (lx::int (+ (abs (- x0 x1)) 1))
            (ly::int (+ (abs (- y0 y1)) 1)))
       (cond
         ((<= lx ly)
@@ -734,7 +757,8 @@ typedef struct {
                 (break))
               (set! x (+ x (ref rect w))
                     y (+ y dy)
-                    ax (+ ax dx)))))))))
+                    ax (+ ax dx))))))))
+    (update-rect gimage (?: (< x0 x1) x0 x1) (?: (< y0 y1) y0 y1) (+ (abs (- x0 x1)) 1) (+ (abs (- y0 y1)) 1)))
   )  ;; end of inline-stub
 
 (load "graviton/enum2sym.scm")
@@ -1032,7 +1056,7 @@ typedef struct {
                           y1::<double>
                           color::<int>)
   ::<void>
-  (%%draw-line (-> gimage surface) x0 y0 x1 y1 color))
+  (%%draw-line gimage x0 y0 x1 y1 color))
 
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
 
