@@ -1,0 +1,10 @@
+(use graviton)
+
+(define (main args)
+  (call-with-window *program-name* '(640 480)
+    (lambda (win)
+      (set-coordinate! win -6 4 6 -4)
+      (draw-line win '((-6 0) (6 0)) #xffff8000)
+      (draw-line win '((0 6) (0 -6)) #xffff8000)
+      (draw-line win (map (^x (list x (* 2 (sin x)))) (iota 121 -6 0.1)) #xffffffff)))
+  0)

@@ -34,11 +34,17 @@
   (use compile-stub)
   (use gauche.parameter)
   (use gauche.partcont)
+  (use gauche.record)
   (use util.match)
 
   (export <graviton-window>
           <graviton-image>
           <graviton-sprite>
+
+          <point>
+          make-point
+          point-x
+          point-y
 
           call-with-window
           set-window-resolution!
@@ -51,6 +57,8 @@
           set-image-rgba-pixels!
           sprite-center-position
           set-sprite-center-position!
+
+          set-coordinate!
 
           draw-line
           ))
@@ -102,11 +110,6 @@ typedef struct {
 
 typedef struct {
     SDL_Window* window;
-    double window_center_x;
-    double window_center_y;
-    double screen_center_x;
-    double screen_center_y;
-    double zoom;
     SDL_Renderer* renderer;
     ScmObj proc;
     ScmObj events;
@@ -862,16 +865,16 @@ typedef struct {
          (height::int 0)
          (flags::Uint32 0))
     (cond
-     ((and (SCM_LISTP size)
-           (== (Scm_Length size) 2)
-           (SCM_INTP (Scm_ListRef size 0 SCM_UNBOUND))
-           (SCM_INTP (Scm_ListRef size 1 SCM_UNBOUND)))
-      (set! width (SCM_INT_VALUE (Scm_ListRef size 0 (SCM_MAKE_INT -1)))
-            height (SCM_INT_VALUE (Scm_ListRef size 1 (SCM_MAKE_INT -1)))))
-     ((SCM_EQ size 'fullscreen)
-      (set! flags SDL_WINDOW_FULLSCREEN))
-     (else
-      (Scm_Error "size must be a list of two integer elements or 'fullscreen, but got %S" size)))
+      ((and (SCM_LISTP size)
+            (== (Scm_Length size) 2)
+            (SCM_INTP (Scm_ListRef size 0 SCM_UNBOUND))
+            (SCM_INTP (Scm_ListRef size 1 SCM_UNBOUND)))
+       (set! width (SCM_INT_VALUE (Scm_ListRef size 0 (SCM_MAKE_INT -1)))
+             height (SCM_INT_VALUE (Scm_ListRef size 1 (SCM_MAKE_INT -1)))))
+      ((SCM_EQ size 'fullscreen)
+       (set! flags SDL_WINDOW_FULLSCREEN))
+      (else
+       (Scm_Error "size must be a list of two integer elements or 'fullscreen, but got %S" size)))
     (let* ((gwin::GrvWindow* (SCM_NEW (.type GrvWindow))))
       (set! (-> gwin window) NULL
             (-> gwin renderer) NULL
@@ -892,12 +895,7 @@ typedef struct {
       (let* ((w::int)
              (h::int))
         (SDL_GetWindowSize (-> gwin window) (& w) (& h))
-        (set! (-> gwin window_center_x) (/ w 2.0)
-              (-> gwin window_center_y) (/ h 2.0)
-              (-> gwin screen_center_x) (-> gwin window_center_x)
-              (-> gwin screen_center_y) (-> gwin window_center_y)
-              (-> gwin zoom) 1.0
-              (-> gwin background_image) (%create-image w h)))
+        (set! (-> gwin background_image) (%create-image w h)))
 
       (set! (-> gwin renderer) (SDL_CreateRenderer (-> gwin window) -1 SDL_RENDERER_PRESENTVSYNC))
       (unless (-> gwin renderer)
@@ -910,23 +908,48 @@ typedef struct {
 
 (define-cproc set-window-resolution! (gwin::<graviton-window> w::<int> h::<int>)
   ::<void>
-  (let* ((screen_center_x::double (/ w 2.0))
-         (screen_center_y::double (/ h 2.0))
-         (zx::double (/ (-> gwin window_center_x) screen_center_x))
-         (zy::double (/ (-> gwin window_center_y) screen_center_y))
-         (zoom::double (?: (< zx zy) zx zy))
+  (let* ((win-w::int)
+         (win-h::int)
+         (zoom-x::double)
+         (zoom-y::double)
+         (zoom::double)
          (rect::SDL_Rect))
     (destroy-image (GRV_IMAGE_PTR (-> gwin background_image)))
-    (set! (-> gwin screen_center_x) screen_center_x
-          (-> gwin screen_center_y) screen_center_y
-          (-> gwin zoom) zoom
-          (-> gwin background_image) (%create-image w h))
-    (set! (ref rect w) (cast int (round (* w zoom)))
-          (ref rect h) (cast int (round (* h zoom)))
-          (ref rect x) (cast int (round (- (-> gwin window_center_x) (/ (ref rect w) 2.0))))
-          (ref rect y) (cast int (round (- (-> gwin window_center_y) (/ (ref rect h) 2.0)))))
+    (SDL_GetWindowSize (-> gwin window) (& win-w) (& win-h))
+    (set! zoom-x (/ (cast double win-w) (cast double w))
+          zoom-y (/ (cast double win-h) (cast double h))
+          zoom (?: (< zoom-x zoom-y) zoom-x zoom-y)
+          (-> gwin background_image) (%create-image w h)
+          (ref rect x) (cast int (round (+ (* (- (/ w 2.0)) zoom) (/ win-w 2.0))))
+          (ref rect y) (cast int (round (+ (* (- (/ h 2.0)) zoom) (/ win-h 2.0))))
+          (ref rect w) (cast int (round (* w zoom)))
+          (ref rect h) (cast int (round (* h zoom))))
     (when (-> gwin renderer)
       (SDL_RenderSetClipRect (-> gwin renderer) (& rect)))))
+
+(define-cproc set-image-coordinate! (gimage::<graviton-image> x0::<double> y0::<double> x1::<double> y1::<double>)
+  ::<void>
+  (let* ((wex::int (- (-> gimage surface w) 1))
+         (wey::int (- (-> gimage surface h) 1))
+         (wcx::double (/ wex 2.0))
+         (wcy::double (/ wey 2.0))
+         (rx::double (/ (- x1 x0) wex))
+         (ry::double (/ (- y1 y0) wey))
+         (r::double (?: (< (fabs rx) (fabs ry)) (fabs ry) (fabs rx)))
+         (mx::double (?: (< rx 0.0) (- r) r))
+         (my::double (?: (< ry 0.0) (- r) r))
+         (cx::double (/ (+ x0 x1) 2.0))
+         (cy::double (/ (+ y0 y1) 2.0))
+         (sx::double (+ (* mx (- wcx)) cx))
+         (sy::double (+ (* my (- wcy)) cy))
+         (ex::double (+ (* mx wcx) cx))
+         (ey::double (+ (* my wcy) cy)))
+    (set! (ref (-> gimage param) m00) (/ 1.0 mx)
+          (ref (-> gimage param) m01) 0.0
+          (ref (-> gimage param) m10) 0.0
+          (ref (-> gimage param) m11) (/ 1.0 my)
+          (ref (-> gimage param) x0) (- (/ sx mx))
+          (ref (-> gimage param) y0) (- (/ sy my)))))
 
 (define-cproc create-image (w::<int> h::<int>)
   (%create-image w h))
@@ -1128,22 +1151,41 @@ typedef struct {
           (ref event window event) SDL_WINDOWEVENT_CLOSE)
     (SDL_PushEvent (& event))))
 
-(define-cproc %draw-line (gimage::<graviton-image>
-                          x0::<double>
-                          y0::<double>
-                          x1::<double>
-                          y1::<double>
-                          color::<int>)
+(define-cproc %draw-line (gimage::<graviton-image> points::<list> color::<int>)
   ::<void>
-  (let* ((ix0::int)
-         (iy0::int)
-         (ix1::int)
-         (iy1::int))
-    (image-coordinate gimage x0 y0 (& ix0) (& iy0))
-    (image-coordinate gimage x1 y1 (& ix1) (& iy1))
-    (%%draw-line gimage ix0 iy0 ix1 iy1 color)))
+  (cond
+    ((SCM_NULLP points)
+     (return))
+    ((SCM_NULLP (SCM_CDR points))
+     (let* ((x::double (Scm_GetDouble (Scm_ListRef (SCM_CAR points) 0 SCM_UNBOUND)))
+            (y::double (Scm_GetDouble (Scm_ListRef (SCM_CAR points) 1 SCM_UNBOUND)))
+            (ix::int)
+            (iy::int))
+       (image-coordinate gimage x y (& ix) (& iy))
+       (%%draw-line gimage ix iy ix iy color)))
+    (else
+     (let* ((x0::double (Scm_GetDouble (Scm_ListRef (SCM_CAR points) 0 SCM_UNBOUND)))
+            (y0::double (Scm_GetDouble (Scm_ListRef (SCM_CAR points) 1 SCM_UNBOUND)))
+            (ix0::int)
+            (iy0::int))
+       (image-coordinate gimage x0 y0 (& ix0) (& iy0))
+       (for-each (lambda (point)
+                   (let* ((x1::double (Scm_GetDouble (Scm_ListRef point 0 SCM_UNBOUND)))
+                          (y1::double (Scm_GetDouble (Scm_ListRef point 1 SCM_UNBOUND)))
+                          (ix1::int)
+                          (iy1::int))
+                     (image-coordinate gimage x1 y1 (& ix1) (& iy1))
+                     (%%draw-line gimage ix0 iy0 ix1 iy1 color)
+                     (set! ix0 ix1
+                           iy0 iy1)))
+                 (SCM_CDR points))))))
 
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
+
+(define-record-type (<point> (pseudo-rtd <list>))
+  point point?
+  (x point-x)
+  (y point-y))
 
 (define (handle-events window handler)
   (shift cont (set-window-proc! window
@@ -1172,6 +1214,20 @@ typedef struct {
       (thunk window)))
   (run-event-loop))
 
+(define-method set-coordinate! ((window <graviton-window>)
+                                (x0 <real>)
+                                (y0 <real>)
+                                (x1 <real>)
+                                (y1 <real>))
+  (set-image-coordinate! (window-background-image window) x0 y0 x1 y1))
+
+(define-method set-coordinate! ((image <graviton-image>)
+                                (x0 <real>)
+                                (y0 <real>)
+                                (x1 <real>)
+                                (y1 <real>))
+  (set-image-coordinate! image x0 y0 x1 y1))
+
 (define-method set-sprite-image! ((sprite <graviton-sprite>) (image <graviton-image>))
   (receive (w h) (image-size image)
     (%set-sprite-image! sprite image (list 0 0 w h))))
@@ -1199,9 +1255,11 @@ typedef struct {
     (make-sprite window image center-x center-y z rect angle zoom-x zoom-y visible)))
 
 (define-method draw-line ((window <graviton-window>)
-                          (x0 <real>)
-                          (y0 <real>)
-                          (x1 <real>)
-                          (y1 <real>)
-                          (color <integer>))
-  (%draw-line (window-background-image window) x0 y0 x1 y1 color))
+                           (points <list>)
+                           (color <integer>))
+  (%draw-line (window-background-image window) points color))
+
+(define-method draw-line ((image <graviton-image>)
+                           (points <list>)
+                           (color <integer>))
+  (%draw-line image points color))
