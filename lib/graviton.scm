@@ -117,6 +117,14 @@ typedef struct {
     ScmObj sprites;
     ScmObj background_image;
 } GrvWindow;
+
+typedef struct {
+    int x;
+    int y;
+    int w;
+    int h;
+    char* data;
+} ScratchArea;
 "
   "static ScmObj grv_windows = SCM_NIL;"
   "static bool running_event_loop = false;"
@@ -231,6 +239,16 @@ typedef struct {
             (ref (-> image param) y0) 0.0)
       (Scm_RegisterFinalizer obj finalize-image NULL)
       (return obj)))
+
+  (define-cfn create-scratch-area (x::int y::int w::int h::int)
+    ::ScratchArea* :static
+    (let* ((area::ScratchArea* (SCM_NEW (.type ScratchArea))))
+      (set! (-> area x) x
+            (-> area y) y
+            (-> area w) w
+            (-> area h) h
+            (-> area data) (SCM_NEW_ATOMIC_ARRAY (.type char) (* w h)))
+      (return area)))
   )  ;; end of inline-stub
 
 (inline-stub
