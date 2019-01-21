@@ -43,6 +43,7 @@
 
           <point>
           make-point
+          point?
           point-x
           point-y
 
