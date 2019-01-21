@@ -62,6 +62,10 @@
           set-coordinate!
 
           draw-line
+
+          rgb
+          rgba
+          color
           ))
 
 (select-module graviton)
@@ -1282,3 +1286,49 @@ typedef struct {
                            (points <list>)
                            (color <integer>))
   (%draw-line image points color))
+
+(define (rgb r g b)
+  (rgba r g b #xff))
+
+(define (rgba r g b a)
+  (if (eq? (native-endian) 'little-endian)
+      (logior r
+              (ash g 8)
+              (ash b 16)
+              (ash a 24))
+      (logior a
+              (ash b 8)
+              (ash g 16)
+              (ash r 24))))
+
+(define *color-table*
+  `((white   . ,(rgb #xff #xff #xff))
+    (silver  . ,(rgb #xc0 #xc0 #xc0))
+    (gray    . ,(rgb #x80 #x80 #x80))
+    (black   . ,(rgb #x00 #x00 #x00))
+    (red     . ,(rgb #xff #x00 #x00))
+    (maroon  . ,(rgb #x80 #x00 #x00))
+    (yellow  . ,(rgb #xff #xff #x00))
+    (olive   . ,(rgb #x80 #x80 #x00))
+    (lime    . ,(rgb #x00 #xff #x00))
+    (green   . ,(rgb #x00 #x80 #x00))
+    (aqua    . ,(rgb #x00 #xff #xff))
+    (teal    . ,(rgb #x00 #x80 #x80))
+    (blue    . ,(rgb #x00 #x00 #xff))
+    (navy    . ,(rgb #x00 #x00 #x80))
+    (fuchsia . ,(rgb #xff #x00 #xff))
+    (purple  . ,(rgb #x80 #x00 #x80))))
+
+(define (color name :optional (a #xff))
+  (let1 v (assq-ref *color-table* name)
+    (unless v
+      (errorf "color not found: ~a" name))
+    (cond
+      ((= a #xff)
+       v)
+      ((eq? (native-endian) 'little-endian)
+       (logior (ash a 24)
+               (logand v #x00ffffff)))
+      (else
+       (logior a
+               (logand #xffffff00))))))
