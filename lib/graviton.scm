@@ -62,6 +62,7 @@
           set-coordinate!
 
           draw-line
+          draw-polygon
 
           rgb
           rgba
@@ -252,6 +253,7 @@ typedef struct {
             (-> area w) w
             (-> area h) h
             (-> area data) (SCM_NEW_ATOMIC_ARRAY (.type char) (* w h)))
+      (memset (-> area data) 0 (* w h))
       (return area)))
   )  ;; end of inline-stub
 
@@ -826,7 +828,99 @@ typedef struct {
                  (ref rect-b h) h)
            (SDL_UnionRect (& rect-a) (& rect-b) (& (-> gimage update_rect))))))))
 
-  (define-cfn %%draw-line (gimage::GrvImage* x0::int y0::int x1::int y1::int color::Uint32)
+  "
+typedef enum {
+    SCRATCH_PIXEL_EMPTY = 0,
+    SCRATCH_PIXEL_BORDER = 1,
+    SCRATCH_PIXEL_OUTSIDE = 2,
+} ScratchPixelType;
+"
+  (define-cfn scratch-fill-rect! (area::ScratchArea* rect::SDL_Rect*)
+    ::void :static
+    (let* ((x::int (-> rect x))
+           (y::int (-> rect y))
+           (w::int (-> rect w))
+           (h::int (-> rect h))
+           (i::int)
+           (maxi::int (- (+ x w) (-> area x)))
+           (j::int)
+           (maxj::int (- (+ y h) (-> area y))))
+      (for ((set! j (- y (-> area y))) (< j maxj) (pre++ j))
+        (for ((set! i (- x (-> area x))) (< i maxi) (pre++ i))
+          (set! (aref (-> area data) (+ (* j (-> area w)) i)) SCRATCH_PIXEL_BORDER)))))
+
+  (define-cfn scratch-fill-border! (area::ScratchArea*)
+    (let* ((idxs SCM_NIL)
+           (w::int (-> area w))
+           (h::int (-> area h)))
+      (let* ((x::int))
+        (for ((set! x 0) (< x w) (pre++ x))
+          (let* ((t::int x))
+            (when (== (aref (-> area data) t) SCRATCH_PIXEL_EMPTY)
+              (set! (aref (-> area data) t) SCRATCH_PIXEL_OUTSIDE
+                    idxs (Scm_Cons (SCM_MAKE_INT (+ t w)) idxs))))
+          (let* ((b::int (+ (* (- h 1) w) x)))
+            (when (== (aref (-> area data) b) SCRATCH_PIXEL_EMPTY)
+              (set! (aref (-> area data) b) SCRATCH_PIXEL_OUTSIDE
+                    idxs (Scm_Cons (SCM_MAKE_INT (- b w)) idxs))))))
+      (let* ((y::int))
+        (for ((set! y 0) (< y h) (pre++ y))
+          (let* ((l::int (* y w)))
+            (when (== (aref (-> area data) l) SCRATCH_PIXEL_EMPTY)
+              (set! (aref (-> area data) l) SCRATCH_PIXEL_OUTSIDE
+                    idxs (Scm_Cons (SCM_MAKE_INT (+ l 1)) idxs))))
+          (let* ((r::int (- (* (+ y 1) w) 1)))
+            (when (== (aref (-> area data) r) SCRATCH_PIXEL_EMPTY)
+              (set! (aref (-> area data) r) SCRATCH_PIXEL_OUTSIDE
+                    idxs (Scm_Cons (SCM_MAKE_INT (- r 1)) idxs))))))
+      (while (not (SCM_NULLP idxs))
+        (let* ((i::int (SCM_INT_VALUE (SCM_CAR idxs))))
+          (set! idxs (SCM_CDR idxs))
+          (cond
+            ((!= (aref (-> area data) i) SCRATCH_PIXEL_EMPTY)
+             (continue))
+            (else
+             (set! (aref (-> area data) i) SCRATCH_PIXEL_OUTSIDE
+                   idxs (Scm_Cons (SCM_MAKE_INT (- i 1)) idxs)
+                   idxs (Scm_Cons (SCM_MAKE_INT (+ i 1)) idxs)
+                   idxs (Scm_Cons (SCM_MAKE_INT (- i w)) idxs)
+                   idxs (Scm_Cons (SCM_MAKE_INT (+ i w)) idxs))))))))
+
+  (define-cfn fill-inside (gimage::GrvImage* area::ScratchArea* color::Uint32)
+    ::void :static
+    (let* ((sx::int)
+           (x::int)
+           (y::int)
+           (w::int (-> area w))
+           (h::int (-> area h)))
+      (for ((set! y 1) (< y (- h 1)) (pre++ y))
+        (set! sx -1)
+        (for ((set! x 0) (< x w) (pre++ x))
+          (let* ((i::int (+ (* y w) x)))
+            (cond
+              ((< sx 0)
+               (when (!= (aref (-> area data) i) SCRATCH_PIXEL_OUTSIDE)
+                 (set! sx x)))
+              (else
+               (when (== (aref (-> area data) i) SCRATCH_PIXEL_OUTSIDE)
+                 (let* ((rect::SDL_Rect))
+                   (set! (ref rect x) (+ sx (-> area x))
+                         (ref rect y) (+ y (-> area y))
+                         (ref rect w) (- x sx)
+                         (ref rect h) 1)
+                   (when (!= (SDL_FillRect (-> gimage surface) (& rect) color) 0)
+                     (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError))))
+                 (set! sx -1))))))
+        (unless (< sx 0)
+          (let* ((rect::SDL_Rect))
+            (set! (ref rect x) (+ sx (-> area x))
+                  (ref rect y) (+ y (-> area y))
+                  (ref rect w) (- w sx)
+                  (ref rect h) 1)
+            (when (!= (SDL_FillRect (-> gimage surface) (& rect) color) 0)
+              (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError))))))))
+
+  (define-cfn %%draw-line (gimage::GrvImage* x0::int y0::int x1::int y1::int color::Uint32 area::ScratchArea*)
     ::void :static
     (let* ((surface::SDL_Surface* (-> gimage surface))
            (lx::int (+ (abs (- x0 x1)) 1))
@@ -848,8 +942,12 @@ typedef struct {
                      (ref rect h) (?: (== x end-x)
                                       (+ (- end-y y) 1)
                                       (cast int (round (- ay y)))))
-               (when (!= (SDL_FillRect surface (& rect) color) 0)
-                 (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))
+               (cond
+                 (area
+                  (scratch-fill-rect! area (& rect)))
+                 (else
+                  (when (!= (SDL_FillRect surface (& rect) color) 0)
+                    (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))))
                (when (== x end-x)
                  (break))
                (set! x (+ x dx)
@@ -871,8 +969,12 @@ typedef struct {
                                       (+ (- end-x x) 1)
                                       (cast int (round (- ax x))))
                      (ref rect h) 1)
-               (when (!= (SDL_FillRect surface (& rect) color) 0)
-                 (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))
+               (cond
+                 (area
+                  (scratch-fill-rect! area (& rect)))
+                 (else
+                  (when (!= (SDL_FillRect surface (& rect) color) 0)
+                    (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))))
                (when (== y end-y)
                  (break))
                (set! x (+ x (ref rect w))
@@ -1185,7 +1287,7 @@ typedef struct {
             (ix::int)
             (iy::int))
        (image-coordinate gimage x y (& ix) (& iy))
-       (%%draw-line gimage ix iy ix iy color)))
+       (%%draw-line gimage ix iy ix iy color NULL)))
     (else
      (let* ((x0::double (Scm_GetDouble (Scm_ListRef (SCM_CAR points) 0 SCM_UNBOUND)))
             (y0::double (Scm_GetDouble (Scm_ListRef (SCM_CAR points) 1 SCM_UNBOUND)))
@@ -1198,10 +1300,81 @@ typedef struct {
                           (ix1::int)
                           (iy1::int))
                      (image-coordinate gimage x1 y1 (& ix1) (& iy1))
-                     (%%draw-line gimage ix0 iy0 ix1 iy1 color)
+                     (%%draw-line gimage ix0 iy0 ix1 iy1 color NULL)
                      (set! ix0 ix1
                            iy0 iy1)))
                  (SCM_CDR points))))))
+
+(define-cproc %draw-polygon (gimage::<graviton-image> points::<list> color::<int> fill?::<boolean>)
+  ::<void>
+  (let* ((num-points::int (Scm_Length points)))
+    (case num-points
+      ((0)
+       (return))
+      ((1)
+       (let* ((x::double (Scm_GetDouble (Scm_ListRef (Scm_ListRef points 0 SCM_UNBOUND) 0 SCM_UNBOUND)))
+              (y::double (Scm_GetDouble (Scm_ListRef (Scm_ListRef points 0 SCM_UNBOUND) 1 SCM_UNBOUND)))
+              (ix::int)
+              (iy::int))
+         (image-coordinate gimage x y (& ix) (& iy))
+         (%%draw-line gimage ix iy ix iy color NULL)))
+      ((2)
+       (let* ((x0::double (Scm_GetDouble (Scm_ListRef (Scm_ListRef points 0 SCM_UNBOUND) 0 SCM_UNBOUND)))
+              (y0::double (Scm_GetDouble (Scm_ListRef (Scm_ListRef points 0 SCM_UNBOUND) 1 SCM_UNBOUND)))
+              (x1::double (Scm_GetDouble (Scm_ListRef (Scm_ListRef points 1 SCM_UNBOUND) 0 SCM_UNBOUND)))
+              (y1::double (Scm_GetDouble (Scm_ListRef (Scm_ListRef points 1 SCM_UNBOUND) 1 SCM_UNBOUND)))
+              (ix0::int)
+              (iy0::int)
+              (ix1::int)
+              (iy1::int))
+         (image-coordinate gimage x0 y0 (& ix0) (& iy0))
+         (image-coordinate gimage x1 y1 (& ix1) (& iy1))
+         (%%draw-line gimage ix0 iy0 ix1 iy1 color NULL)))
+      (else
+       (let* ((x0::double (Scm_GetDouble (Scm_ListRef (SCM_CAR points) 0 SCM_UNBOUND)))
+              (y0::double (Scm_GetDouble (Scm_ListRef (SCM_CAR points) 1 SCM_UNBOUND)))
+              (ix0::int)
+              (iy0::int)
+              (sx::int)
+              (sy::int)
+              (ex::int)
+              (ey::int)
+              (area::ScratchArea* NULL)
+              (nodes SCM_NIL))
+         (image-coordinate gimage x0 y0 (& ix0) (& iy0))
+         (set! nodes (SCM_LIST1 (Scm_Cons (SCM_MAKE_INT ix0) (SCM_MAKE_INT iy0))))
+         (set! sx ix0
+               sy iy0
+               ex ix0
+               ey iy0)
+         (for-each (lambda (point)
+                     (let* ((x::double (Scm_GetDouble (Scm_ListRef point 0 SCM_UNBOUND)))
+                            (y::double (Scm_GetDouble (Scm_ListRef point 1 SCM_UNBOUND)))
+                            (ix::int)
+                            (iy::int))
+                       (image-coordinate gimage x y (& ix) (& iy))
+                       (set! nodes (Scm_Cons (Scm_Cons (SCM_MAKE_INT ix) (SCM_MAKE_INT iy)) nodes))
+                       (when (< ix sx)
+                         (set! sx ix))
+                       (when (< iy sy)
+                         (set! sy iy))
+                       (when (< ex ix)
+                         (set! ex ix))
+                       (when (< ey iy)
+                         (set! ey iy))))
+                   (SCM_CDR points))
+         (when fill?
+           (set! area (create-scratch-area sx sy (+ (- ex sx) 1) (+ (- ey sy) 1))))
+         (for-each (lambda (node)
+                     (let* ((ix1::int (SCM_INT_VALUE (SCM_CAR node)))
+                            (iy1::int (SCM_INT_VALUE (SCM_CDR node))))
+                       (%%draw-line gimage ix0 iy0 ix1 iy1 color area)
+                       (set! ix0 ix1
+                             iy0 iy1)))
+                   nodes)
+         (when fill?
+           (scratch-fill-border! area)
+           (fill-inside gimage area color)))))))
 
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
 
@@ -1278,14 +1451,28 @@ typedef struct {
     (make-sprite window image center-x center-y z rect angle zoom-x zoom-y visible)))
 
 (define-method draw-line ((window <graviton-window>)
-                           (points <list>)
-                           (color <integer>))
+                          (points <list>)
+                          (color <integer>))
   (%draw-line (window-background-image window) points color))
 
 (define-method draw-line ((image <graviton-image>)
-                           (points <list>)
-                           (color <integer>))
+                          (points <list>)
+                          (color <integer>))
   (%draw-line image points color))
+
+(define-method draw-polygon ((window <graviton-window>)
+                             (points <list>)
+                             (color <integer>)
+                             :key
+                             (fill? #f))
+  (%draw-polygon (window-background-image window) points color fill?))
+
+(define-method draw-polygon ((image <graviton-image>)
+                             (points <list>)
+                             (color <integer>)
+                             :key
+                             (fill? #f))
+  (%draw-polygon image points color fill?))
 
 (define (rgb r g b)
   (rgba r g b #xff))
