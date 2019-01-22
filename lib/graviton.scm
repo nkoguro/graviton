@@ -61,6 +61,7 @@
 
           set-coordinate!
 
+          draw-rect
           draw-line
           draw-polygon
 
@@ -918,7 +919,19 @@ typedef enum {
                   (ref rect w) (- w sx)
                   (ref rect h) 1)
             (when (!= (SDL_FillRect (-> gimage surface) (& rect) color) 0)
-              (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError))))))))
+              (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))))))
+    (update-rect gimage (-> area x) (-> area y) (-> area w) (-> area h)))
+
+  (define-cfn fill-rect (gimage::GrvImage* x0::int y0::int x1::int y1::int color::Uint32)
+    ::void :static
+    (let* ((rect::SDL_Rect))
+      (set! (ref rect x) (?: (< x0 x1) x0 x1)
+            (ref rect y) (?: (< y0 y1) y0 y1)
+            (ref rect w) (+ (abs (- x0 x1)) 1)
+            (ref rect h) (+ (abs (- y0 y1)) 1))
+      (when (!= (SDL_FillRect (-> gimage surface) (& rect) color) 0)
+        (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))
+      (update-rect gimage (ref rect x) (ref rect y) (ref rect w) (ref rect h))))
 
   (define-cfn %%draw-line (gimage::GrvImage* x0::int y0::int x1::int y1::int color::Uint32 area::ScratchArea*)
     ::void :static
@@ -1276,6 +1289,27 @@ typedef enum {
           (ref event window event) SDL_WINDOWEVENT_CLOSE)
     (SDL_PushEvent (& event))))
 
+(define-cproc %draw-rect (gimage::<graviton-image> point0::<list> point1::<list> color::<int> fill?::<boolean>)
+  ::<void>
+  (let* ((x0::double (Scm_GetDouble (Scm_ListRef point0 0 SCM_UNBOUND)))
+         (y0::double (Scm_GetDouble (Scm_ListRef point0 1 SCM_UNBOUND)))
+         (x1::double (Scm_GetDouble (Scm_ListRef point1 0 SCM_UNBOUND)))
+         (y1::double (Scm_GetDouble (Scm_ListRef point1 1 SCM_UNBOUND)))
+         (ix0::int)
+         (iy0::int)
+         (ix1::int)
+         (iy1::int))
+    (image-coordinate gimage x0 y0 (& ix0) (& iy0))
+    (image-coordinate gimage x1 y1 (& ix1) (& iy1))
+    (cond
+      (fill?
+       (fill-rect gimage ix0 iy0 ix1 iy1 color))
+      (else
+       (%%draw-line gimage ix0 iy0 ix1 iy0 color NULL)
+       (%%draw-line gimage ix1 iy0 ix1 iy1 color NULL)
+       (%%draw-line gimage ix1 iy1 ix0 iy1 color NULL)
+       (%%draw-line gimage ix0 iy1 ix0 iy0 color NULL)))))
+
 (define-cproc %draw-line (gimage::<graviton-image> points::<list> color::<int>)
   ::<void>
   (cond
@@ -1449,6 +1483,22 @@ typedef enum {
                    (list 0 0 w h))
                  rect)
     (make-sprite window image center-x center-y z rect angle zoom-x zoom-y visible)))
+
+(define-method draw-rect ((window <graviton-window>)
+                          (point0 <list>)
+                          (point1 <list>)
+                          (color <integer>)
+                          :key
+                          (fill? #f))
+  (%draw-rect (window-background-image window) point0 point1 color fill?))
+
+(define-method draw-rect ((image <graviton-image>)
+                          (point0 <list>)
+                          (point1 <list>)
+                          (color <integer>)
+                          :key
+                          (fill? #f))
+  (%draw-rect image point0 point1 color fill?))
 
 (define-method draw-line ((window <graviton-window>)
                           (points <list>)
