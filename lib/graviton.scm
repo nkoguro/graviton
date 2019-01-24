@@ -60,6 +60,17 @@
           set-sprite-center-position!
 
           set-coordinate!
+          border-left
+          border-top
+          border-right
+          border-bottom
+          border-min-x
+          border-max-x
+          border-min-y
+          border-max-y
+          center-point
+          center-x
+          center-y
 
           draw-rect
           draw-line
@@ -99,6 +110,10 @@ typedef struct {
     SDL_Rect update_rect;
     SDL_Texture *texture;
     TransformParam param;
+    double left;
+    double top;
+    double right;
+    double bottom;
 } GrvImage;
 
 typedef struct {
@@ -242,7 +257,11 @@ typedef struct {
             (ref (-> image param) m10) 0.0
             (ref (-> image param) m11) 1.0
             (ref (-> image param) x0) 0.0
-            (ref (-> image param) y0) 0.0)
+            (ref (-> image param) y0) 0.0
+            (-> image left) 0.0
+            (-> image top) 0.0
+            (-> image right) (cast double (- w 1))
+            (-> image bottom) (cast double (- h 1)))
       (Scm_RegisterFinalizer obj finalize-image NULL)
       (return obj)))
 
@@ -700,6 +719,16 @@ typedef struct {
            (y0::double (ref (-> gimage param) y0)))
       (set! (* ox) (+ (* m00 x) (* m01 y) x0)
             (* oy) (+ (* m10 x) (* m11 y) y0))))
+
+  (define-cfn x->image (window-or-image)
+    ::GrvImage* :static
+    (cond
+      ((GRV_WINDOW_P window-or-image)
+       (return (GRV_IMAGE_PTR (-> (GRV_WINDOW_PTR window-or-image) background_image))))
+      ((GRV_IMAGE_P window-or-image)
+       (return (GRV_IMAGE_PTR window-or-image)))
+      (else
+       (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
   )  ;; end of inline-stub
 
 (inline-stub
@@ -1087,7 +1116,11 @@ typedef enum {
           (ref (-> gimage param) m10) 0.0
           (ref (-> gimage param) m11) (/ 1.0 my)
           (ref (-> gimage param) x0) (- (/ sx mx))
-          (ref (-> gimage param) y0) (- (/ sy my)))))
+          (ref (-> gimage param) y0) (- (/ sy my))
+          (-> gimage left) sx
+          (-> gimage top) sy
+          (-> gimage right) ex
+          (-> gimage bottom) ey)))
 
 (define-cproc create-image (w::<int> h::<int>)
   (%create-image w h))
@@ -1114,6 +1147,42 @@ typedef enum {
 (define-cproc image-size (image::<graviton-image>)
   ::(<int> <int>)
   (return (-> image surface w) (-> image surface h)))
+
+(define-cproc border-left (window-or-image)
+  ::<double>
+  (let* ((gimage::GrvImage* (x->image window-or-image)))
+    (return (-> gimage left))))
+
+(define-cproc border-top (window-or-image)
+  ::<double>
+  (let* ((gimage::GrvImage* (x->image window-or-image)))
+    (return (-> gimage top))))
+
+(define-cproc border-right (window-or-image)
+  ::<double>
+  (let* ((gimage::GrvImage* (x->image window-or-image)))
+    (return (-> gimage right))))
+
+(define-cproc border-bottom (window-or-image)
+  ::<double>
+  (let* ((gimage::GrvImage* (x->image window-or-image)))
+    (return (-> gimage bottom))))
+
+(define-cproc center-point (window-or-image)
+  ::<list>
+  (let* ((gimage::GrvImage* (x->image window-or-image)))
+    (return (SCM_LIST2 (Scm_MakeFlonum (/ (+ (-> gimage left) (-> gimage right)) 2.0))
+                       (Scm_MakeFlonum (/ (+ (-> gimage top) (-> gimage bottom)) 2.0))))))
+
+(define-cproc center-x (window-or-image)
+  ::<double>
+  (let* ((gimage::GrvImage* (x->image window-or-image)))
+    (return (/ (+ (-> gimage left) (-> gimage right)) 2.0))))
+
+(define-cproc center-y (window-or-image)
+  ::<double>
+  (let* ((gimage::GrvImage* (x->image window-or-image)))
+    (return (/ (+ (-> gimage top) (-> gimage bottom)) 2.0))))
 
 (define-cproc image-rgba-pixels (image::<graviton-image>)
   (let* ((surface::SDL_Surface* (-> image surface))
@@ -1457,6 +1526,18 @@ typedef enum {
                                 (x1 <real>)
                                 (y1 <real>))
   (set-image-coordinate! image x0 y0 x1 y1))
+
+(define (border-min-x window-or-image)
+  (min (border-left window-or-image) (border-right window-or-image)))
+
+(define (border-max-x window-or-image)
+  (max (border-left window-or-image) (border-right window-or-image)))
+
+(define (border-min-y window-or-image)
+  (min (border-top window-or-image) (border-bottom window-or-image)))
+
+(define (border-max-y window-or-image)
+  (max (border-top window-or-image) (border-bottom window-or-image)))
 
 (define-method set-sprite-image! ((sprite <graviton-sprite>) (image <graviton-image>))
   (receive (w h) (image-size image)
