@@ -1482,7 +1482,7 @@ typedef enum {
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
 
 (define-record-type (<point> (pseudo-rtd <list>))
-  point point?
+  make-point point?
   (x point-x)
   (y point-y))
 
