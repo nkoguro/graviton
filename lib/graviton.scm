@@ -923,7 +923,7 @@ typedef enum {
            (y::int)
            (w::int (-> area w))
            (h::int (-> area h)))
-      (for ((set! y 1) (< y (- h 1)) (pre++ y))
+      (for ((set! y 0) (< y h) (pre++ y))
         (set! sx -1)
         (for ((set! x 0) (< x w) (pre++ x))
           (let* ((i::int (+ (* y w) x)))
