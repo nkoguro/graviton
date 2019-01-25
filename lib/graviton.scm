@@ -87,94 +87,89 @@
 (select-module graviton)
 
 (inline-stub
- (declcode
-  (.include "SDL.h"
-            "SDL_image.h"
-            "SDL_mixer.h"
-            "float.h"
-            "gauche.h"
-            "gauche/number.h"
-            "gauche/vector.h"
-            "stdbool.h"
-            "stdio.h"
-            "string.h")
-  "
-typedef struct {
-    double m00;
-    double m01;
-    double m10;
-    double m11;
-    double x0;
-    double y0;
-} TransformParam;
+  (declcode
+   (.include "SDL.h"
+             "SDL_image.h"
+             "SDL_mixer.h"
+             "float.h"
+             "gauche.h"
+             "gauche/number.h"
+             "gauche/vector.h"
+             "stdbool.h"
+             "stdio.h"
+             "string.h")
+   ) ;; end of declcode
 
-typedef struct {
-    SDL_Surface *surface;
-    SDL_Rect update_rect;
-    SDL_Texture *texture;
-    TransformParam param;
-    double left;
-    double top;
-    double right;
-    double bottom;
-} GrvImage;
+  (define-ctype TransformParam::(.struct
+                                 (m00::double
+                                  m01::double
+                                  m10::double
+                                  m11::double
+                                  x0::double
+                                  y0::double)))
 
-typedef struct {
-    ScmObj window;
-    ScmObj image;
-    SDL_Rect srcrect;
-    double center_x;
-    double center_y;
-    double z;
-    double angle;
-    double zoom_x;
-    double zoom_y;
-    SDL_RendererFlip flip;
-    bool visible;
-} GrvSprite;
+  (define-ctype GrvImage::(.struct
+                           (surface::SDL_Surface*
+                            update_rect::SDL_Rect
+                            texture::SDL_Texture*
+                            param::TransformParam
+                            left::double
+                            top::double
+                            right::double
+                            bottom::double)))
 
-typedef struct {
-    SDL_Window* window;
-    SDL_Renderer* renderer;
-    ScmObj proc;
-    ScmObj events;
-    ScmObj sprites;
-    ScmObj background_image;
-} GrvWindow;
+  (define-ctype GrvSprite::(.struct
+                            (window
+                             image
+                             srcrect::SDL_Rect
+                             center_x::double
+                             center_y::double
+                             z::double
+                             angle::double
+                             zoom_x::double
+                             zoom_y::double
+                             flip::SDL_RendererFlip
+                             visible::bool)))
 
-typedef struct {
-    int x;
-    int y;
-    int w;
-    int h;
-    char* data;
-} ScratchArea;
-"
+  (define-ctype GrvWindow::(.struct
+                            (window::SDL_Window*
+                             renderer::SDL_Renderer*
+                             proc
+                             events
+                             sprites
+                             background_image)))
+
+  (define-ctype ScratchArea::(.struct
+                              (x::int
+                               y::int
+                               w::int
+                               h::int
+                               data::char*)))
+
   "static ScmObj grv_windows = SCM_NIL;"
   "static bool running_event_loop = false;"
   "static ScmObj default_handler = SCM_FALSE;"
-  ) ;; end of declcode
 
- (define-cptr <graviton-window> :private
-   "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
+  (define-cptr <graviton-window> :private
+    "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
 
- (define-cptr <graviton-image> :private
-   "GrvImage*" "GravitonImageClass" "GRV_IMAGE_P" "MAKE_GRV_IMAGE" "GRV_IMAGE_PTR")
+  (define-cptr <graviton-image> :private
+    "GrvImage*" "GravitonImageClass" "GRV_IMAGE_P" "MAKE_GRV_IMAGE" "GRV_IMAGE_PTR")
 
- (define-cptr <graviton-sprite> :private
-   "GrvSprite*" "GravitonSpriteClass" "GRV_SPRITE_P" "MAKE_GRV_SPRITE" "GRV_SPRITE_PTR")
- )  ;; end of inline-stub
+  (define-cptr <graviton-sprite> :private
+    "GrvSprite*" "GravitonSpriteClass" "GRV_SPRITE_P" "MAKE_GRV_SPRITE" "GRV_SPRITE_PTR")
+  )  ;; end of inline-stub
 
 (inline-stub
   (define-cfn teardown-libs (data::|void*|)
-    ::void :static
+    ::void
     (Mix_CloseAudio)
     (Mix_Quit)
 
     (SDL_Quit))
 
   (define-cfn initialize-libs ()
-    ::void :static
+    ::void
     (SDL_Init (logior SDL_INIT_VIDEO SDL_INIT_AUDIO))
     (Mix_Init (logior MIX_INIT_FLAC MIX_INIT_MOD MIX_INIT_MP3 MIX_INIT_OGG))
     (when (Mix_OpenAudio 44100 MIX_DEFAULT_FORMAT 2 1024)
@@ -189,13 +184,13 @@ typedef struct {
 
 (inline-stub
   (define-cfn finalize-sprite (z data::void*)
-    ::void :static
+    ::void
     (when (GRV_SPRITE_P z)
       (set! (-> (GRV_SPRITE_PTR z) window) SCM_FALSE
             (-> (GRV_SPRITE_PTR z) image) SCM_FALSE)))
 
   (define-cfn destroy-image (gimage::GrvImage*)
-    ::void :static
+    ::void
     (let* ((texture::SDL_Texture* (-> gimage texture)))
       (unless (== texture NULL)
         (SDL_DestroyTexture texture))
@@ -204,18 +199,18 @@ typedef struct {
             (-> gimage texture) NULL)))
 
   (define-cfn finalize-image (z data::void*)
-    ::void :static
+    ::void
     (when (GRV_IMAGE_P z)
       (destroy-image (GRV_IMAGE_PTR z))))
 
   (define-cfn register-grv-window (gwin::GrvWindow*)
-    ::ScmObj :static
+    ::ScmObj
     (let* ((obj (MAKE_GRV_WINDOW gwin)))
       (set! grv_windows (Scm_Cons obj grv_windows))
       (return obj)))
 
   (define-cfn unregister-grv-window (gwin::GrvWindow*)
-    ::void :static
+    ::void
     (let* ((prev SCM_NIL))
       (pair-for-each (lambda (pair)
                        (let* ((curwin::GrvWindow* (GRV_WINDOW_PTR (SCM_CAR pair))))
@@ -230,7 +225,7 @@ typedef struct {
                      grv_windows)))
 
   (define-cfn destroy-window (gwin::GrvWindow*)
-    ::void :static
+    ::void
     (unregister-grv-window gwin)
     (SDL_DestroyRenderer (-> gwin renderer))
     (SDL_DestroyWindow (-> gwin window))
@@ -269,7 +264,7 @@ typedef struct {
       (return obj)))
 
   (define-cfn create-scratch-area (x::int y::int w::int h::int)
-    ::ScratchArea* :static
+    ::ScratchArea*
     (let* ((area::ScratchArea* (SCM_NEW (.type ScratchArea))))
       (set! (-> area x) x
             (-> area y) y
@@ -281,8 +276,92 @@ typedef struct {
   )  ;; end of inline-stub
 
 (inline-stub
+  (define-cfn create-streaming-texture-from-surface (renderer::SDL_Renderer* surface::SDL_Surface*)
+    ::SDL_Texture*
+    (let* ((w::int (-> surface w))
+           (h::int (-> surface h))
+           (rect::SDL_Rect)
+           (texture::SDL_Texture* (SDL_CreateTexture renderer
+                                                     (-> surface format format)
+                                                     SDL_TEXTUREACCESS_STREAMING
+                                                     w
+                                                     h))
+           (pixels::void*)
+           (pitch::int))
+      (when (== texture NULL)
+        (Scm_Error "SDL_CreateTexture failed: %s" (SDL_GetError)))
+      (set! (ref rect x) 0
+            (ref rect y) 0
+            (ref rect w) w
+            (ref rect h) h)
+      (when (< (SDL_LockSurface surface) 0)
+        (Scm_Error "SDL_LockSurface failed: %s" (SDL_GetError)))
+      (when (< (SDL_LockTexture texture (& rect) (& pixels) (& pitch)) 0)
+        (Scm_Error "SDL_LockTexture failed: %s" (SDL_GetError)))
+      (memcpy pixels (-> surface pixels) (* h pitch))
+      (SDL_UnlockTexture texture)
+      (SDL_UnlockSurface surface)
+      (SDL_SetTextureBlendMode texture SDL_BLENDMODE_BLEND)
+      (return texture)))
+
+  (define-cfn update-texture (texture::SDL_Texture* surface::SDL_Surface* rect::SDL_Rect*)
+    ::void
+    (let* ((pixels::void*)
+           (pitch::int)
+           (y::int))
+      (when (< (SDL_LockSurface surface) 0)
+        (Scm_Error "SDL_LockSurface failed: %s" (SDL_GetError)))
+      (when (< (SDL_LockTexture texture rect (& pixels) (& pitch)) 0)
+        (Scm_Error "SDL_LockTexture failed: %s" (SDL_GetError)))
+      (for ((set! y (-> rect y)) (< y (-> rect h)) (pre++ y))
+        (memcpy (+ pixels (* y pitch))
+                (+ (-> surface pixels) (* y (-> surface pitch)) (* (-> rect x) (-> surface format BytesPerPixel)))
+                pitch))
+      (SDL_UnlockTexture texture)
+      (SDL_UnlockSurface surface)))
+
+  (define-cfn get-texture (gwin::GrvWindow* image::GrvImage*)
+    ::SDL_Texture*
+    (cond
+      ((== (-> image texture) NULL)
+       (set! (-> image texture) (create-streaming-texture-from-surface (-> gwin renderer) (-> image surface)))
+       (when (== (-> image texture) NULL)
+         (Scm_Error "SDL_CreateTextureFromSurface failed: %s" (SDL_GetError)))
+       (SDL_SetTextureBlendMode (-> image texture) SDL_BLENDMODE_BLEND))
+      ((not (SDL_RectEmpty (& (-> image update_rect))))
+       (let* ((format::Uint32)
+              (access::int)
+              (w::int)
+              (h::int))
+         (when (< (SDL_QueryTexture (-> image texture) (& format) (& access) (& w) (& h)) 0)
+           (Scm_Error "SDL_QueryTexture failed: %s" (SDL_GetError)))
+         (cond
+           ((!= access SDL_TEXTUREACCESS_STREAMING)
+            (SDL_DestroyTexture (-> image texture))
+            (set! (-> image texture) (create-streaming-texture-from-surface (-> gwin renderer) (-> image surface))))
+           (else
+            (update-texture (-> image texture) (-> image surface) (& (-> image update_rect))))))))
+    (set! (ref (-> image update_rect) x) 0
+          (ref (-> image update_rect) y) 0
+          (ref (-> image update_rect) w) 0
+          (ref (-> image update_rect) h) 0)
+    (return (-> image texture)))
+
+  (define-cfn image-coordinate (gimage::GrvImage* x::double y::double ox::int* oy::int*)
+    ::void
+    (let* ((m00::double (ref (-> gimage param) m00))
+           (m10::double (ref (-> gimage param) m10))
+           (m01::double (ref (-> gimage param) m01))
+           (m11::double (ref (-> gimage param) m11))
+           (x0::double (ref (-> gimage param) x0))
+           (y0::double (ref (-> gimage param) y0)))
+      (set! (* ox) (+ (* m00 x) (* m01 y) x0)
+            (* oy) (+ (* m10 x) (* m11 y) y0))))
+  )  ;; end of inline-stub
+
+(inline-stub
   (define-cfn get-events ()
-    ::ScmObj :static
+    ::ScmObj
     (let* ((events SCM_NIL)
            (sdl-event::SDL_Event))
       (while (SDL_PollEvent (& sdl-event))
@@ -510,7 +589,7 @@ typedef struct {
 
   ;; events must be reverse chronological order.
   (define-cfn extract-window-events (gwin::GrvWindow* all-events)
-    ::ScmObj :static
+    ::ScmObj
     (let* ((win-events SCM_NIL)
            (winid (SCM_MAKE_INT (SDL_GetWindowID (-> gwin window)))))
       (for-each (lambda (event)
@@ -521,7 +600,7 @@ typedef struct {
       (return win-events)))
 
   (define-cfn window-close-event-exists? (win-events)
-    ::bool :static
+    ::bool
     (for-each (lambda (event)
                 (when (SCM_EQ (SCM_CAR event) 'window-close)
                   (return true)))
@@ -529,7 +608,7 @@ typedef struct {
     (return false))
 
   (define-cfn run-window-handlers ()
-    ::void :static
+    ::void
     (let* ((all-events (get-events))
            (will-close-windows SCM_NIL))
       (for-each (lambda (obj)
@@ -551,7 +630,7 @@ typedef struct {
                 will-close-windows)))
 
   (define-cfn render-background-image (gwin::GrvWindow*)
-    ::void :static
+    ::void
     (let* ((win-w::int)
            (win-h::int)
            (win-center::SDL_Point)
@@ -582,7 +661,7 @@ typedef struct {
         (Scm_Error "SDL_RenderCopyEx failed: %s" (SDL_GetError)))))
 
   (define-cfn render-sprite (gsprite::GrvSprite*)
-    ::void :static
+    ::void
     (when (or (SCM_FALSEP (-> gsprite image))
               (not (-> gsprite visible)))
       (return))
@@ -625,7 +704,7 @@ typedef struct {
                         (-> gsprite flip))))
 
   (define-cfn update-window-contents ()
-    ::void :static
+    ::void
     (for-each (lambda (win)
                 (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win))
                        (renderer::SDL_Renderer* (-> gwin renderer)))
@@ -641,90 +720,8 @@ typedef struct {
   )  ;; end of inline-stub
 
 (inline-stub
-  (define-cfn create-streaming-texture-from-surface (renderer::SDL_Renderer* surface::SDL_Surface*)
-    ::SDL_Texture* :static
-    (let* ((w::int (-> surface w))
-           (h::int (-> surface h))
-           (rect::SDL_Rect)
-           (texture::SDL_Texture* (SDL_CreateTexture renderer
-                                                     (-> surface format format)
-                                                     SDL_TEXTUREACCESS_STREAMING
-                                                     w
-                                                     h))
-           (pixels::void*)
-           (pitch::int))
-      (when (== texture NULL)
-        (Scm_Error "SDL_CreateTexture failed: %s" (SDL_GetError)))
-      (set! (ref rect x) 0
-            (ref rect y) 0
-            (ref rect w) w
-            (ref rect h) h)
-      (when (< (SDL_LockSurface surface) 0)
-        (Scm_Error "SDL_LockSurface failed: %s" (SDL_GetError)))
-      (when (< (SDL_LockTexture texture (& rect) (& pixels) (& pitch)) 0)
-        (Scm_Error "SDL_LockTexture failed: %s" (SDL_GetError)))
-      (memcpy pixels (-> surface pixels) (* h pitch))
-      (SDL_UnlockTexture texture)
-      (SDL_UnlockSurface surface)
-      (SDL_SetTextureBlendMode texture SDL_BLENDMODE_BLEND)
-      (return texture)))
-
-  (define-cfn update-texture (texture::SDL_Texture* surface::SDL_Surface* rect::SDL_Rect*)
-    ::void :static
-    (let* ((pixels::void*)
-           (pitch::int)
-           (y::int))
-      (when (< (SDL_LockSurface surface) 0)
-        (Scm_Error "SDL_LockSurface failed: %s" (SDL_GetError)))
-      (when (< (SDL_LockTexture texture rect (& pixels) (& pitch)) 0)
-        (Scm_Error "SDL_LockTexture failed: %s" (SDL_GetError)))
-      (for ((set! y (-> rect y)) (< y (-> rect h)) (pre++ y))
-        (memcpy (+ pixels (* y pitch))
-                (+ (-> surface pixels) (* y (-> surface pitch)) (* (-> rect x) (-> surface format BytesPerPixel)))
-                pitch))
-      (SDL_UnlockTexture texture)
-      (SDL_UnlockSurface surface)))
-
-  (define-cfn get-texture (gwin::GrvWindow* image::GrvImage*)
-    ::SDL_Texture* :static
-    (cond
-      ((== (-> image texture) NULL)
-       (set! (-> image texture) (create-streaming-texture-from-surface (-> gwin renderer) (-> image surface)))
-       (when (== (-> image texture) NULL)
-         (Scm_Error "SDL_CreateTextureFromSurface failed: %s" (SDL_GetError)))
-       (SDL_SetTextureBlendMode (-> image texture) SDL_BLENDMODE_BLEND))
-      ((not (SDL_RectEmpty (& (-> image update_rect))))
-       (let* ((format::Uint32)
-              (access::int)
-              (w::int)
-              (h::int))
-         (when (< (SDL_QueryTexture (-> image texture) (& format) (& access) (& w) (& h)) 0)
-           (Scm_Error "SDL_QueryTexture failed: %s" (SDL_GetError)))
-         (cond
-           ((!= access SDL_TEXTUREACCESS_STREAMING)
-            (SDL_DestroyTexture (-> image texture))
-            (set! (-> image texture) (create-streaming-texture-from-surface (-> gwin renderer) (-> image surface))))
-           (else
-            (update-texture (-> image texture) (-> image surface) (& (-> image update_rect))))))))
-    (set! (ref (-> image update_rect) x) 0
-          (ref (-> image update_rect) y) 0
-          (ref (-> image update_rect) w) 0
-          (ref (-> image update_rect) h) 0)
-    (return (-> image texture)))
-
-  (define-cfn image-coordinate (gimage::GrvImage* x::double y::double ox::int* oy::int*)
-    ::void :static
-    (let* ((m00::double (ref (-> gimage param) m00))
-           (m10::double (ref (-> gimage param) m10))
-           (m01::double (ref (-> gimage param) m01))
-           (m11::double (ref (-> gimage param) m11))
-           (x0::double (ref (-> gimage param) x0))
-           (y0::double (ref (-> gimage param) y0)))
-      (set! (* ox) (+ (* m00 x) (* m01 y) x0)
-            (* oy) (+ (* m10 x) (* m11 y) y0))))
-
   (define-cfn x->image (window-or-image)
-    ::GrvImage* :static
+    ::GrvImage*
     (cond
       ((GRV_WINDOW_P window-or-image)
        (return (GRV_IMAGE_PTR (-> (GRV_WINDOW_PTR window-or-image) background_image))))
@@ -736,7 +733,7 @@ typedef struct {
 
 (inline-stub
  (define-cfn remove-window-sprite (sprite)
-   ::void :static
+   ::void
    (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR (-> (GRV_SPRITE_PTR sprite) window)))
           (sprites (-> gwin sprites)))
      (cond
@@ -753,7 +750,7 @@ typedef struct {
                         (SCM_CDR sprites)))))))
 
  (define-cfn insert-window-sprite (sprite)
-   ::void :static
+   ::void
    (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR (-> (GRV_SPRITE_PTR sprite) window))))
      (cond
       ((SCM_NULLP (-> gwin sprites))
@@ -830,7 +827,7 @@ typedef struct {
 
 (inline-stub
   (define-cfn sign (a::int)
-    ::int :static
+    ::int
     (cond
       ((< a 0)
        (return -1))
@@ -840,7 +837,7 @@ typedef struct {
        (return 1))))
 
   (define-cfn update-rect (gimage::GrvImage* x::int y::int w::int h::int)
-    ::void :static
+    ::void
     (let* ((rect::SDL_Rect* (& (-> gimage update_rect))))
       (cond
         ((SDL_RectEmpty rect)
@@ -869,7 +866,7 @@ typedef enum {
 } ScratchPixelType;
 "
   (define-cfn scratch-fill-rect! (area::ScratchArea* rect::SDL_Rect*)
-    ::void :static
+    ::void
     (let* ((x::int (-> rect x))
            (y::int (-> rect y))
            (w::int (-> rect w))
@@ -920,7 +917,7 @@ typedef enum {
                    idxs (Scm_Cons (SCM_MAKE_INT (+ i w)) idxs))))))))
 
   (define-cfn fill-inside (gimage::GrvImage* area::ScratchArea* color::Uint32)
-    ::void :static
+    ::void
     (let* ((sx::int)
            (x::int)
            (y::int)
@@ -955,7 +952,7 @@ typedef enum {
     (update-rect gimage (-> area x) (-> area y) (-> area w) (-> area h)))
 
   (define-cfn fill-rect (gimage::GrvImage* x0::int y0::int x1::int y1::int color::Uint32)
-    ::void :static
+    ::void
     (let* ((rect::SDL_Rect))
       (set! (ref rect x) (?: (< x0 x1) x0 x1)
             (ref rect y) (?: (< y0 y1) y0 y1)
@@ -966,7 +963,7 @@ typedef enum {
       (update-rect gimage (ref rect x) (ref rect y) (ref rect w) (ref rect h))))
 
   (define-cfn %%draw-line (gimage::GrvImage* x0::int y0::int x1::int y1::int color::Uint32 area::ScratchArea*)
-    ::void :static
+    ::void
     (let* ((surface::SDL_Surface* (-> gimage surface))
            (lx::int (+ (abs (- x0 x1)) 1))
            (ly::int (+ (abs (- y0 y1)) 1)))
