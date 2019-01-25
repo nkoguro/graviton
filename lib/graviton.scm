@@ -32,6 +32,7 @@
 
 (define-module graviton
   (use compile-stub)
+  (use file.util)
   (use gauche.parameter)
   (use gauche.partcont)
   (use gauche.record)
@@ -53,6 +54,7 @@
           close-window
 
           match-events
+          display-image
           create-image
           load-image
           put-image
@@ -62,6 +64,9 @@
           set-sprite-center-position!
 
           set-coordinate!
+          border-size
+          border-width
+          border-height
           border-left
           border-top
           border-right
@@ -106,17 +111,17 @@
                                   m10::double
                                   m11::double
                                   x0::double
-                                  y0::double)))
+                                  y0::double
+                                  left::double
+                                  top::double
+                                  right::double
+                                  bottom::double)))
 
   (define-ctype GrvImage::(.struct
                            (surface::SDL_Surface*
                             update_rect::SDL_Rect
                             texture::SDL_Texture*
-                            param::TransformParam
-                            left::double
-                            top::double
-                            right::double
-                            bottom::double)))
+                            param::TransformParam)))
 
   (define-ctype GrvSprite::(.struct
                             (window
@@ -137,7 +142,7 @@
                              proc
                              events
                              sprites
-                             background_image)))
+                             param::TransformParam)))
 
   (define-ctype ScratchArea::(.struct
                               (x::int
@@ -233,33 +238,36 @@
           (-> gwin renderer) NULL
           (-> gwin proc) SCM_FALSE
           (-> gwin events) SCM_NIL
-          (-> gwin sprites) SCM_NIL
-          (-> gwin background_image) SCM_FALSE))
+          (-> gwin sprites) SCM_NIL))
+
+  (define-cfn init-transform-param (param::TransformParam* width::int height::int)
+    ::void
+    (set! (-> param m00) 1.0
+          (-> param m01) 0.0
+          (-> param m10) 0.0
+          (-> param m11) 1.0
+          (-> param x0) 0.0
+          (-> param y0) 0.0
+          (-> param left) 0.0
+          (-> param top) 0.0
+          (-> param right) (cast double (- width 1))
+          (-> param bottom) (cast double (- height 1))))
 
   (define-cfn %create-image (w::int h::int)
     ::ScmObj
     (let* ((surface::SDL_Surface* (SDL_CreateRGBSurfaceWithFormat 0 w h 32 SDL_PIXELFORMAT_RGBA32))
-           (image::GrvImage* (SCM_NEW (.type GrvImage)))
-           (obj (MAKE_GRV_IMAGE image)))
+           (gimage::GrvImage* (SCM_NEW (.type GrvImage)))
+           (obj (MAKE_GRV_IMAGE gimage)))
       (when (== surface NULL)
         (Scm_Error "SDL_CreateRGBSurfaceWithFormat failed: %s" (SDL_GetError)))
       (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
-      (set! (-> image surface) surface
-            (-> image texture) NULL
-            (ref (-> image update_rect) x) 0
-            (ref (-> image update_rect) y) 0
-            (ref (-> image update_rect) w) 0
-            (ref (-> image update_rect) h) 0
-            (ref (-> image param) m00) 1.0
-            (ref (-> image param) m01) 0.0
-            (ref (-> image param) m10) 0.0
-            (ref (-> image param) m11) 1.0
-            (ref (-> image param) x0) 0.0
-            (ref (-> image param) y0) 0.0
-            (-> image left) 0.0
-            (-> image top) 0.0
-            (-> image right) (cast double (- w 1))
-            (-> image bottom) (cast double (- h 1)))
+      (set! (-> gimage surface) surface
+            (-> gimage texture) NULL
+            (ref (-> gimage update_rect) x) 0
+            (ref (-> gimage update_rect) y) 0
+            (ref (-> gimage update_rect) w) 0
+            (ref (-> gimage update_rect) h) 0)
+      (init-transform-param (& (-> gimage param)) w h)
       (Scm_RegisterFinalizer obj finalize-image NULL)
       (return obj)))
 
@@ -347,16 +355,24 @@
           (ref (-> image update_rect) h) 0)
     (return (-> image texture)))
 
-  (define-cfn image-coordinate (gimage::GrvImage* x::double y::double ox::int* oy::int*)
+  (define-cfn convert-coordinate (param::TransformParam* x::double y::double ox::int* oy::int*)
     ::void
-    (let* ((m00::double (ref (-> gimage param) m00))
-           (m10::double (ref (-> gimage param) m10))
-           (m01::double (ref (-> gimage param) m01))
-           (m11::double (ref (-> gimage param) m11))
-           (x0::double (ref (-> gimage param) x0))
-           (y0::double (ref (-> gimage param) y0)))
+    (let* ((m00::double (-> param m00))
+           (m10::double (-> param m10))
+           (m01::double (-> param m01))
+           (m11::double (-> param m11))
+           (x0::double (-> param x0))
+           (y0::double (-> param y0)))
       (set! (* ox) (+ (* m00 x) (* m01 y) x0)
             (* oy) (+ (* m10 x) (* m11 y) y0))))
+
+  (define-cfn image-coordinate (gimage::GrvImage* x::double y::double ox::int* oy::int*)
+    ::void
+    (convert-coordinate (& (-> gimage param)) x y ox oy))
+
+  (define-cfn window-coordinate (gwin::GrvWindow* x::double y::double ox::int* oy::int*)
+    ::void
+    (convert-coordinate (& (-> gwin param)) x y ox oy))
   )  ;; end of inline-stub
 
 (inline-stub
@@ -629,72 +645,23 @@
                     (destroy-window gwin)))
                 will-close-windows)))
 
-  (define-cfn render-background-image (gwin::GrvWindow*)
-    ::void
-    (let* ((win-w::int)
-           (win-h::int)
-           (win-center::SDL_Point)
-           (gimage::GrvImage* (GRV_IMAGE_PTR (-> gwin background_image)))
-           (img-w::int (-> gimage surface w))
-           (img-h::int (-> gimage surface h))
-           (zoom-x::double)
-           (zoom-y::double)
-           (zoom::double)
-           (dstrect::SDL_Rect))
-      (SDL_GetWindowSize (-> gwin window) (& win-w) (& win-h))
-      (set! zoom-x (/ (cast double win-w) (cast double img-w))
-            zoom-y (/ (cast double win-h) (cast double img-h))
-            zoom (?: (< zoom-x zoom-y) zoom-x zoom-y)
-            (ref win-center x) (/ win-w 2)
-            (ref win-center y) (/ win-h 2)
-            (ref dstrect x) (+ (* zoom (- (/ img-w 2))) (/ win-w 2))
-            (ref dstrect y) (+ (* zoom (- (/ img-h 2))) (/ win-h 2))
-            (ref dstrect w) (* zoom img-w)
-            (ref dstrect h) (* zoom img-h))
-      (when (< (SDL_RenderCopyEx (-> gwin renderer)
-                                 (get-texture gwin gimage)
-                                 NULL
-                                 (& dstrect)
-                                 0.0
-                                 (& win-center)
-                                 SDL_FLIP_NONE) 0)
-        (Scm_Error "SDL_RenderCopyEx failed: %s" (SDL_GetError)))))
-
   (define-cfn render-sprite (gsprite::GrvSprite*)
     ::void
     (when (or (SCM_FALSEP (-> gsprite image))
               (not (-> gsprite visible)))
       (return))
     (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR (-> gsprite window)))
-           (win-w::int)
-           (win-h::int)
-           (gimage::GrvImage* (GRV_IMAGE_PTR (-> gwin background_image)))
-           (img-w::int (-> gimage surface w))
-           (img-h::int (-> gimage surface h))
-           (zoom-x::double)
-           (zoom-y::double)
-           (zoom::double)
            (texture::SDL_Texture* (get-texture gwin (GRV_IMAGE_PTR (-> gsprite image))))
            (spr-center-x::int)
            (spr-center-y::int)
            (spr-w::double (* (ref (-> gsprite srcrect) w) (-> gsprite zoom_x)))
            (spr-h::double (* (ref (-> gsprite srcrect) h) (-> gsprite zoom_y)))
            (dstrect::SDL_Rect))
-      (SDL_GetWindowSize (-> gwin window) (& win-w) (& win-h))
-      (image-coordinate gimage (-> gsprite center_x) (-> gsprite center_y) (& spr-center-x) (& spr-center-y))
-      (set! zoom-x (/ (cast double win-w) (cast double img-w))
-            zoom-y (/ (cast double win-h) (cast double img-h))
-            zoom (?: (< zoom-x zoom-y) zoom-x zoom-y)
-            (ref dstrect x) (cast int (round (+ (* (- (- spr-center-x (/ spr-w 2.0))
-                                                      (/ img-w 2))
-                                                   zoom)
-                                                (/ win-w 2))))
-            (ref dstrect y) (cast int (round (+ (* (- (- spr-center-y (/ spr-h 2.0))
-                                                      (/ img-h 2))
-                                                   zoom)
-                                                (/ win-h 2))))
-            (ref dstrect w) (cast int (round (* spr-w zoom)))
-            (ref dstrect h) (cast int (round (* spr-h zoom))))
+      (window-coordinate gwin (-> gsprite center_x) (-> gsprite center_y) (& spr-center-x) (& spr-center-y))
+      (set! (ref dstrect x) (cast int (round (- spr-center-x (/ spr-w 2.0))))
+            (ref dstrect y) (cast int (round (- spr-center-y (/ spr-h 2.0))))
+            (ref dstrect w) (cast int (round spr-w))
+            (ref dstrect h) (cast int (round spr-h)))
       (SDL_RenderCopyEx (-> gwin renderer)
                         texture
                         (& (-> gsprite srcrect))
@@ -711,24 +678,11 @@
                   (SDL_SetRenderDrawBlendMode renderer SDL_BLENDMODE_BLEND)
                   (SDL_SetRenderDrawColor renderer 0 0 0 255)
                   (SDL_RenderClear renderer)
-                  (render-background-image gwin)
                   (for-each (lambda (sprite)
                               (render-sprite (GRV_SPRITE_PTR sprite)))
                             (-> gwin sprites))
                   (SDL_RenderPresent renderer)))
               grv_windows))
-  )  ;; end of inline-stub
-
-(inline-stub
-  (define-cfn x->image (window-or-image)
-    ::GrvImage*
-    (cond
-      ((GRV_WINDOW_P window-or-image)
-       (return (GRV_IMAGE_PTR (-> (GRV_WINDOW_PTR window-or-image) background_image))))
-      ((GRV_IMAGE_P window-or-image)
-       (return (GRV_IMAGE_PTR window-or-image)))
-      (else
-       (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
   )  ;; end of inline-stub
 
 (inline-stub
@@ -1047,8 +1001,7 @@ typedef enum {
             (-> gwin renderer) NULL
             (-> gwin proc) SCM_FALSE
             (-> gwin events) SCM_NIL
-            (-> gwin sprites) SCM_NIL
-            (-> gwin background_image) SCM_FALSE)
+            (-> gwin sprites) SCM_NIL)
 
       (set! (-> gwin window) (SDL_CreateWindow title
                                                SDL_WINDOWPOS_UNDEFINED
@@ -1062,16 +1015,13 @@ typedef enum {
       (let* ((w::int)
              (h::int))
         (SDL_GetWindowSize (-> gwin window) (& w) (& h))
-        (set! (-> gwin background_image) (%create-image w h)))
+        (init-transform-param (& (-> gwin param)) w h))
 
       (set! (-> gwin renderer) (SDL_CreateRenderer (-> gwin window) -1 SDL_RENDERER_PRESENTVSYNC))
       (unless (-> gwin renderer)
         (Scm_Error "SDL_CreateRenderer failed: %s" (SDL_GetError)))
 
       (return (register-grv-window gwin)))))
-
-(define-cproc window-background-image (gwin::<graviton-window>)
-  (return (-> gwin background_image)))
 
 (define-cproc set-window-resolution! (gwin::<graviton-window> w::<int> h::<int>)
   ::<void>
@@ -1081,12 +1031,10 @@ typedef enum {
          (zoom-y::double)
          (zoom::double)
          (rect::SDL_Rect))
-    (destroy-image (GRV_IMAGE_PTR (-> gwin background_image)))
     (SDL_GetWindowSize (-> gwin window) (& win-w) (& win-h))
     (set! zoom-x (/ (cast double win-w) (cast double w))
           zoom-y (/ (cast double win-h) (cast double h))
           zoom (?: (< zoom-x zoom-y) zoom-x zoom-y)
-          (-> gwin background_image) (%create-image w h)
           (ref rect x) (cast int (round (+ (* (- (/ w 2.0)) zoom) (/ win-w 2.0))))
           (ref rect y) (cast int (round (+ (* (- (/ h 2.0)) zoom) (/ win-h 2.0))))
           (ref rect w) (cast int (round (* w zoom)))
@@ -1094,33 +1042,52 @@ typedef enum {
     (when (-> gwin renderer)
       (SDL_RenderSetClipRect (-> gwin renderer) (& rect)))))
 
+(inline-stub
+  (define-cfn compute-transform-param (param::TransformParam*
+                                       width::int
+                                       height::int
+                                       x0::double
+                                       y0::double
+                                       x1::double
+                                       y1::double)
+    ::void
+    (let* ((wex::int (- width 1))
+           (wey::int (- height 1))
+           (wcx::double (/ wex 2.0))
+           (wcy::double (/ wey 2.0))
+           (rx::double (/ (- x1 x0) wex))
+           (ry::double (/ (- y1 y0) wey))
+           (r::double (?: (< (fabs rx) (fabs ry)) (fabs ry) (fabs rx)))
+           (mx::double (?: (< rx 0.0) (- r) r))
+           (my::double (?: (< ry 0.0) (- r) r))
+           (cx::double (/ (+ x0 x1) 2.0))
+           (cy::double (/ (+ y0 y1) 2.0))
+           (sx::double (+ (* mx (- wcx)) cx))
+           (sy::double (+ (* my (- wcy)) cy))
+           (ex::double (+ (* mx wcx) cx))
+           (ey::double (+ (* my wcy) cy)))
+      (set! (-> param m00) (/ 1.0 mx)
+            (-> param m01) 0.0
+            (-> param m10) 0.0
+            (-> param m11) (/ 1.0 my)
+            (-> param x0) (- (/ sx mx))
+            (-> param y0) (- (/ sy my))
+            (-> param left) sx
+            (-> param top) sy
+            (-> param right) ex
+            (-> param bottom) ey)))
+  )  ;; end of inline-stub
+
+(define-cproc set-window-coordinate! (gwin::<graviton-window> x0::<double> y0::<double> x1::<double> y1::<double>)
+  ::<void>
+  (let* ((width::int)
+         (height::int))
+    (SDL_GetWindowSize (-> gwin window) (& width) (& height))
+    (compute-transform-param (& (-> gwin param)) width height x0 y0 x1 y1)))
+
 (define-cproc set-image-coordinate! (gimage::<graviton-image> x0::<double> y0::<double> x1::<double> y1::<double>)
   ::<void>
-  (let* ((wex::int (- (-> gimage surface w) 1))
-         (wey::int (- (-> gimage surface h) 1))
-         (wcx::double (/ wex 2.0))
-         (wcy::double (/ wey 2.0))
-         (rx::double (/ (- x1 x0) wex))
-         (ry::double (/ (- y1 y0) wey))
-         (r::double (?: (< (fabs rx) (fabs ry)) (fabs ry) (fabs rx)))
-         (mx::double (?: (< rx 0.0) (- r) r))
-         (my::double (?: (< ry 0.0) (- r) r))
-         (cx::double (/ (+ x0 x1) 2.0))
-         (cy::double (/ (+ y0 y1) 2.0))
-         (sx::double (+ (* mx (- wcx)) cx))
-         (sy::double (+ (* my (- wcy)) cy))
-         (ex::double (+ (* mx wcx) cx))
-         (ey::double (+ (* my wcy) cy)))
-    (set! (ref (-> gimage param) m00) (/ 1.0 mx)
-          (ref (-> gimage param) m01) 0.0
-          (ref (-> gimage param) m10) 0.0
-          (ref (-> gimage param) m11) (/ 1.0 my)
-          (ref (-> gimage param) x0) (- (/ sx mx))
-          (ref (-> gimage param) y0) (- (/ sy my))
-          (-> gimage left) sx
-          (-> gimage top) sy
-          (-> gimage right) ex
-          (-> gimage bottom) ey)))
+  (compute-transform-param (& (-> gimage param)) (-> gimage surface w) (-> gimage surface h) x0 y0 x1 y1))
 
 (define-cproc create-image (w::<int> h::<int>)
   (return (%create-image w h)))
@@ -1148,41 +1115,63 @@ typedef enum {
   ::(<int> <int>)
   (return (-> image surface w) (-> image surface h)))
 
+(inline-stub
+  (define-cfn get-transform-param (window-or-image)
+    ::TransformParam*
+    (cond
+      ((GRV_WINDOW_P window-or-image)
+       (return (& (-> (GRV_WINDOW_PTR window-or-image) param))))
+      ((GRV_IMAGE_P window-or-image)
+       (return (& (-> (GRV_IMAGE_PTR window-or-image) param))))
+      (else
+       (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
+  ) ;; end of inline-stub
+
+(define-cproc border-size (window-or-image)
+  ::(<int> <int>)
+  (cond
+    ((GRV_WINDOW_P window-or-image)
+     (let* ((w::int)
+            (h::int))
+       (SDL_GetWindowSize (-> (GRV_WINDOW_PTR window-or-image) window) (& w) (& h))
+       (return w h)))
+    ((GRV_IMAGE_P window-or-image)
+     (return (-> (GRV_IMAGE_PTR window-or-image) surface w)
+             (-> (GRV_IMAGE_PTR window-or-image) surface h)))
+    (else
+     (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
+
 (define-cproc border-left (window-or-image)
   ::<double>
-  (let* ((gimage::GrvImage* (x->image window-or-image)))
-    (return (-> gimage left))))
+  (return (-> (get-transform-param window-or-image) left)))
 
 (define-cproc border-top (window-or-image)
   ::<double>
-  (let* ((gimage::GrvImage* (x->image window-or-image)))
-    (return (-> gimage top))))
+  (return (-> (get-transform-param window-or-image) top)))
 
 (define-cproc border-right (window-or-image)
   ::<double>
-  (let* ((gimage::GrvImage* (x->image window-or-image)))
-    (return (-> gimage right))))
+  (return (-> (get-transform-param window-or-image) right)))
 
 (define-cproc border-bottom (window-or-image)
   ::<double>
-  (let* ((gimage::GrvImage* (x->image window-or-image)))
-    (return (-> gimage bottom))))
+  (return (-> (get-transform-param window-or-image) bottom)))
 
 (define-cproc center-point (window-or-image)
   ::<list>
-  (let* ((gimage::GrvImage* (x->image window-or-image)))
-    (return (SCM_LIST2 (Scm_MakeFlonum (/ (+ (-> gimage left) (-> gimage right)) 2.0))
-                       (Scm_MakeFlonum (/ (+ (-> gimage top) (-> gimage bottom)) 2.0))))))
+  (let* ((param::TransformParam* (get-transform-param window-or-image)))
+    (return (SCM_LIST2 (Scm_MakeFlonum (/ (+ (-> param left) (-> param right)) 2.0))
+                       (Scm_MakeFlonum (/ (+ (-> param top) (-> param bottom)) 2.0))))))
 
 (define-cproc center-x (window-or-image)
   ::<double>
-  (let* ((gimage::GrvImage* (x->image window-or-image)))
-    (return (/ (+ (-> gimage left) (-> gimage right)) 2.0))))
+  (let* ((param::TransformParam* (get-transform-param window-or-image)))
+    (return (/ (+ (-> param left) (-> param right)) 2.0))))
 
 (define-cproc center-y (window-or-image)
   ::<double>
-  (let* ((gimage::GrvImage* (x->image window-or-image)))
-    (return (/ (+ (-> gimage top) (-> gimage bottom)) 2.0))))
+  (let* ((param::TransformParam* (get-transform-param window-or-image)))
+    (return (/ (+ (-> param top) (-> param bottom)) 2.0))))
 
 (define-cproc image-rgba-pixels (image::<graviton-image>)
   (let* ((surface::SDL_Surface* (-> image surface))
@@ -1513,12 +1502,29 @@ typedef enum {
       (thunk window)))
   (run-event-loop))
 
+(define (display-image image :key (fullscreen? #f))
+  (let ((img-w (border-width image))
+        (img-h (border-height image))
+        (title (match (command-line)
+                 ((program-name args ...)
+                  (values-ref (decompose-path program-name) 1))
+                 (_
+                  "Untitled"))))
+    (call-with-window title (if fullscreen?
+                                'fullscreen
+                                (list img-w img-h))
+      (lambda (win)
+        (let* ((win-w (border-width win))
+               (win-h (border-height win))
+               (zoom (min (/. win-w img-w) (/. win-h img-h))))
+          (put-image win image (center-x win) (center-y win) :zoom-x zoom :zoom-y zoom))))))
+
 (define-method set-coordinate! ((window <graviton-window>)
                                 (x0 <real>)
                                 (y0 <real>)
                                 (x1 <real>)
                                 (y1 <real>))
-  (set-image-coordinate! (window-background-image window) x0 y0 x1 y1))
+  (set-window-coordinate! window x0 y0 x1 y1))
 
 (define-method set-coordinate! ((image <graviton-image>)
                                 (x0 <real>)
@@ -1526,6 +1532,12 @@ typedef enum {
                                 (x1 <real>)
                                 (y1 <real>))
   (set-image-coordinate! image x0 y0 x1 y1))
+
+(define (border-width window-or-image)
+  (values-ref (border-size window-or-image) 0))
+
+(define (border-height window-or-image)
+  (values-ref (border-size window-or-image) 1))
 
 (define (border-min-x window-or-image)
   (min (border-left window-or-image) (border-right window-or-image)))
@@ -1565,47 +1577,16 @@ typedef enum {
                  rect)
     (make-sprite window image center-x center-y z rect angle zoom-x zoom-y visible)))
 
-(define-method draw-rect ((window <graviton-window>)
-                          (point0 <list>)
-                          (point1 <list>)
-                          (color <integer>)
-                          :key
-                          (fill? #f))
-  (%draw-rect (window-background-image window) point0 point1 color fill?))
-
-(define-method draw-rect ((image <graviton-image>)
-                          (point0 <list>)
-                          (point1 <list>)
-                          (color <integer>)
-                          :key
-                          (fill? #f))
+(define (draw-rect image point0 point1 color :key (fill? #f))
   (%draw-rect image point0 point1 color fill?))
 
-(define-method draw-line ((window <graviton-window>)
-                          (points <list>)
-                          (color <integer>))
-  (%draw-line (window-background-image window) points color))
-
-(define-method draw-line ((image <graviton-image>)
-                          (points <list>)
-                          (color <integer>))
+(define (draw-line image points color)
   (%draw-line image points color))
 
-(define-method draw-polygon ((window <graviton-window>)
-                             (points <list>)
-                             (color <integer>)
-                             :key
-                             (fill? #f))
-  (%draw-polygon (window-background-image window) points color fill?))
-
-(define-method draw-polygon ((image <graviton-image>)
-                             (points <list>)
-                             (color <integer>)
-                             :key
-                             (fill? #f))
+(define (draw-polygon image points color :key (fill? #f))
   (%draw-polygon image points color fill?))
 
-(define (draw-circle window-or-image
+(define (draw-circle image
                      center-point
                      radius
                      color
@@ -1641,8 +1622,8 @@ typedef enum {
            (let ((x (+ center-x (* radius (cos et))))
                  (y (+ center-y (* (* radius radius-ratio) (sin et)))))
              (if (or draw-radius? fill?)
-                 (draw-polygon window-or-image (cons (rotate-point x y) points) color :fill? fill?)
-                 (draw-line window-or-image (cons (rotate-point x y) points) color))))
+                 (draw-polygon image (cons (rotate-point x y) points) color :fill? fill?)
+                 (draw-line image (cons (rotate-point x y) points) color))))
           (else
            (let ((x (+ center-x (* radius (cos t))))
                  (y (+ center-y (* (* radius radius-ratio) (sin t)))))
