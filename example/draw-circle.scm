@@ -1,0 +1,17 @@
+(use graviton)
+(use math.const)
+
+(define (deg x)
+  (* (/ x 180.0) pi))
+
+(define (main args)
+  (call-with-window *program-name* '(1024 768)
+    (lambda (win)
+      (let1 img (create-image 1024 768)
+        (draw-circle img (center-point win) 350 (color 'teal) :radius-ratio 0.3 :fill? #t)
+        (draw-circle img (center-point win) 340 0 :radius-ratio 0.28 :fill? #t)
+        (put-image win img (center-x win) (center-y win) :angle 30)
+        (put-image win img (center-x win) (center-y win) :angle 90)
+        (put-image win img (center-x win) (center-y win) :angle 150))
+      (draw-circle win (center-point win) 25 (color 'teal) :fill? #t)))
+  0)

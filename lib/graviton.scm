@@ -35,6 +35,7 @@
   (use gauche.parameter)
   (use gauche.partcont)
   (use gauche.record)
+  (use math.const)
   (use util.match)
 
   (export <graviton-window>
@@ -76,6 +77,7 @@
           draw-rect
           draw-line
           draw-polygon
+          draw-circle
 
           rgb
           rgba
@@ -1605,6 +1607,49 @@ typedef enum {
                              :key
                              (fill? #f))
   (%draw-polygon image points color fill?))
+
+(define (draw-circle window-or-image
+                     center-point
+                     radius
+                     color
+                     :key
+                     (start 0)
+                     (angle #f)
+                     (radius-ratio 1.0)
+                     (rotate 0)
+                     (fill? #f)
+                     (draw-radius? (if angle #t #f)))
+  (let ((center-x (point-x center-point))
+        (center-y (point-y center-point)))
+    (define rotate-point
+      (let ((m00 (cos rotate))
+            (m01 (- (sin rotate)))
+            (m10 (sin rotate))
+            (m11 (cos rotate)))
+        (lambda (x y)
+          (let ((x1 (- x center-x))
+                (y1 (- y center-y)))
+            (make-point (+ (* m00 x1) (* m01 y1) center-x)
+                        (+ (* m10 x1) (* m11 y1) center-y))))))
+
+    (let ((dt (/ pi/2 radius))
+          (et (+ start (or angle (* 2 pi)))))
+      (let loop ((t start)
+                 (points (if (or draw-radius?
+                                 (and angle fill?))
+                             (list center-point)
+                             '())))
+        (cond
+          ((<= et t)
+           (let ((x (+ center-x (* radius (cos et))))
+                 (y (+ center-y (* (* radius radius-ratio) (sin et)))))
+             (if (or draw-radius? fill?)
+                 (draw-polygon window-or-image (cons (rotate-point x y) points) color :fill? fill?)
+                 (draw-line window-or-image (cons (rotate-point x y) points) color))))
+          (else
+           (let ((x (+ center-x (* radius (cos t))))
+                 (y (+ center-y (* (* radius radius-ratio) (sin t)))))
+             (loop (+ t dt) (cons (rotate-point x y) points)))))))))
 
 (define (rgb r g b)
   (rgba r g b #xff))
