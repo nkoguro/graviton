@@ -52,6 +52,7 @@
           close-window
 
           match-events
+          create-image
           load-image
           put-image
           image-rgba-pixels
@@ -1123,7 +1124,7 @@ typedef enum {
           (-> gimage bottom) ey)))
 
 (define-cproc create-image (w::<int> h::<int>)
-  (%create-image w h))
+  (return (%create-image w h)))
 
 (define-cproc load-image (filename::<const-cstring>)
   ::<graviton-image>
