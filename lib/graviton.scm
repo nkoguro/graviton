@@ -79,7 +79,7 @@
           center-x
           center-y
 
-          draw-pixel
+          draw-point
           draw-rect
           draw-line
           draw-polygon
@@ -1745,7 +1745,7 @@ typedef enum {
                  rect)
     (make-sprite window image center-x center-y z rect angle zoom-x zoom-y visible)))
 
-(define (draw-pixel image point color :key (thickness 0))
+(define (draw-point image point color :key (thickness 0))
   (cond
     ((= thickness 0)
      (draw-rect image point point color))
@@ -1777,7 +1777,7 @@ typedef enum {
     ((null? points)
      #f)
     (else
-     (draw-pixel image (car points) color :thickness thickness)
+     (draw-point image (car points) color :thickness thickness)
      (let loop ((point0 (car points))
                 (points (cdr points)))
        (cond
@@ -1804,7 +1804,7 @@ typedef enum {
                                 (make-point x10 y10))
                           color
                           :fill? #t)
-            (draw-pixel image (make-point x1 y1) color :thickness thickness)
+            (draw-point image (make-point x1 y1) color :thickness thickness)
             (loop (car points) (cdr points))))
          ((< (abs (- (point-x point0) (point-x (car points)))) (pixel-size image))
           (let* ((x0 (point-x point0))
@@ -1827,7 +1827,7 @@ typedef enum {
                                 (make-point x10 y10))
                           color
                           :fill? #t)
-            (draw-pixel image (make-point x1 y1) color :thickness thickness)
+            (draw-point image (make-point x1 y1) color :thickness thickness)
             (loop (car points) (cdr points))))
          (else
           (let* ((x0 (point-x point0))
@@ -1851,7 +1851,7 @@ typedef enum {
                                 (make-point x10 y10))
                           color
                           :fill? #t)
-            (draw-pixel image (make-point x1 y1) color :thickness thickness)
+            (draw-point image (make-point x1 y1) color :thickness thickness)
             (loop (car points) (cdr points))))))
      )))
 
