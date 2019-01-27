@@ -63,7 +63,7 @@
           sprite-center-position
           set-sprite-center-position!
 
-          set-coordinate!
+          set-border!
           border-size
           border-width
           border-height
@@ -79,6 +79,7 @@
           center-x
           center-y
 
+          draw-pixel
           draw-rect
           draw-line
           draw-polygon
@@ -117,11 +118,15 @@
                                   right::double
                                   bottom::double)))
 
+  (define-ctype GrvTexture::(.struct
+                             (texture::SDL_Texture*
+                              ref_count::int)))
+
   (define-ctype GrvImage::(.struct
                            (surface::SDL_Surface*
                             update_rect::SDL_Rect
-                            texture::SDL_Texture*
-                            param::TransformParam)))
+                            param::TransformParam
+                            texture_alist)))
 
   (define-ctype GrvSprite::(.struct
                             (window
@@ -161,6 +166,9 @@
   (define-cptr <graviton-image> :private
     "GrvImage*" "GravitonImageClass" "GRV_IMAGE_P" "MAKE_GRV_IMAGE" "GRV_IMAGE_PTR")
 
+  (define-cptr <graviton-texture> :private
+    "GrvTexture*" "GravitonTextureClass" "GRV_TEXTURE_P" "MAKE_GRV_TEXTURE" "GRV_TEXTURE_PTR")
+
   (define-cptr <graviton-sprite> :private
     "GrvSprite*" "GravitonSpriteClass" "GRV_SPRITE_P" "MAKE_GRV_SPRITE" "GRV_SPRITE_PTR")
   )  ;; end of inline-stub
@@ -194,19 +202,15 @@
       (set! (-> (GRV_SPRITE_PTR z) window) SCM_FALSE
             (-> (GRV_SPRITE_PTR z) image) SCM_FALSE)))
 
-  (define-cfn destroy-image (gimage::GrvImage*)
-    ::void
-    (let* ((texture::SDL_Texture* (-> gimage texture)))
-      (unless (== texture NULL)
-        (SDL_DestroyTexture texture))
-      (SDL_FreeSurface (-> gimage surface))
-      (set! (-> gimage surface) NULL
-            (-> gimage texture) NULL)))
-
   (define-cfn finalize-image (z data::void*)
     ::void
     (when (GRV_IMAGE_P z)
-      (destroy-image (GRV_IMAGE_PTR z))))
+      (let* ((gimage::GrvImage* (GRV_IMAGE_PTR z)))
+        (unless (SCM_NULLP (-> gimage texture_alist))
+          (fprintf stderr "[BUG] texture_alist in <graviton-image> must be nil in finalizer. forgot to call release-texture?\n"))
+        (SDL_FreeSurface (-> gimage surface))
+        (set! (-> gimage surface) NULL
+              (-> gimage texture_alist) SCM_NIL))))
 
   (define-cfn register-grv-window (gwin::GrvWindow*)
     ::ScmObj
@@ -228,17 +232,6 @@
                               (SCM_SET_CDR prev (SCM_CDR pair))
                               (break))))))
                      grv_windows)))
-
-  (define-cfn destroy-window (gwin::GrvWindow*)
-    ::void
-    (unregister-grv-window gwin)
-    (SDL_DestroyRenderer (-> gwin renderer))
-    (SDL_DestroyWindow (-> gwin window))
-    (set! (-> gwin window) NULL
-          (-> gwin renderer) NULL
-          (-> gwin proc) SCM_FALSE
-          (-> gwin events) SCM_NIL
-          (-> gwin sprites) SCM_NIL))
 
   (define-cfn init-transform-param (param::TransformParam* width::int height::int)
     ::void
@@ -262,7 +255,7 @@
         (Scm_Error "SDL_CreateRGBSurfaceWithFormat failed: %s" (SDL_GetError)))
       (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
       (set! (-> gimage surface) surface
-            (-> gimage texture) NULL
+            (-> gimage texture_alist) SCM_NIL
             (ref (-> gimage update_rect) x) 0
             (ref (-> gimage update_rect) y) 0
             (ref (-> gimage update_rect) w) 0
@@ -322,38 +315,115 @@
       (when (< (SDL_LockTexture texture rect (& pixels) (& pitch)) 0)
         (Scm_Error "SDL_LockTexture failed: %s" (SDL_GetError)))
       (for ((set! y (-> rect y)) (< y (-> rect h)) (pre++ y))
-        (memcpy (+ pixels (* y pitch))
+        (memcpy (+ pixels (* (- y (-> rect y)) pitch))
                 (+ (-> surface pixels) (* y (-> surface pitch)) (* (-> rect x) (-> surface format BytesPerPixel)))
                 pitch))
       (SDL_UnlockTexture texture)
       (SDL_UnlockSurface surface)))
 
-  (define-cfn get-texture (gwin::GrvWindow* image::GrvImage*)
+  (define-cfn retain-texture (win gimage::GrvImage*)
+    ::void
+    (unless (GRV_WINDOW_P win)
+      (Scm_Error "<graviton-window> required, but got %S" win))
+
+    (let* ((texture SCM_FALSE))
+      (for-each (lambda (pair)
+                  (when (SCM_EQ (SCM_CAR pair) win)
+                    (set! texture (SCM_CDR pair))
+                    (break)))
+                (-> gimage texture_alist))
+      (cond
+        ((SCM_FALSEP texture)
+         (let* ((renderer::SDL_Renderer* (-> (GRV_WINDOW_PTR win) renderer))
+                (gtexture::GrvTexture* (SCM_NEW (.type GrvTexture)))
+                (stexture::SDL_Texture* (create-streaming-texture-from-surface renderer (-> gimage surface))))
+           (when (== stexture NULL)
+             (Scm_Error "SDL_CreateTextureFromSurface failed: %s" (SDL_GetError)))
+           (SDL_SetTextureBlendMode stexture SDL_BLENDMODE_BLEND)
+           (set! (-> gtexture texture) stexture
+                 (-> gtexture ref_count) 1
+                 texture (MAKE_GRV_TEXTURE gtexture)
+                 (-> gimage texture_alist) (Scm_Cons (Scm_Cons win texture) (-> gimage texture_alist) ))))
+        (else
+         (let* ((gtexture::GrvTexture* (GRV_TEXTURE_PTR texture)))
+           (pre++ (-> gtexture ref_count)))))))
+
+  (define-cfn release-texture (win gimage::GrvImage*)
+    ::void
+    (unless (GRV_WINDOW_P win)
+      (Scm_Error "<graviton-window> required, but got %S" win))
+
+    (let* ((texture SCM_FALSE))
+      (for-each (lambda (pair)
+                  (when (SCM_EQ (SCM_CAR pair) win)
+                    (set! texture (SCM_CDR pair))
+                    (break)))
+                (-> gimage texture_alist))
+      (unless (SCM_FALSEP texture)
+        (let* ((gtexture::GrvTexture* (GRV_TEXTURE_PTR texture)))
+          (pre-- (-> gtexture ref_count))
+          (when (<= (-> gtexture ref_count) 0)
+            (unless (== (-> gtexture texture) NULL)
+              (SDL_DestroyTexture (-> gtexture texture))
+              (set! (-> gtexture texture) NULL))
+            (let* ((prev SCM_NIL))
+              (pair-for-each (lambda (rest)
+                               (let* ((pair (SCM_CAR rest)))
+                                 (when (SCM_EQ (SCM_CAR pair) win)
+                                   (cond
+                                     ((SCM_NULLP prev)
+                                      (set! (-> gimage texture_alist) (SCM_CDR rest))
+                                      (break))
+                                     (else
+                                      (SCM_SET_CDR prev (SCM_CDR rest))
+                                      (break))))
+                                 (set! prev pair)))
+                             (-> gimage texture_alist)))))))
+
+    (when (SCM_NULLP (-> gimage texture_alist))
+      (set! (ref (-> gimage update_rect) x) 0
+            (ref (-> gimage update_rect) y) 0
+            (ref (-> gimage update_rect) w) 0
+            (ref (-> gimage update_rect) h) 0)))
+
+  (define-cfn refresh-textures (gimage::GrvImage*)
+    ::void
+    (when (SDL_RectEmpty (& (-> gimage update_rect)))
+      (return))
+
+    (for-each (lambda (pair)
+                (let* ((gtexture::GrvTexture* (GRV_TEXTURE_PTR (SCM_CDR pair)))
+                       (format::Uint32)
+                       (access::int)
+                       (w::int)
+                       (h::int))
+                  (when (< (SDL_QueryTexture (-> gtexture texture) (& format) (& access) (& w) (& h)) 0)
+                    (Scm_Error "SDL_QueryTexture failed: %s" (SDL_GetError)))
+                  (cond
+                    ((!= access SDL_TEXTUREACCESS_STREAMING)
+                     (SDL_DestroyTexture (-> gtexture texture))
+                     (let* ((renderer::SDL_Renderer* (-> (GRV_WINDOW_PTR (SCM_CAR pair)) renderer)))
+                       (set! (-> gtexture texture) (create-streaming-texture-from-surface renderer (-> gimage surface)))))
+                    (else
+                     (update-texture (-> gtexture texture) (-> gimage surface) (& (-> gimage update_rect)))))))
+              (-> gimage texture_alist))
+    (set! (ref (-> gimage update_rect) x) 0
+          (ref (-> gimage update_rect) y) 0
+          (ref (-> gimage update_rect) w) 0
+          (ref (-> gimage update_rect) h) 0))
+
+  (define-cfn get-texture (win gimage::GrvImage*)
     ::SDL_Texture*
-    (cond
-      ((== (-> image texture) NULL)
-       (set! (-> image texture) (create-streaming-texture-from-surface (-> gwin renderer) (-> image surface)))
-       (when (== (-> image texture) NULL)
-         (Scm_Error "SDL_CreateTextureFromSurface failed: %s" (SDL_GetError)))
-       (SDL_SetTextureBlendMode (-> image texture) SDL_BLENDMODE_BLEND))
-      ((not (SDL_RectEmpty (& (-> image update_rect))))
-       (let* ((format::Uint32)
-              (access::int)
-              (w::int)
-              (h::int))
-         (when (< (SDL_QueryTexture (-> image texture) (& format) (& access) (& w) (& h)) 0)
-           (Scm_Error "SDL_QueryTexture failed: %s" (SDL_GetError)))
-         (cond
-           ((!= access SDL_TEXTUREACCESS_STREAMING)
-            (SDL_DestroyTexture (-> image texture))
-            (set! (-> image texture) (create-streaming-texture-from-surface (-> gwin renderer) (-> image surface))))
-           (else
-            (update-texture (-> image texture) (-> image surface) (& (-> image update_rect))))))))
-    (set! (ref (-> image update_rect) x) 0
-          (ref (-> image update_rect) y) 0
-          (ref (-> image update_rect) w) 0
-          (ref (-> image update_rect) h) 0)
-    (return (-> image texture)))
+    (let* ((texture SCM_FALSE))
+      (for-each (lambda (pair)
+                  (when (SCM_EQ (SCM_CAR pair) win)
+                    (set! texture (SCM_CDR pair))
+                    (break)))
+                (-> gimage texture_alist))
+      (when (SCM_FALSEP texture)
+        (Scm_Error "<graviton-texture> not found for %S, forgot retain-texture?" win))
+
+      (return (-> (GRV_TEXTURE_PTR texture) texture))))
 
   (define-cfn convert-coordinate (param::TransformParam* x::double y::double ox::int* oy::int*)
     ::void
@@ -366,6 +436,14 @@
       (set! (* ox) (+ (* m00 x) (* m01 y) x0)
             (* oy) (+ (* m10 x) (* m11 y) y0))))
 
+  (define-cfn image-pixel-size (gimage::GrvImage*)
+    ::double
+    (return (/ 1.0 (fabs (ref (-> gimage param) m00)))))
+
+  (define-cfn window-pixel-size (gwin::GrvWindow*)
+    ::double
+    (return (/ 1.0 (fabs (ref (-> gwin param) m00)))))
+
   (define-cfn image-coordinate (gimage::GrvImage* x::double y::double ox::int* oy::int*)
     ::void
     (convert-coordinate (& (-> gimage param)) x y ox oy))
@@ -374,6 +452,25 @@
     ::void
     (convert-coordinate (& (-> gwin param)) x y ox oy))
   )  ;; end of inline-stub
+
+(inline-stub
+  (define-cfn destroy-window (gwin::GrvWindow*)
+    ::void
+    (for-each (lambda (sprite)
+                (let* ((gsprite::GrvSprite* (GRV_SPRITE_PTR sprite)))
+                  (unless (SCM_FALSEP (-> gsprite image))
+                    (release-texture (-> gsprite window) (GRV_IMAGE_PTR (-> gsprite image))))))
+              (-> gwin sprites))
+    (set! (-> gwin sprites) SCM_NIL)
+
+    (unregister-grv-window gwin)
+    (SDL_DestroyRenderer (-> gwin renderer))
+    (SDL_DestroyWindow (-> gwin window))
+    (set! (-> gwin window) NULL
+          (-> gwin renderer) NULL
+          (-> gwin proc) SCM_FALSE
+          (-> gwin events) SCM_NIL))
+  ) ;; end of inline-stub
 
 (inline-stub
   (define-cfn get-events ()
@@ -650,25 +747,28 @@
     (when (or (SCM_FALSEP (-> gsprite image))
               (not (-> gsprite visible)))
       (return))
-    (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR (-> gsprite window)))
-           (texture::SDL_Texture* (get-texture gwin (GRV_IMAGE_PTR (-> gsprite image))))
-           (spr-center-x::int)
-           (spr-center-y::int)
-           (spr-w::double (* (ref (-> gsprite srcrect) w) (-> gsprite zoom_x)))
-           (spr-h::double (* (ref (-> gsprite srcrect) h) (-> gsprite zoom_y)))
-           (dstrect::SDL_Rect))
-      (window-coordinate gwin (-> gsprite center_x) (-> gsprite center_y) (& spr-center-x) (& spr-center-y))
-      (set! (ref dstrect x) (cast int (round (- spr-center-x (/ spr-w 2.0))))
-            (ref dstrect y) (cast int (round (- spr-center-y (/ spr-h 2.0))))
-            (ref dstrect w) (cast int (round spr-w))
-            (ref dstrect h) (cast int (round spr-h)))
-      (SDL_RenderCopyEx (-> gwin renderer)
-                        texture
-                        (& (-> gsprite srcrect))
-                        (& dstrect)
-                        (-> gsprite angle)
-                        NULL
-                        (-> gsprite flip))))
+    (let* ((gimage::GrvImage* (GRV_IMAGE_PTR (-> gsprite image))))
+      (refresh-textures gimage)
+      (let* ((win (-> gsprite window))
+             (gwin::GrvWindow* (GRV_WINDOW_PTR win))
+             (texture::SDL_Texture* (get-texture win gimage))
+             (spr-center-x::int)
+             (spr-center-y::int)
+             (spr-w::double (* (ref (-> gsprite srcrect) w) (-> gsprite zoom_x)))
+             (spr-h::double (* (ref (-> gsprite srcrect) h) (-> gsprite zoom_y)))
+             (dstrect::SDL_Rect))
+        (window-coordinate gwin (-> gsprite center_x) (-> gsprite center_y) (& spr-center-x) (& spr-center-y))
+        (set! (ref dstrect x) (cast int (round (- spr-center-x (/ spr-w 2.0))))
+              (ref dstrect y) (cast int (round (- spr-center-y (/ spr-h 2.0))))
+              (ref dstrect w) (cast int (round spr-w))
+              (ref dstrect h) (cast int (round spr-h)))
+        (SDL_RenderCopyEx (-> gwin renderer)
+                          texture
+                          (& (-> gsprite srcrect))
+                          (& dstrect)
+                          (-> gsprite angle)
+                          NULL
+                          (-> gsprite flip)))))
 
   (define-cfn update-window-contents ()
     ::void
@@ -686,98 +786,101 @@
   )  ;; end of inline-stub
 
 (inline-stub
- (define-cfn remove-window-sprite (sprite)
-   ::void
-   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR (-> (GRV_SPRITE_PTR sprite) window)))
-          (sprites (-> gwin sprites)))
-     (cond
-      ((and (== (Scm_Length sprites) 1)
-            (SCM_EQ (SCM_CAR sprites) sprite))
-       (set! (-> gwin sprites) SCM_NIL))
-      (else
-       (let* ((prev-pair (SCM_CAR sprites)))
+  (define-cfn remove-window-sprite (sprite)
+    ::void
+    (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR (-> (GRV_SPRITE_PTR sprite) window)))
+           (sprites (-> gwin sprites)))
+      (cond
+        ((and (== (Scm_Length sprites) 1)
+              (SCM_EQ (SCM_CAR sprites) sprite))
+         (set! (-> gwin sprites) SCM_NIL))
+        (else
+         (let* ((prev-pair (SCM_CAR sprites)))
+           (pair-for-each (lambda (pair)
+                            (when (SCM_EQ (SCM_CAR pair) sprite)
+                              (SCM_SET_CDR prev-pair (SCM_CDR pair))
+                              (break))
+                            (set! prev-pair pair))
+                          (SCM_CDR sprites)))))))
+
+  (define-cfn insert-window-sprite (sprite)
+    ::void
+    (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR (-> (GRV_SPRITE_PTR sprite) window)))
+           (gsprite::GrvSprite* (GRV_SPRITE_PTR sprite)))
+      (cond
+        ((SCM_NULLP (-> gwin sprites))
+         (set! (-> gwin sprites) (SCM_LIST1 sprite)))
+        (else
          (pair-for-each (lambda (pair)
-                          (when (SCM_EQ (SCM_CAR pair) sprite)
-                            (SCM_SET_CDR prev-pair (SCM_CDR pair))
-                            (break))
-                          (set! prev-pair pair))
-                        (SCM_CDR sprites)))))))
+                          (cond
+                            ((> (-> (GRV_SPRITE_PTR (SCM_CAR pair)) z) (-> gsprite z))
+                             (SCM_SET_CDR pair (Scm_Cons (SCM_CAR pair) (SCM_CDR pair)))
+                             (SCM_SET_CAR pair sprite)
+                             (break))
+                            ((SCM_NULLP (SCM_CDR pair))
+                             (SCM_SET_CDR pair (Scm_Cons sprite SCM_NIL))
+                             (break))))
+                        (-> gwin sprites))))))
 
- (define-cfn insert-window-sprite (sprite)
-   ::void
-   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR (-> (GRV_SPRITE_PTR sprite) window))))
-     (cond
-      ((SCM_NULLP (-> gwin sprites))
-       (set! (-> gwin sprites) (SCM_LIST1 sprite)))
-      (else
-       (pair-for-each (lambda (pair)
-                        (cond
-                         ((> (-> (GRV_SPRITE_PTR (SCM_CAR pair)) z) (-> (GRV_SPRITE_PTR sprite) z))
-                          (SCM_SET_CDR pair (Scm_Cons (SCM_CAR pair) (SCM_CDR pair)))
-                          (SCM_SET_CAR pair sprite)
-                          (break))
-                         ((SCM_NULLP (SCM_CDR pair))
-                          (SCM_SET_CDR pair (Scm_Cons sprite SCM_NIL))
-                          (break))))
-                      (-> gwin sprites))))))
-
- (define-cfn %make-sprite (window::ScmObj
-                           image::ScmObj
-                           center-x::double
-                           center-y::double
-                           z::double
-                           rect::ScmObj
-                           angle::double
-                           zoom_x::double
-                           zoom_y::double
-                           visible::bool)
-   (unless (GRV_WINDOW_P window)
-     (Scm_Error "window must be <graviton-window>, but got %S" window))
-   (unless (or (SCM_FALSEP image)
-               (GRV_IMAGE_P image))
-     (Scm_Error "image mush be <graviton-image> or #f, but got %S" image))
-   (unless (and (SCM_LISTP rect)
-                (== (Scm_Length rect) 4)
-                (SCM_INTP (Scm_ListRef rect 0 SCM_UNBOUND))
-                (SCM_INTP (Scm_ListRef rect 1 SCM_UNBOUND))
-                (SCM_INTP (Scm_ListRef rect 2 SCM_UNBOUND))
-                (SCM_INTP (Scm_ListRef rect 3 SCM_UNBOUND)))
-     (Scm_Error "rect must be (x y w h), but got %S" rect))
-   (let* ((sprite::GrvSprite* (SCM_NEW (.type GrvSprite)))
-          (flip::SDL_RendererFlip))
-     (cond
-      ((and (< zoom_x 0) (< zoom_y 0))
-       (set! zoom_x (- zoom_x)
-             zoom_y (- zoom_y)
-             angle (+ angle 180)
-             flip SDL_FLIP_NONE))
-      ((< zoom_x 0)
-       (set! zoom_x (- zoom_x)
-             flip SDL_FLIP_VERTICAL))
-      ((< zoom_y 0)
-       (set! zoom_y (- zoom_y)
-             flip SDL_FLIP_HORIZONTAL))
-      (else
-       (set! flip SDL_FLIP_NONE)))
-     (set! (-> sprite window) window
-           (-> sprite image) image
-           (-> sprite center_x) center-x
-           (-> sprite center_y) center-y
-           (-> sprite z) z
-           (ref (-> sprite srcrect) x) (SCM_INT_VALUE (Scm_ListRef rect 0 (SCM_MAKE_INT 0)))
-           (ref (-> sprite srcrect) y) (SCM_INT_VALUE (Scm_ListRef rect 1 (SCM_MAKE_INT 0)))
-           (ref (-> sprite srcrect) w) (SCM_INT_VALUE (Scm_ListRef rect 2 (SCM_MAKE_INT 0)))
-           (ref (-> sprite srcrect) h) (SCM_INT_VALUE (Scm_ListRef rect 3 (SCM_MAKE_INT 0)))
-           (-> sprite angle) angle
-           (-> sprite zoom_x) zoom_x
-           (-> sprite zoom_y) zoom_y
-           (-> sprite flip) flip
-           (-> sprite visible) visible)
-     (let* ((sprite-obj (MAKE_GRV_SPRITE sprite)))
-       (Scm_RegisterFinalizer sprite-obj finalize-sprite NULL)
-       (insert-window-sprite sprite-obj)
-       (return sprite-obj))))
- )  ;; end of inline-stub
+  (define-cfn %make-sprite (window::ScmObj
+                            image::ScmObj
+                            center-x::double
+                            center-y::double
+                            z::double
+                            rect::ScmObj
+                            angle::double
+                            zoom_x::double
+                            zoom_y::double
+                            visible::bool)
+    (unless (GRV_WINDOW_P window)
+      (Scm_Error "window must be <graviton-window>, but got %S" window))
+    (unless (or (SCM_FALSEP image)
+                (GRV_IMAGE_P image))
+      (Scm_Error "image must be <graviton-image> or #f, but got %S" image))
+    (unless (and (SCM_LISTP rect)
+                 (== (Scm_Length rect) 4)
+                 (SCM_INTP (Scm_ListRef rect 0 SCM_UNBOUND))
+                 (SCM_INTP (Scm_ListRef rect 1 SCM_UNBOUND))
+                 (SCM_INTP (Scm_ListRef rect 2 SCM_UNBOUND))
+                 (SCM_INTP (Scm_ListRef rect 3 SCM_UNBOUND)))
+      (Scm_Error "rect must be (x y w h), but got %S" rect))
+    (let* ((sprite::GrvSprite* (SCM_NEW (.type GrvSprite)))
+           (flip::SDL_RendererFlip))
+      (cond
+        ((and (< zoom_x 0) (< zoom_y 0))
+         (set! zoom_x (- zoom_x)
+               zoom_y (- zoom_y)
+               angle (+ angle 180)
+               flip SDL_FLIP_NONE))
+        ((< zoom_x 0)
+         (set! zoom_x (- zoom_x)
+               flip SDL_FLIP_VERTICAL))
+        ((< zoom_y 0)
+         (set! zoom_y (- zoom_y)
+               flip SDL_FLIP_HORIZONTAL))
+        (else
+         (set! flip SDL_FLIP_NONE)))
+      (set! (-> sprite window) window
+            (-> sprite image) image
+            (-> sprite center_x) center-x
+            (-> sprite center_y) center-y
+            (-> sprite z) z
+            (ref (-> sprite srcrect) x) (SCM_INT_VALUE (Scm_ListRef rect 0 (SCM_MAKE_INT 0)))
+            (ref (-> sprite srcrect) y) (SCM_INT_VALUE (Scm_ListRef rect 1 (SCM_MAKE_INT 0)))
+            (ref (-> sprite srcrect) w) (SCM_INT_VALUE (Scm_ListRef rect 2 (SCM_MAKE_INT 0)))
+            (ref (-> sprite srcrect) h) (SCM_INT_VALUE (Scm_ListRef rect 3 (SCM_MAKE_INT 0)))
+            (-> sprite angle) angle
+            (-> sprite zoom_x) zoom_x
+            (-> sprite zoom_y) zoom_y
+            (-> sprite flip) flip
+            (-> sprite visible) visible)
+      (unless (SCM_FALSEP image)
+        (retain-texture window (GRV_IMAGE_PTR image)))
+      (let* ((sprite-obj (MAKE_GRV_SPRITE sprite)))
+        (Scm_RegisterFinalizer sprite-obj finalize-sprite NULL)
+        (insert-window-sprite sprite-obj)
+        (return sprite-obj))))
+  )  ;; end of inline-stub
 
 (inline-stub
   (define-cfn sign (a::int)
@@ -792,6 +895,9 @@
 
   (define-cfn update-rect (gimage::GrvImage* x::int y::int w::int h::int)
     ::void
+    (when (SCM_NULLP (-> gimage texture_alist))
+      (return))
+
     (let* ((rect::SDL_Rect* (& (-> gimage update_rect))))
       (cond
         ((SDL_RectEmpty rect)
@@ -801,7 +907,9 @@
                (-> rect h) h))
         (else
          (let* ((rect-a::SDL_Rect)
-                (rect-b::SDL_Rect))
+                (rect-b::SDL_Rect)
+                (rect-c::SDL_Rect)
+                (rect-x::SDL_Rect))
            (set! (ref rect-a x) (-> rect x)
                  (ref rect-a y) (-> rect y)
                  (ref rect-a w) (-> rect w)
@@ -809,8 +917,13 @@
                  (ref rect-b x) x
                  (ref rect-b y) y
                  (ref rect-b w) w
-                 (ref rect-b h) h)
-           (SDL_UnionRect (& rect-a) (& rect-b) (& (-> gimage update_rect))))))))
+                 (ref rect-b h) h
+                 (ref rect-c x) 0
+                 (ref rect-c y) 0
+                 (ref rect-c w) (-> gimage surface w)
+                 (ref rect-c h) (-> gimage surface h))
+           (SDL_UnionRect (& rect-a) (& rect-b) (& rect-x))
+           (SDL_IntersectRect (& rect-c) (& rect-x) (& (-> gimage update_rect))))))))
 
   "
 typedef enum {
@@ -1078,16 +1191,26 @@ typedef enum {
             (-> param bottom) ey)))
   )  ;; end of inline-stub
 
-(define-cproc set-window-coordinate! (gwin::<graviton-window> x0::<double> y0::<double> x1::<double> y1::<double>)
+(define-cproc pixel-size (window-or-image)
+  ::<double>
+  (cond
+    ((GRV_IMAGE_P window-or-image)
+     (return (image-pixel-size (GRV_IMAGE_PTR window-or-image))))
+    ((GRV_WINDOW_P window-or-image)
+     (return (window-pixel-size (GRV_WINDOW_PTR window-or-image))))
+    (else
+     (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
+
+(define-cproc set-window-border! (gwin::<graviton-window> top::<double> right::<double> bottom::<double> left::<double>)
   ::<void>
   (let* ((width::int)
          (height::int))
     (SDL_GetWindowSize (-> gwin window) (& width) (& height))
-    (compute-transform-param (& (-> gwin param)) width height x0 y0 x1 y1)))
+    (compute-transform-param (& (-> gwin param)) width height left top right bottom)))
 
-(define-cproc set-image-coordinate! (gimage::<graviton-image> x0::<double> y0::<double> x1::<double> y1::<double>)
+(define-cproc set-image-border! (gimage::<graviton-image> top::<double> right::<double> bottom::<double> left::<double>)
   ::<void>
-  (compute-transform-param (& (-> gimage param)) (-> gimage surface w) (-> gimage surface h) x0 y0 x1 y1))
+  (compute-transform-param (& (-> gimage param)) (-> gimage surface w) (-> gimage surface h) left top right bottom))
 
 (define-cproc create-image (w::<int> h::<int>)
   (return (%create-image w h)))
@@ -1104,7 +1227,7 @@ typedef enum {
       (SDL_FreeSurface img-surface)
       (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
       (set! (-> image surface) surface
-            (-> image texture) NULL
+            (-> image texture_alist) SCM_NIL
             (ref (-> image update_rect) x) 0
             (ref (-> image update_rect) y) 0
             (ref (-> image update_rect) w) 0
@@ -1223,7 +1346,7 @@ typedef enum {
   ::<void>
   (unless (or (SCM_FALSEP image)
               (GRV_IMAGE_P image))
-    (Scm_Error "image mush be <graviton-image> or #f, but got %S" image))
+    (Scm_Error "image must be <graviton-image> or #f, but got %S" image))
   (unless (and (SCM_LISTP rect)
                (== (Scm_Length rect) 4)
                (SCM_INTP (Scm_ListRef rect 0 SCM_UNBOUND))
@@ -1231,6 +1354,10 @@ typedef enum {
                (SCM_INTP (Scm_ListRef rect 2 SCM_UNBOUND))
                (SCM_INTP (Scm_ListRef rect 3 SCM_UNBOUND)))
     (Scm_Error "rect must be (x y w h), but got %S" rect))
+  (unless (SCM_FALSEP (-> sprite image))
+    (release-texture (-> sprite window) (GRV_IMAGE_PTR (-> sprite image))))
+  (unless (SCM_FALSEP image)
+    (retain-texture (-> sprite window) (GRV_IMAGE_PTR image)))
   (set! (-> sprite image) image
         (ref (-> sprite srcrect) x) (SCM_INT_VALUE (Scm_ListRef rect 0 (SCM_MAKE_INT 0)))
         (ref (-> sprite srcrect) y) (SCM_INT_VALUE (Scm_ListRef rect 1 (SCM_MAKE_INT 0)))
@@ -1327,6 +1454,7 @@ typedef enum {
   (set! default_handler proc))
 
 (define-cproc run-event-loop ()
+  ::<void>
   (when running-event-loop
     (return))
 
@@ -1475,6 +1603,12 @@ typedef enum {
   (x point-x)
   (y point-y))
 
+(define (window? obj)
+  (is-a? obj <graviton-window>))
+
+(define (image? obj)
+  (is-a? obj <graviton-image>))
+
 (define (handle-events window handler)
   (shift cont (set-window-proc! window
                                 (lambda ()
@@ -1518,6 +1652,40 @@ typedef enum {
                (win-h (border-height win))
                (zoom (min (/. win-w img-w) (/. win-h img-h))))
           (put-image win image (center-x win) (center-y win) :zoom-x zoom :zoom-y zoom))))))
+
+(define (set-border! window-or-image v0 :optional (v1 #f) (v2 #f) (v3 #f))
+  (let ((top #f)
+        (bottom #f)
+        (left #f)
+        (right #f))
+    (cond
+      ((not v1)                         ; # of args = 1
+       (set! top v0)
+       (set! right v0)
+       (set! bottom (- v0))
+       (set! left (- v0)))
+      ((not v2)                         ; # of args = 2
+       (set! top v0)
+       (set! right v1)
+       (set! bottom (- v0))
+       (set! left (- v1)))
+      ((not v3)                         ; # of args = 3
+       (set! top v0)
+       (set! right v1)
+       (set! bottom v2)
+       (set! left (- v1)))
+      (else                             ; # of args = 4
+       (set! top v0)
+       (set! right v1)
+       (set! bottom v2)
+       (set! left v3)))
+    (cond
+      ((window? window-or-image)
+       (set-window-border! window-or-image top right bottom left))
+      ((image? window-or-image)
+       (set-image-border! window-or-image top right bottom left))
+      (else
+       (errorf "<graviton-window> or <graviton-image> required, but got %S" window-or-image)))))
 
 (define-method set-coordinate! ((window <graviton-window>)
                                 (x0 <real>)
@@ -1577,14 +1745,126 @@ typedef enum {
                  rect)
     (make-sprite window image center-x center-y z rect angle zoom-x zoom-y visible)))
 
-(define (draw-rect image point0 point1 color :key (fill? #f))
-  (%draw-rect image point0 point1 color fill?))
+(define (draw-pixel image point color :key (thickness 0))
+  (cond
+    ((= thickness 0)
+     (draw-rect image point point color))
+    (else
+     (draw-circle image point (/. thickness 2) color :fill? #t))))
 
-(define (draw-line image points color)
-  (%draw-line image points color))
+(define (draw-rect image point0 point1 color :key (fill? #f) (thickness 0))
+  (cond
+    ((= thickness 0)
+     (%draw-rect image point0 point1 color fill?))
+    (else
+     (let ((x0 (point-x point0))
+           (y0 (point-y point0))
+           (x1 (point-x point1))
+           (y1 (point-y point1)))
+       (draw-polygon image
+                     (list (make-point x0 y0)
+                           (make-point x0 y1)
+                           (make-point x1 y1)
+                           (make-point x1 y0))
+                     color
+                     :fill? fill?
+                     :thinkness thickness)))))
 
-(define (draw-polygon image points color :key (fill? #f))
-  (%draw-polygon image points color fill?))
+(define (draw-line image points color :key (thickness 0))
+  (cond
+    ((= thickness 0)
+     (%draw-line image points color))
+    ((null? points)
+     #f)
+    (else
+     (draw-pixel image (car points) color :thickness thickness)
+     (let loop ((point0 (car points))
+                (points (cdr points)))
+       (cond
+         ((null? points)
+          #f)
+         ((< (abs (- (point-y point0) (point-y (car points)))) (pixel-size image))
+          (let* ((x0 (point-x point0))
+                 (y0 (point-y point0))
+                 (x1 (point-x (car points)))
+                 (y1 (point-y (car points)))
+                 (x00 x0)
+                 (x01 x0)
+                 (x10 x1)
+                 (x11 x1)
+                 (d (/. thickness 2))
+                 (y00 (- y0 d))
+                 (y01 (+ y0 d))
+                 (y10 (- y1 d))
+                 (y11 (+ y1 d)))
+            (draw-polygon image
+                          (list (make-point x00 y00)
+                                (make-point x01 y01)
+                                (make-point x11 y11)
+                                (make-point x10 y10))
+                          color
+                          :fill? #t)
+            (draw-pixel image (make-point x1 y1) color :thickness thickness)
+            (loop (car points) (cdr points))))
+         ((< (abs (- (point-x point0) (point-x (car points)))) (pixel-size image))
+          (let* ((x0 (point-x point0))
+                 (y0 (point-y point0))
+                 (x1 (point-x (car points)))
+                 (y1 (point-y (car points)))
+                 (d (/. thickness 2))
+                 (x00 (- x0 d))
+                 (x01 (+ x0 d))
+                 (x10 (- x1 d))
+                 (x11 (+ x1 d))
+                 (y00 y0)
+                 (y01 y0)
+                 (y10 y1)
+                 (y11 y1))
+            (draw-polygon image
+                          (list (make-point x00 y00)
+                                (make-point x01 y01)
+                                (make-point x11 y11)
+                                (make-point x10 y10))
+                          color
+                          :fill? #t)
+            (draw-pixel image (make-point x1 y1) color :thickness thickness)
+            (loop (car points) (cdr points))))
+         (else
+          (let* ((x0 (point-x point0))
+                 (y0 (point-y point0))
+                 (x1 (point-x (car points)))
+                 (y1 (point-y (car points)))
+                 (a (/. (- y0 y1) (- x0 x1)))
+                 (c (* thickness (sqrt (/. (* a a) (+ (* a a) 1))) 0.5))
+                 (x00 (- x0 c))
+                 (x01 (+ x0 c))
+                 (x10 (- x1 c))
+                 (x11 (+ x1 c))
+                 (y00 (+ (* (/. -1 a) (- x00 x0)) y0))
+                 (y01 (+ (* (/. -1 a) (- x01 x0)) y0))
+                 (y10 (+ (* (/. -1 a) (- x10 x1)) y1))
+                 (y11 (+ (* (/. -1 a) (- x11 x1)) y1)))
+            (draw-polygon image
+                          (list (make-point x00 y00)
+                                (make-point x01 y01)
+                                (make-point x11 y11)
+                                (make-point x10 y10))
+                          color
+                          :fill? #t)
+            (draw-pixel image (make-point x1 y1) color :thickness thickness)
+            (loop (car points) (cdr points))))))
+     )))
+
+(define (draw-polygon image points color :key (fill? #f) (thickness 0))
+  (cond
+    ((= thickness 0)
+     (%draw-polygon image points color fill?))
+    ((null? points)
+     #f)
+    (else
+     (draw-line image (cons (last points) points) color :thickness thickness)
+     (when fill?
+       (%draw-polygon image points color #t)))))
 
 (define (draw-circle image
                      center-point
@@ -1596,7 +1876,8 @@ typedef enum {
                      (radius-ratio 1.0)
                      (rotate 0)
                      (fill? #f)
-                     (draw-radius? (if angle #t #f)))
+                     (draw-radius? (if angle #t #f))
+                     (thickness 0))
   (let ((center-x (point-x center-point))
         (center-y (point-y center-point)))
     (define rotate-point
@@ -1610,7 +1891,7 @@ typedef enum {
             (make-point (+ (* m00 x1) (* m01 y1) center-x)
                         (+ (* m10 x1) (* m11 y1) center-y))))))
 
-    (let ((dt (/ pi/2 radius))
+    (let ((dt (/ pi/2 (/ radius (pixel-size image))))
           (et (+ start (or angle (* 2 pi)))))
       (let loop ((t start)
                  (points (if (or draw-radius?
@@ -1622,8 +1903,8 @@ typedef enum {
            (let ((x (+ center-x (* radius (cos et))))
                  (y (+ center-y (* (* radius radius-ratio) (sin et)))))
              (if (or draw-radius? fill?)
-                 (draw-polygon image (cons (rotate-point x y) points) color :fill? fill?)
-                 (draw-line image (cons (rotate-point x y) points) color))))
+                 (draw-polygon image (cons (rotate-point x y) points) color :fill? fill? :thickness thickness)
+                 (draw-line image (cons (rotate-point x y) points) color :thickness thickness))))
           (else
            (let ((x (+ center-x (* radius (cos t))))
                  (y (+ center-y (* (* radius radius-ratio) (sin t)))))
