@@ -88,6 +88,8 @@
           rgb
           rgba
           color
+
+          message-box
           ))
 
 (select-module graviton)
@@ -1596,6 +1598,21 @@ typedef enum {
            (scratch-fill-border! area)
            (fill-inside gimage area color)))))))
 
+(define-cproc %message-box (title::<const-cstring> message::<const-cstring> message-type)
+  ::<void>
+  (let* ((flags::Uint32))
+    (cond
+      ((SCM_EQ message-type 'info)
+       (set! flags SDL_MESSAGEBOX_INFORMATION))
+      ((SCM_EQ message-type 'warning)
+       (set! flags SDL_MESSAGEBOX_WARNING))
+      ((SCM_EQ message-type 'error)
+       (set! flags SDL_MESSAGEBOX_ERROR))
+      (else
+       (Scm_Error "type must be info, warning or error, but got %S" message-type)))
+    (when (< (SDL_ShowSimpleMessageBox flags title message NULL) 0)
+      (Scm_Error "SDL_ShowSimpleMessageBox failed: %s" (SDL_GetError)))))
+
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
 
 (define-record-type (<point> (pseudo-rtd <list>))
@@ -1955,3 +1972,6 @@ typedef enum {
       (else
        (logior a
                (logand #xffffff00))))))
+
+(define (message-box title message :key (type 'info))
+  (%message-box title message type))
