@@ -1046,24 +1046,24 @@ typedef enum {
                 (dy::double (/ (cast double ly) (cast double lx)))
                 (ay::double (+ y dy)))
            (loop
-             (let* ((rect::SDL_Rect))
-               (set! (ref rect x) x
-                     (ref rect y) y
-                     (ref rect w) 1
-                     (ref rect h) (?: (== x end-x)
-                                      (+ (- end-y y) 1)
-                                      (cast int (round (- ay y)))))
-               (cond
-                 (area
-                  (scratch-fill-rect! area (& rect)))
-                 (else
-                  (when (!= (SDL_FillRect surface (& rect) color) 0)
-                    (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))))
-               (when (== x end-x)
-                 (break))
-               (set! x (+ x dx)
-                     y (+ y (ref rect h))
-                     ay (+ ay dy))))))
+            (let* ((rect::SDL_Rect))
+              (set! (ref rect x) x
+                    (ref rect y) y
+                    (ref rect w) 1
+                    (ref rect h) (?: (== x end-x)
+                                     (+ (- end-y y) 1)
+                                     (cast int (round (- ay y)))))
+              (cond
+                (area
+                 (scratch-fill-rect! area (& rect)))
+                (else
+                 (when (!= (SDL_FillRect surface (& rect) color) 0)
+                   (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))))
+              (when (== x end-x)
+                (break))
+              (set! x (+ x dx)
+                    y (+ y (ref rect h))
+                    ay (+ ay dy))))))
         (else
          (let* ((x::int (?: (< x0 x1) x0 x1))
                 (end-x::int (?: (< x0 x1) x1 x0))
@@ -1073,24 +1073,24 @@ typedef enum {
                 (end-y::int (?: (< x0 x1) y1 y0))
                 (dy::int (sign (- end-y y))))
            (loop
-             (let* ((rect::SDL_Rect))
-               (set! (ref rect x) x
-                     (ref rect y) y
-                     (ref rect w) (?: (== y end-y)
-                                      (+ (- end-x x) 1)
-                                      (cast int (round (- ax x))))
-                     (ref rect h) 1)
-               (cond
-                 (area
-                  (scratch-fill-rect! area (& rect)))
-                 (else
-                  (when (!= (SDL_FillRect surface (& rect) color) 0)
-                    (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))))
-               (when (== y end-y)
-                 (break))
-               (set! x (+ x (ref rect w))
-                     y (+ y dy)
-                     ax (+ ax dx))))))))
+            (let* ((rect::SDL_Rect))
+              (set! (ref rect x) x
+                    (ref rect y) y
+                    (ref rect w) (?: (== y end-y)
+                                     (+ (- end-x x) 1)
+                                     (cast int (round (- ax x))))
+                    (ref rect h) 1)
+              (cond
+                (area
+                 (scratch-fill-rect! area (& rect)))
+                (else
+                 (when (!= (SDL_FillRect surface (& rect) color) 0)
+                   (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))))
+              (when (== y end-y)
+                (break))
+              (set! x (+ x (ref rect w))
+                    y (+ y dy)
+                    ax (+ ax dx))))))))
     (update-rect gimage (?: (< x0 x1) x0 x1) (?: (< y0 y1) y0 y1) (+ (abs (- x0 x1)) 1) (+ (abs (- y0 y1)) 1)))
   )  ;; end of inline-stub
 
