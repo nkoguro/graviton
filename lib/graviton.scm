@@ -90,6 +90,8 @@
           color
 
           message-box
+
+          call-on-main-thread
           ))
 
 (select-module graviton)
@@ -158,9 +160,18 @@
                                h::int
                                data::char*)))
 
+  (define-ctype EvalPacketHolder::(.struct
+                                   (lock::SDL_mutex*
+                                    cond::SDL_cond*
+                                    eval_packet::ScmEvalPacket*)))
+
+  "static SDL_threadID main_thread_id;"
   "static ScmObj grv_windows = SCM_NIL;"
   "static bool running_event_loop = false;"
   "static ScmObj default_handler = SCM_FALSE;"
+  "static Uint32 graviton_event;"
+
+  (.define GRV_CALL_EVENT_CODE 1)
 
   (define-cptr <graviton-window> :private
     "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
@@ -191,10 +202,17 @@
       (Scm_Error "Mix_OpenAudio failed: %s" (Mix_GetError)))
     (IMG_Init (logior IMG_INIT_JPG IMG_INIT_PNG IMG_INIT_TIF))
 
-    (Scm_AddCleanupHandler teardown-libs NULL))
+    (Scm_AddCleanupHandler teardown-libs NULL)
+
+    (let* ((event-type::Uint32 (SDL_RegisterEvents 1)))
+      (when (== event-type #xffffffff)
+        (Scm_Error "SDL_RegisterEvents failed: %s" (SDL_GetError)))
+      (set! graviton_event event-type))
+
+    (set! main_thread_id (SDL_ThreadID)))
 
   (initcode
-    (initialize-libs))
+   (initialize-libs))
   )  ;; end of inline-stub
 
 (inline-stub
@@ -699,7 +717,18 @@
                                              (?: (== (ref sdl-event type) SDL_DROPBEGIN) 'drop-begin 'drop-complete)
                                              (Scm_MakeIntegerU (ref sdl-event drop timestamp)))
                                   events))
-           (SDL_free (ref sdl-event drop file)))))
+           (SDL_free (ref sdl-event drop file)))
+          (else
+           (cond
+             ((== (ref sdl-event type) graviton_event)
+              (case (ref sdl-event user code)
+                ((GRV_CALL_EVENT_CODE)
+                 (let* ((proc (cast ScmObj (ref sdl-event user data1)))
+                        (packet-holder::EvalPacketHolder* (cast EvalPacketHolder* (ref sdl-event user data2))))
+                   (SDL_LockMutex (-> packet-holder lock))
+                   (Scm_Apply proc SCM_NIL (-> packet-holder eval_packet))
+                   (SDL_CondSignal (-> packet-holder cond))
+                   (SDL_UnlockMutex (-> packet-holder lock))))))))))
       (return events)))
 
   ;; events must be reverse chronological order.
@@ -1613,6 +1642,39 @@ typedef enum {
        (Scm_Error "type must be info, warning or error, but got %S" message-type)))
     (when (< (SDL_ShowSimpleMessageBox flags title message NULL) 0)
       (Scm_Error "SDL_ShowSimpleMessageBox failed: %s" (SDL_GetError)))))
+
+(define-cproc call-on-main-thread (proc)
+  ::<void>
+  (let* ((packet::ScmEvalPacket* (SCM_NEW (.type ScmEvalPacket))))
+    (cond
+      ((== main_thread_id (SDL_ThreadID))
+       (Scm_Apply proc SCM_NIL packet))
+      (else
+       (let* ((packet-holder::EvalPacketHolder* (SCM_NEW (.type EvalPacketHolder)))
+              (event::SDL_Event))
+         (set! (-> packet-holder lock) (SDL_CreateMutex)
+               (-> packet-holder cond) (SDL_CreateCond)
+               (-> packet-holder eval_packet) packet)
+         (SDL_zero event)
+         (set! (ref event type) graviton_event
+               (ref event user code) GRV_CALL_EVENT_CODE
+               (ref event user data1) proc
+               (ref event user data2) packet-holder)
+         (SDL_LockMutex (-> packet-holder lock))
+         (SDL_PushEvent (& event))
+         (SDL_CondWait (-> packet-holder cond) (-> packet-holder lock))
+         (SDL_UnlockMutex (-> packet-holder lock))
+         (SDL_DestroyCond (-> packet-holder cond))
+         (SDL_DestroyMutex (-> packet-holder lock)))))
+    (cond
+      ((SCM_FALSEP (-> packet exception))
+       (let* ((i::int)
+              (args SCM_NIL))
+         (for ((set! i (- (-> packet numResults) 1)) (<= 0 i) (pre-- i))
+           (set! args (Scm_Cons (aref (-> packet results) i) args)))
+         (SCM_RETURN (Scm_Values args))))
+      (else
+       (Scm_Raise (-> packet exception) 0)))))
 
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
 
