@@ -1449,6 +1449,7 @@ typedef enum {
   (return (-> gwin events)))
 
 (define-cproc clear-window-sprites! (gwin::<graviton-window>)
+  ::<void>
   (set! (-> gwin sprites) SCM_NIL))
 
 (define-cproc set-default-handler! (proc)
