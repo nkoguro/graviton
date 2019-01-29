@@ -316,7 +316,7 @@
         (Scm_Error "SDL_LockSurface failed: %s" (SDL_GetError)))
       (when (< (SDL_LockTexture texture rect (& pixels) (& pitch)) 0)
         (Scm_Error "SDL_LockTexture failed: %s" (SDL_GetError)))
-      (for ((set! y (-> rect y)) (< y (-> rect h)) (pre++ y))
+      (for ((set! y (-> rect y)) (< y (+ (-> rect y) (-> rect h))) (pre++ y))
         (memcpy (+ pixels (* (- y (-> rect y)) pitch))
                 (+ (-> surface pixels) (* y (-> surface pitch)) (* (-> rect x) (-> surface format BytesPerPixel)))
                 pitch))
