@@ -36,6 +36,8 @@
   (use gauche.parameter)
   (use gauche.partcont)
   (use gauche.record)
+  (use gauche.selector)
+  (use gauche.threads)
   (use math.const)
   (use util.match)
 
@@ -92,6 +94,8 @@
           message-box
 
           call-on-main-thread
+
+          graviton-read-eval-print-loop
           ))
 
 (select-module graviton)
@@ -725,10 +729,17 @@
                 ((GRV_CALL_EVENT_CODE)
                  (let* ((proc (cast ScmObj (ref sdl-event user data1)))
                         (packet-holder::EvalPacketHolder* (cast EvalPacketHolder* (ref sdl-event user data2))))
-                   (SDL_LockMutex (-> packet-holder lock))
-                   (Scm_Apply proc SCM_NIL (-> packet-holder eval_packet))
-                   (SDL_CondSignal (-> packet-holder cond))
-                   (SDL_UnlockMutex (-> packet-holder lock))))))))))
+                   (cond
+                     (packet-holder
+                      (SDL_LockMutex (-> packet-holder lock))
+                      (Scm_Apply proc SCM_NIL (-> packet-holder eval_packet))
+                      (SDL_CondSignal (-> packet-holder cond))
+                      (SDL_UnlockMutex (-> packet-holder lock)))
+                     (else
+                      (let* ((packet::ScmEvalPacket))
+                        (Scm_Apply proc SCM_NIL (& packet))
+                        (unless (SCM_FALSEP (ref packet exception))
+                          (Scm_Raise (ref packet exception) 0)))))))))))))
       (return events)))
 
   ;; events must be reverse chronological order.
@@ -1491,11 +1502,23 @@ typedef enum {
     (return))
 
   (set! running-event-loop true)
+  (let* ((packet::ScmEvalPacket))
+    (Scm_EvalCString "(run-repl-if-needed)"
+                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))
+                     (& packet))
+    (unless (SCM_FALSEP (ref packet exception))
+      (Scm_Raise (ref packet exception) 0)))
   (SDL_StartTextInput)
   (while (not (SCM_NULLP grv_windows))
     (run-window-handlers)
     (update-window-contents))
-  (set! running-event-loop false))
+  (set! running-event-loop false)
+  (let* ((packet::ScmEvalPacket))
+    (Scm_EvalCString "(close-all-repl)"
+                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))
+                     (& packet))
+    (unless (SCM_FALSEP (ref packet exception))
+      (Scm_Raise (ref packet exception) 0))))
 
 (define-cproc close-window (gwin::<graviton-window>)
   ::<void>
@@ -1643,12 +1666,21 @@ typedef enum {
     (when (< (SDL_ShowSimpleMessageBox flags title message NULL) 0)
       (Scm_Error "SDL_ShowSimpleMessageBox failed: %s" (SDL_GetError)))))
 
-(define-cproc call-on-main-thread (proc)
+(define-cproc call-on-main-thread (proc :key (wait?::<boolean> #t))
   ::<void>
   (let* ((packet::ScmEvalPacket* (SCM_NEW (.type ScmEvalPacket))))
     (cond
       ((== main_thread_id (SDL_ThreadID))
        (Scm_Apply proc SCM_NIL packet))
+      ((not wait?)
+       (let* ((event::SDL_Event))
+         (SDL_zero event)
+         (set! (ref event type) graviton_event
+               (ref event user code) GRV_CALL_EVENT_CODE
+               (ref event user data1) proc
+               (ref event user data2) NULL)
+         (SDL_PushEvent (& event))
+         (return)))
       (else
        (let* ((packet-holder::EvalPacketHolder* (SCM_NEW (.type EvalPacketHolder)))
               (event::SDL_Event))
@@ -1826,125 +1858,132 @@ typedef enum {
     (make-sprite window image center-x center-y z rect angle zoom-x zoom-y visible)))
 
 (define (draw-point image point color :key (thickness 0))
-  (cond
-    ((= thickness 0)
-     (draw-rect image point point color))
-    (else
-     (draw-circle image point (/. thickness 2) color :fill? #t))))
+  (call-on-main-thread (lambda ()
+                         (cond
+                           ((= thickness 0)
+                            (draw-rect image point point color))
+                           (else
+                            (draw-circle image point (/. thickness 2) color :fill? #t))))
+                       :wait? #f))
 
 (define (draw-rect image point0 point1 color :key (fill? #f) (thickness 0))
-  (cond
-    ((= thickness 0)
-     (%draw-rect image point0 point1 color fill?))
-    (else
-     (let ((x0 (point-x point0))
-           (y0 (point-y point0))
-           (x1 (point-x point1))
-           (y1 (point-y point1)))
-       (draw-polygon image
-                     (list (make-point x0 y0)
-                           (make-point x0 y1)
-                           (make-point x1 y1)
-                           (make-point x1 y0))
-                     color
-                     :fill? fill?
-                     :thinkness thickness)))))
+  (call-on-main-thread (lambda ()
+                         (cond
+                           ((= thickness 0)
+                            (%draw-rect image point0 point1 color fill?))
+                           (else
+                            (let ((x0 (point-x point0))
+                                  (y0 (point-y point0))
+                                  (x1 (point-x point1))
+                                  (y1 (point-y point1)))
+                              (draw-polygon image
+                                            (list (make-point x0 y0)
+                                                  (make-point x0 y1)
+                                                  (make-point x1 y1)
+                                                  (make-point x1 y0))
+                                            color
+                                            :fill? fill?
+                                            :thinkness thickness)))))
+                       :wait? #f))
 
 (define (draw-line image points color :key (thickness 0))
-  (cond
-    ((= thickness 0)
-     (%draw-line image points color))
-    ((null? points)
-     #f)
-    (else
-     (draw-point image (car points) color :thickness thickness)
-     (let loop ((point0 (car points))
-                (points (cdr points)))
-       (cond
-         ((null? points)
-          #f)
-         ((< (abs (- (point-y point0) (point-y (car points)))) (pixel-size image))
-          (let* ((x0 (point-x point0))
-                 (y0 (point-y point0))
-                 (x1 (point-x (car points)))
-                 (y1 (point-y (car points)))
-                 (x00 x0)
-                 (x01 x0)
-                 (x10 x1)
-                 (x11 x1)
-                 (d (/. thickness 2))
-                 (y00 (- y0 d))
-                 (y01 (+ y0 d))
-                 (y10 (- y1 d))
-                 (y11 (+ y1 d)))
-            (draw-polygon image
-                          (list (make-point x00 y00)
-                                (make-point x01 y01)
-                                (make-point x11 y11)
-                                (make-point x10 y10))
-                          color
-                          :fill? #t)
-            (draw-point image (make-point x1 y1) color :thickness thickness)
-            (loop (car points) (cdr points))))
-         ((< (abs (- (point-x point0) (point-x (car points)))) (pixel-size image))
-          (let* ((x0 (point-x point0))
-                 (y0 (point-y point0))
-                 (x1 (point-x (car points)))
-                 (y1 (point-y (car points)))
-                 (d (/. thickness 2))
-                 (x00 (- x0 d))
-                 (x01 (+ x0 d))
-                 (x10 (- x1 d))
-                 (x11 (+ x1 d))
-                 (y00 y0)
-                 (y01 y0)
-                 (y10 y1)
-                 (y11 y1))
-            (draw-polygon image
-                          (list (make-point x00 y00)
-                                (make-point x01 y01)
-                                (make-point x11 y11)
-                                (make-point x10 y10))
-                          color
-                          :fill? #t)
-            (draw-point image (make-point x1 y1) color :thickness thickness)
-            (loop (car points) (cdr points))))
-         (else
-          (let* ((x0 (point-x point0))
-                 (y0 (point-y point0))
-                 (x1 (point-x (car points)))
-                 (y1 (point-y (car points)))
-                 (a (/. (- y0 y1) (- x0 x1)))
-                 (c (* thickness (sqrt (/. (* a a) (+ (* a a) 1))) 0.5))
-                 (x00 (- x0 c))
-                 (x01 (+ x0 c))
-                 (x10 (- x1 c))
-                 (x11 (+ x1 c))
-                 (y00 (+ (* (/. -1 a) (- x00 x0)) y0))
-                 (y01 (+ (* (/. -1 a) (- x01 x0)) y0))
-                 (y10 (+ (* (/. -1 a) (- x10 x1)) y1))
-                 (y11 (+ (* (/. -1 a) (- x11 x1)) y1)))
-            (draw-polygon image
-                          (list (make-point x00 y00)
-                                (make-point x01 y01)
-                                (make-point x11 y11)
-                                (make-point x10 y10))
-                          color
-                          :fill? #t)
-            (draw-point image (make-point x1 y1) color :thickness thickness)
-            (loop (car points) (cdr points))))))
-     )))
+  (call-on-main-thread (lambda ()
+                         (cond
+                           ((= thickness 0)
+                            (%draw-line image points color))
+                           ((null? points)
+                            #f)
+                           (else
+                            (draw-point image (car points) color :thickness thickness)
+                            (let loop ((point0 (car points))
+                                       (points (cdr points)))
+                              (cond
+                                ((null? points)
+                                 #f)
+                                ((< (abs (- (point-y point0) (point-y (car points)))) (pixel-size image))
+                                 (let* ((x0 (point-x point0))
+                                        (y0 (point-y point0))
+                                        (x1 (point-x (car points)))
+                                        (y1 (point-y (car points)))
+                                        (x00 x0)
+                                        (x01 x0)
+                                        (x10 x1)
+                                        (x11 x1)
+                                        (d (/. thickness 2))
+                                        (y00 (- y0 d))
+                                        (y01 (+ y0 d))
+                                        (y10 (- y1 d))
+                                        (y11 (+ y1 d)))
+                                   (draw-polygon image
+                                                 (list (make-point x00 y00)
+                                                       (make-point x01 y01)
+                                                       (make-point x11 y11)
+                                                       (make-point x10 y10))
+                                                 color
+                                                 :fill? #t)
+                                   (draw-point image (make-point x1 y1) color :thickness thickness)
+                                   (loop (car points) (cdr points))))
+                                ((< (abs (- (point-x point0) (point-x (car points)))) (pixel-size image))
+                                 (let* ((x0 (point-x point0))
+                                        (y0 (point-y point0))
+                                        (x1 (point-x (car points)))
+                                        (y1 (point-y (car points)))
+                                        (d (/. thickness 2))
+                                        (x00 (- x0 d))
+                                        (x01 (+ x0 d))
+                                        (x10 (- x1 d))
+                                        (x11 (+ x1 d))
+                                        (y00 y0)
+                                        (y01 y0)
+                                        (y10 y1)
+                                        (y11 y1))
+                                   (draw-polygon image
+                                                 (list (make-point x00 y00)
+                                                       (make-point x01 y01)
+                                                       (make-point x11 y11)
+                                                       (make-point x10 y10))
+                                                 color
+                                                 :fill? #t)
+                                   (draw-point image (make-point x1 y1) color :thickness thickness)
+                                   (loop (car points) (cdr points))))
+                                (else
+                                 (let* ((x0 (point-x point0))
+                                        (y0 (point-y point0))
+                                        (x1 (point-x (car points)))
+                                        (y1 (point-y (car points)))
+                                        (a (/. (- y0 y1) (- x0 x1)))
+                                        (c (* thickness (sqrt (/. (* a a) (+ (* a a) 1))) 0.5))
+                                        (x00 (- x0 c))
+                                        (x01 (+ x0 c))
+                                        (x10 (- x1 c))
+                                        (x11 (+ x1 c))
+                                        (y00 (+ (* (/. -1 a) (- x00 x0)) y0))
+                                        (y01 (+ (* (/. -1 a) (- x01 x0)) y0))
+                                        (y10 (+ (* (/. -1 a) (- x10 x1)) y1))
+                                        (y11 (+ (* (/. -1 a) (- x11 x1)) y1)))
+                                   (draw-polygon image
+                                                 (list (make-point x00 y00)
+                                                       (make-point x01 y01)
+                                                       (make-point x11 y11)
+                                                       (make-point x10 y10))
+                                                 color
+                                                 :fill? #t)
+                                   (draw-point image (make-point x1 y1) color :thickness thickness)
+                                   (loop (car points) (cdr points)))))))))
+                       :wait? #f))
 
 (define (draw-polygon image points color :key (fill? #f) (thickness 0))
-  (cond
-    ((= thickness 0)
-     (%draw-polygon image points color fill?))
-    ((null? points)
-     #f)
-    (else
-     (draw-line image (cons (last points) points) color :thickness thickness)
-     (when fill?
-       (%draw-polygon image points color #t)))))
+  (call-on-main-thread (lambda ()
+                         (cond
+                           ((= thickness 0)
+                            (%draw-polygon image points color fill?))
+                           ((null? points)
+                            #f)
+                           (else
+                            (draw-line image (cons (last points) points) color :thickness thickness)
+                            (when fill?
+                              (%draw-polygon image points color #t)))))
+                       :wait? #f))
 
 (define (draw-circle image
                      center-point
@@ -1958,37 +1997,39 @@ typedef enum {
                      (fill? #f)
                      (draw-radius? (if angle #t #f))
                      (thickness 0))
-  (let ((center-x (point-x center-point))
-        (center-y (point-y center-point)))
-    (define rotate-point
-      (let ((m00 (cos rotate))
-            (m01 (- (sin rotate)))
-            (m10 (sin rotate))
-            (m11 (cos rotate)))
-        (lambda (x y)
-          (let ((x1 (- x center-x))
-                (y1 (- y center-y)))
-            (make-point (+ (* m00 x1) (* m01 y1) center-x)
-                        (+ (* m10 x1) (* m11 y1) center-y))))))
+  (call-on-main-thread (lambda ()
+                         (let ((center-x (point-x center-point))
+                               (center-y (point-y center-point)))
+                           (define rotate-point
+                             (let ((m00 (cos rotate))
+                                   (m01 (- (sin rotate)))
+                                   (m10 (sin rotate))
+                                   (m11 (cos rotate)))
+                               (lambda (x y)
+                                 (let ((x1 (- x center-x))
+                                       (y1 (- y center-y)))
+                                   (make-point (+ (* m00 x1) (* m01 y1) center-x)
+                                               (+ (* m10 x1) (* m11 y1) center-y))))))
 
-    (let ((dt (/ pi/2 (/ radius (pixel-size image))))
-          (et (+ start (or angle (* 2 pi)))))
-      (let loop ((t start)
-                 (points (if (or draw-radius?
-                                 (and angle fill?))
-                             (list center-point)
-                             '())))
-        (cond
-          ((<= et t)
-           (let ((x (+ center-x (* radius (cos et))))
-                 (y (+ center-y (* (* radius radius-ratio) (sin et)))))
-             (if (or draw-radius? fill?)
-                 (draw-polygon image (cons (rotate-point x y) points) color :fill? fill? :thickness thickness)
-                 (draw-line image (cons (rotate-point x y) points) color :thickness thickness))))
-          (else
-           (let ((x (+ center-x (* radius (cos t))))
-                 (y (+ center-y (* (* radius radius-ratio) (sin t)))))
-             (loop (+ t dt) (cons (rotate-point x y) points)))))))))
+                           (let ((dt (/ pi/2 (/ radius (pixel-size image))))
+                                 (et (+ start (or angle (* 2 pi)))))
+                             (let loop ((t start)
+                                        (points (if (or draw-radius?
+                                                        (and angle fill?))
+                                                    (list center-point)
+                                                    '())))
+                               (cond
+                                 ((<= et t)
+                                  (let ((x (+ center-x (* radius (cos et))))
+                                        (y (+ center-y (* (* radius radius-ratio) (sin et)))))
+                                    (if (or draw-radius? fill?)
+                                        (draw-polygon image (cons (rotate-point x y) points) color :fill? fill? :thickness thickness)
+                                        (draw-line image (cons (rotate-point x y) points) color :thickness thickness))))
+                                 (else
+                                  (let ((x (+ center-x (* radius (cos t))))
+                                        (y (+ center-y (* (* radius radius-ratio) (sin t)))))
+                                    (loop (+ t dt) (cons (rotate-point x y) points)))))))))
+                       :wait? #f))
 
 (define (rgb r g b)
   (rgba r g b #xff))
@@ -2038,3 +2079,53 @@ typedef enum {
 
 (define (message-box title message :key (type 'info))
   (%message-box title message type))
+
+(define *repl-threads* '())
+(define *close-all-repl?* (atom #f))
+
+(define (is-interactive?)
+  (let ((gosh? (and (not (null? (command-line)))
+                    (equal? (values-ref (decompose-path (car (command-line))) 1) "gosh"))))
+    (and gosh? (find-module 'gauche.interactive))))
+
+(define (graviton-read-eval-print-loop in)
+  (let1 repl-thread (make-thread
+                      (lambda ()
+                        (let ((selector (make <selector>))
+                              (expr #f)
+                              (ready? #f))
+                          (define (read-sexpr)
+                            (set! ready? #f)
+                            (while (not ready?)
+                              (let1 count (selector-select selector 500000)
+                                (when (and (= count 0) (atom-ref *close-all-repl?*))
+                                  (set! expr (eof-object))
+                                  (set! ready? #t))))
+                            expr)
+                          (selector-add! selector
+                                         in
+                                         (lambda (port flag)
+                                           (set! expr (read in))
+                                           (set! ready? #t))
+                                         '(r))
+                          (selector-add! selector
+                                         in
+                                         (lambda (port flag)
+                                           (set! expr (eof-object))
+                                           (set! ready? #t))
+                                         '(x))
+                          ((with-module gauche.internal vm-set-current-module) (find-module 'user))
+                          ((global-variable-ref (find-module 'gauche.interactive) 'read-eval-print-loop) read-sexpr))))
+    (push! *repl-threads* repl-thread)
+    (thread-start! repl-thread)))
+
+(define (close-all-repl)
+  (atomic-update! *close-all-repl?* (^_ #t))
+  (unwind-protect
+      (for-each (^t (thread-join! t)) *repl-threads*)
+    (set! *repl-threads* '())))
+
+(define (run-repl-if-needed)
+  (when (is-interactive?)
+    (atomic-update! *close-all-repl?* (^_ #f))
+    (graviton-read-eval-print-loop (current-input-port))))
