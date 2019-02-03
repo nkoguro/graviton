@@ -112,62 +112,63 @@
              "stdbool.h"
              "stdio.h"
              "string.h")
+
+   (define-ctype TransformParam::(.struct
+                                  (m00::double
+                                   m01::double
+                                   m10::double
+                                   m11::double
+                                   x0::double
+                                   y0::double
+                                   left::double
+                                   top::double
+                                   right::double
+                                   bottom::double)))
+
+   (define-ctype GrvTexture::(.struct
+                              (texture::SDL_Texture*
+                               ref_count::int)))
+
+   (define-ctype GrvImage::(.struct
+                            (surface::SDL_Surface*
+                             update_rect::SDL_Rect
+                             param::TransformParam
+                             texture_alist)))
+
+   (define-ctype GrvSprite::(.struct
+                             (window
+                              image
+                              srcrect::SDL_Rect
+                              center_x::double
+                              center_y::double
+                              z::double
+                              angle::double
+                              zoom_x::double
+                              zoom_y::double
+                              flip::SDL_RendererFlip
+                              visible::bool)))
+
+   (define-ctype GrvWindow::(.struct
+                             (window::SDL_Window*
+                              renderer::SDL_Renderer*
+                              proc
+                              events
+                              sprites
+                              param::TransformParam)))
+
+   (define-ctype ScratchArea::(.struct
+                               (x::int
+                                y::int
+                                w::int
+                                h::int
+                                data::char*)))
+
+   (define-ctype EvalPacketHolder::(.struct
+                                    (lock::SDL_mutex*
+                                     cond::SDL_cond*
+                                     eval_packet::ScmEvalPacket*)))
+
    ) ;; end of declcode
-
-  (define-ctype TransformParam::(.struct
-                                 (m00::double
-                                  m01::double
-                                  m10::double
-                                  m11::double
-                                  x0::double
-                                  y0::double
-                                  left::double
-                                  top::double
-                                  right::double
-                                  bottom::double)))
-
-  (define-ctype GrvTexture::(.struct
-                             (texture::SDL_Texture*
-                              ref_count::int)))
-
-  (define-ctype GrvImage::(.struct
-                           (surface::SDL_Surface*
-                            update_rect::SDL_Rect
-                            param::TransformParam
-                            texture_alist)))
-
-  (define-ctype GrvSprite::(.struct
-                            (window
-                             image
-                             srcrect::SDL_Rect
-                             center_x::double
-                             center_y::double
-                             z::double
-                             angle::double
-                             zoom_x::double
-                             zoom_y::double
-                             flip::SDL_RendererFlip
-                             visible::bool)))
-
-  (define-ctype GrvWindow::(.struct
-                            (window::SDL_Window*
-                             renderer::SDL_Renderer*
-                             proc
-                             events
-                             sprites
-                             param::TransformParam)))
-
-  (define-ctype ScratchArea::(.struct
-                              (x::int
-                               y::int
-                               w::int
-                               h::int
-                               data::char*)))
-
-  (define-ctype EvalPacketHolder::(.struct
-                                   (lock::SDL_mutex*
-                                    cond::SDL_cond*
-                                    eval_packet::ScmEvalPacket*)))
 
   "static SDL_threadID main_thread_id;"
   "static ScmObj grv_windows = SCM_NIL;"
