@@ -271,24 +271,6 @@
           (-> param right) (cast double (- width 1))
           (-> param bottom) (cast double (- height 1))))
 
-  (define-cfn %create-image (w::int h::int)
-    ::ScmObj
-    (let* ((surface::SDL_Surface* (SDL_CreateRGBSurfaceWithFormat 0 w h 32 SDL_PIXELFORMAT_RGBA32))
-           (gimage::GrvImage* (SCM_NEW (.type GrvImage)))
-           (obj (MAKE_GRV_IMAGE gimage)))
-      (when (== surface NULL)
-        (Scm_Error "SDL_CreateRGBSurfaceWithFormat failed: %s" (SDL_GetError)))
-      (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
-      (set! (-> gimage surface) surface
-            (-> gimage texture_alist) SCM_NIL
-            (ref (-> gimage update_rect) x) 0
-            (ref (-> gimage update_rect) y) 0
-            (ref (-> gimage update_rect) w) 0
-            (ref (-> gimage update_rect) h) 0)
-      (init-transform-param (& (-> gimage param)) w h)
-      (Scm_RegisterFinalizer obj finalize-image NULL)
-      (return obj)))
-
   (define-cfn create-scratch-area (x::int y::int w::int h::int)
     ::ScratchArea*
     (let* ((area::ScratchArea* (SCM_NEW (.type ScratchArea))))
@@ -864,65 +846,6 @@
                              (SCM_SET_CDR pair (Scm_Cons sprite SCM_NIL))
                              (break))))
                         (-> gwin sprites))))))
-
-  (define-cfn %make-sprite (window::ScmObj
-                            image::ScmObj
-                            center-x::double
-                            center-y::double
-                            z::double
-                            rect::ScmObj
-                            angle::double
-                            zoom_x::double
-                            zoom_y::double
-                            visible::bool)
-    (unless (GRV_WINDOW_P window)
-      (Scm_Error "window must be <graviton-window>, but got %S" window))
-    (unless (or (SCM_FALSEP image)
-                (GRV_IMAGE_P image))
-      (Scm_Error "image must be <graviton-image> or #f, but got %S" image))
-    (unless (and (SCM_LISTP rect)
-                 (== (Scm_Length rect) 4)
-                 (SCM_INTP (Scm_ListRef rect 0 SCM_UNBOUND))
-                 (SCM_INTP (Scm_ListRef rect 1 SCM_UNBOUND))
-                 (SCM_INTP (Scm_ListRef rect 2 SCM_UNBOUND))
-                 (SCM_INTP (Scm_ListRef rect 3 SCM_UNBOUND)))
-      (Scm_Error "rect must be (x y w h), but got %S" rect))
-    (let* ((sprite::GrvSprite* (SCM_NEW (.type GrvSprite)))
-           (flip::SDL_RendererFlip))
-      (cond
-        ((and (< zoom_x 0) (< zoom_y 0))
-         (set! zoom_x (- zoom_x)
-               zoom_y (- zoom_y)
-               angle (+ angle 180)
-               flip SDL_FLIP_NONE))
-        ((< zoom_x 0)
-         (set! zoom_x (- zoom_x)
-               flip SDL_FLIP_VERTICAL))
-        ((< zoom_y 0)
-         (set! zoom_y (- zoom_y)
-               flip SDL_FLIP_HORIZONTAL))
-        (else
-         (set! flip SDL_FLIP_NONE)))
-      (set! (-> sprite window) window
-            (-> sprite image) image
-            (-> sprite center_x) center-x
-            (-> sprite center_y) center-y
-            (-> sprite z) z
-            (ref (-> sprite srcrect) x) (SCM_INT_VALUE (Scm_ListRef rect 0 (SCM_MAKE_INT 0)))
-            (ref (-> sprite srcrect) y) (SCM_INT_VALUE (Scm_ListRef rect 1 (SCM_MAKE_INT 0)))
-            (ref (-> sprite srcrect) w) (SCM_INT_VALUE (Scm_ListRef rect 2 (SCM_MAKE_INT 0)))
-            (ref (-> sprite srcrect) h) (SCM_INT_VALUE (Scm_ListRef rect 3 (SCM_MAKE_INT 0)))
-            (-> sprite angle) angle
-            (-> sprite zoom_x) zoom_x
-            (-> sprite zoom_y) zoom_y
-            (-> sprite flip) flip
-            (-> sprite visible) visible)
-      (unless (SCM_FALSEP image)
-        (retain-texture window (GRV_IMAGE_PTR image)))
-      (let* ((sprite-obj (MAKE_GRV_SPRITE sprite)))
-        (Scm_RegisterFinalizer sprite-obj finalize-sprite NULL)
-        (insert-window-sprite sprite-obj)
-        (return sprite-obj))))
   )  ;; end of inline-stub
 
 (inline-stub
@@ -1137,7 +1060,7 @@ typedef enum {
 
 (include "graviton/enum2sym.scm")
 
-(define-cproc %create-window (title::<const-cstring> size)
+(define-cproc make-window (title::<const-cstring> size)
   (let* ((width::int 0)
          (height::int 0)
          (flags::Uint32 0))
@@ -1256,7 +1179,21 @@ typedef enum {
   (compute-transform-param (& (-> gimage param)) (-> gimage surface w) (-> gimage surface h) left top right bottom))
 
 (define-cproc create-image (w::<int> h::<int>)
-  (return (%create-image w h)))
+  (let* ((surface::SDL_Surface* (SDL_CreateRGBSurfaceWithFormat 0 w h 32 SDL_PIXELFORMAT_RGBA32))
+         (gimage::GrvImage* (SCM_NEW (.type GrvImage)))
+         (obj (MAKE_GRV_IMAGE gimage)))
+    (when (== surface NULL)
+      (Scm_Error "SDL_CreateRGBSurfaceWithFormat failed: %s" (SDL_GetError)))
+    (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
+    (set! (-> gimage surface) surface
+          (-> gimage texture_alist) SCM_NIL
+          (ref (-> gimage update_rect) x) 0
+          (ref (-> gimage update_rect) y) 0
+          (ref (-> gimage update_rect) w) 0
+          (ref (-> gimage update_rect) h) 0)
+    (init-transform-param (& (-> gimage param)) w h)
+    (Scm_RegisterFinalizer obj finalize-image NULL)
+    (return obj)))
 
 (define-cproc load-image (filename::<const-cstring>)
   ::<graviton-image>
@@ -1383,7 +1320,54 @@ typedef enum {
                            zoom_x::<double>
                            zoom_y::<double>
                            visible::<boolean>)
-  (return (%make-sprite window image center-x center-y z rect angle zoom_x zoom_y visible)))
+  (unless (GRV_WINDOW_P window)
+    (Scm_Error "window must be <graviton-window>, but got %S" window))
+  (unless (or (SCM_FALSEP image)
+              (GRV_IMAGE_P image))
+    (Scm_Error "image must be <graviton-image> or #f, but got %S" image))
+  (unless (and (SCM_LISTP rect)
+               (== (Scm_Length rect) 4)
+               (SCM_INTP (Scm_ListRef rect 0 SCM_UNBOUND))
+               (SCM_INTP (Scm_ListRef rect 1 SCM_UNBOUND))
+               (SCM_INTP (Scm_ListRef rect 2 SCM_UNBOUND))
+               (SCM_INTP (Scm_ListRef rect 3 SCM_UNBOUND)))
+    (Scm_Error "rect must be (x y w h), but got %S" rect))
+  (let* ((sprite::GrvSprite* (SCM_NEW (.type GrvSprite)))
+         (flip::SDL_RendererFlip))
+    (cond
+      ((and (< zoom_x 0) (< zoom_y 0))
+       (set! zoom_x (- zoom_x)
+             zoom_y (- zoom_y)
+             angle (+ angle 180)
+             flip SDL_FLIP_NONE))
+      ((< zoom_x 0)
+       (set! zoom_x (- zoom_x)
+             flip SDL_FLIP_VERTICAL))
+      ((< zoom_y 0)
+       (set! zoom_y (- zoom_y)
+             flip SDL_FLIP_HORIZONTAL))
+      (else
+       (set! flip SDL_FLIP_NONE)))
+    (set! (-> sprite window) window
+          (-> sprite image) image
+          (-> sprite center_x) center-x
+          (-> sprite center_y) center-y
+          (-> sprite z) z
+          (ref (-> sprite srcrect) x) (SCM_INT_VALUE (Scm_ListRef rect 0 (SCM_MAKE_INT 0)))
+          (ref (-> sprite srcrect) y) (SCM_INT_VALUE (Scm_ListRef rect 1 (SCM_MAKE_INT 0)))
+          (ref (-> sprite srcrect) w) (SCM_INT_VALUE (Scm_ListRef rect 2 (SCM_MAKE_INT 0)))
+          (ref (-> sprite srcrect) h) (SCM_INT_VALUE (Scm_ListRef rect 3 (SCM_MAKE_INT 0)))
+          (-> sprite angle) angle
+          (-> sprite zoom_x) zoom_x
+          (-> sprite zoom_y) zoom_y
+          (-> sprite flip) flip
+          (-> sprite visible) visible)
+    (unless (SCM_FALSEP image)
+      (retain-texture window (GRV_IMAGE_PTR image)))
+    (let* ((sprite-obj (MAKE_GRV_SPRITE sprite)))
+      (Scm_RegisterFinalizer sprite-obj finalize-sprite NULL)
+      (insert-window-sprite sprite-obj)
+      (return sprite-obj))))
 
 (define-cproc %set-sprite-image! (sprite::<graviton-sprite> image rect)
   ::<void>
@@ -1744,7 +1728,7 @@ typedef enum {
                                   (get-window-events win))))
 
 (define (call-with-window title size thunk)
-  (let1 window (%create-window title size)
+  (let1 window (make-window title size)
     (reset
       (thunk window)))
   (run-event-loop))
