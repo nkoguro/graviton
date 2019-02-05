@@ -168,11 +168,11 @@
 
    ) ;; end of declcode
 
-  "static SDL_threadID main_thread_id;"
-  "static ScmObj grv_windows = SCM_NIL;"
-  "static bool running_event_loop = false;"
-  "static ScmObj default_handler = SCM_FALSE;"
-  "static Uint32 graviton_event;"
+  (define-cvar main-thread-id::SDL_threadID :static)
+  (define-cvar grv-windows :static SCM_NIL)
+  (define-cvar running-event-loop::bool :static false)
+  (define-cvar default-handler :static SCM_FALSE)
+  (define-cvar graviton-event::Uint32 :static)
 
   (.define GRV_CALL_EVENT_CODE 1)
 
@@ -210,9 +210,9 @@
     (let* ((event-type::Uint32 (SDL_RegisterEvents 1)))
       (when (== event-type #xffffffff)
         (Scm_Error "SDL_RegisterEvents failed: %s" (SDL_GetError)))
-      (set! graviton_event event-type))
+      (set! graviton-event event-type))
 
-    (set! main_thread_id (SDL_ThreadID)))
+    (set! main-thread-id (SDL_ThreadID)))
 
   (initcode
    (initialize-libs))
@@ -238,7 +238,7 @@
   (define-cfn register-grv-window (gwin::GrvWindow*)
     ::ScmObj
     (let* ((obj (MAKE_GRV_WINDOW gwin)))
-      (set! grv_windows (Scm_Cons obj grv_windows))
+      (set! grv-windows (Scm_Cons obj grv-windows))
       (return obj)))
 
   (define-cfn unregister-grv-window (gwin::GrvWindow*)
@@ -249,12 +249,12 @@
                          (when (== gwin curwin)
                            (cond
                              ((SCM_NULLP prev)
-                              (set! grv_windows (SCM_CDR pair))
+                              (set! grv-windows (SCM_CDR pair))
                               (break))
                              (else
                               (SCM_SET_CDR prev (SCM_CDR pair))
                               (break))))))
-                     grv_windows)))
+                     grv-windows)))
 
   (define-cfn init-transform-param (param::TransformParam* width::int height::int)
     ::void
@@ -705,7 +705,7 @@
            (SDL_free (ref sdl-event drop file)))
           (else
            (cond
-             ((== (ref sdl-event type) graviton_event)
+             ((== (ref sdl-event type) graviton-event)
               (case (ref sdl-event user code)
                 ((GRV_CALL_EVENT_CODE)
                  (let* ((proc (cast ScmObj (ref sdl-event user data1)))
@@ -755,11 +755,11 @@
                       ((SCM_PROCEDUREP proc)
                        (set! (-> gwin proc) SCM_FALSE)
                        (Scm_ApplyRec0 proc))
-                      ((SCM_PROCEDUREP default_handler)
-                       (Scm_ApplyRec1 default_handler obj)))
+                      ((SCM_PROCEDUREP default-handler)
+                       (Scm_ApplyRec1 default-handler obj)))
                     (when (window-close-event-exists? (-> gwin events))
                       (set! will-close-windows (Scm_Cons obj will-close-windows)))))
-                grv_windows)
+                grv-windows)
       (for-each (lambda (obj)
                   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
                     (destroy-window gwin)))
@@ -805,7 +805,7 @@
                               (render-sprite (GRV_SPRITE_PTR sprite)))
                             (-> gwin sprites))
                   (SDL_RenderPresent renderer)))
-              grv_windows))
+              grv-windows))
   )  ;; end of inline-stub
 
 (inline-stub
@@ -1475,7 +1475,7 @@ typedef enum {
 
 (define-cproc set-default-handler! (proc)
   ::<void>
-  (set! default_handler proc))
+  (set! default-handler proc))
 
 (define-cproc run-event-loop ()
   ::<void>
@@ -1490,7 +1490,7 @@ typedef enum {
     (unless (SCM_FALSEP (ref packet exception))
       (Scm_Raise (ref packet exception) 0)))
   (SDL_StartTextInput)
-  (while (not (SCM_NULLP grv_windows))
+  (while (not (SCM_NULLP grv-windows))
     (run-window-handlers)
     (update-window-contents))
   (set! running-event-loop false)
@@ -1651,12 +1651,12 @@ typedef enum {
   ::<void>
   (let* ((packet::ScmEvalPacket* (SCM_NEW (.type ScmEvalPacket))))
     (cond
-      ((== main_thread_id (SDL_ThreadID))
+      ((== main-thread-id (SDL_ThreadID))
        (Scm_Apply proc SCM_NIL packet))
       ((not wait?)
        (let* ((event::SDL_Event))
          (SDL_zero event)
-         (set! (ref event type) graviton_event
+         (set! (ref event type) graviton-event
                (ref event user code) GRV_CALL_EVENT_CODE
                (ref event user data1) proc
                (ref event user data2) NULL)
@@ -1669,7 +1669,7 @@ typedef enum {
                (-> packet-holder cond) (SDL_CreateCond)
                (-> packet-holder eval_packet) packet)
          (SDL_zero event)
-         (set! (ref event type) graviton_event
+         (set! (ref event type) graviton-event
                (ref event user code) GRV_CALL_EVENT_CODE
                (ref event user data1) proc
                (ref event user data2) packet-holder)
