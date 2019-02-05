@@ -166,11 +166,14 @@
                                      cond::SDL_cond*
                                      eval_packet::ScmEvalPacket*)))
 
+   (define-ctype EventLoopStatus::(.struct
+                                   (lock::SDL_SpinLock
+                                    running?::bool)))
    ) ;; end of declcode
 
   (define-cvar main-thread-id::SDL_threadID :static)
   (define-cvar grv-windows :static SCM_NIL)
-  (define-cvar running-event-loop::bool :static false)
+  (define-cvar event-loop-status::EventLoopStatus)
   (define-cvar default-handler :static SCM_FALSE)
   (define-cvar graviton-event::Uint32 :static)
 
@@ -212,7 +215,8 @@
         (Scm_Error "SDL_RegisterEvents failed: %s" (SDL_GetError)))
       (set! graviton-event event-type))
 
-    (set! main-thread-id (SDL_ThreadID)))
+    (set! main-thread-id (SDL_ThreadID))
+    (set! (ref event-loop-status running?) false))
 
   (initcode
    (initialize-libs))
@@ -806,6 +810,20 @@
                             (-> gwin sprites))
                   (SDL_RenderPresent renderer)))
               grv-windows))
+
+  (define-cfn set-event-loop-status (running?::bool)
+    ::void
+    (SDL_AtomicLock (& (ref event-loop-status lock)))
+    (set! (ref event-loop-status running?) running?)
+    (SDL_AtomicUnlock (& (ref event-loop-status lock))))
+
+  (define-cfn event-loop-running? ()
+    ::bool
+    (let* ((running?::bool))
+      (SDL_AtomicLock (& (ref event-loop-status lock)))
+      (set! running? (ref event-loop-status running?))
+      (SDL_AtomicUnlock (& (ref event-loop-status lock)))
+      (return running?)))
   )  ;; end of inline-stub
 
 (inline-stub
@@ -1477,12 +1495,16 @@ typedef enum {
   ::<void>
   (set! default-handler proc))
 
+(define-cproc event-loop-running? ()
+  ::<boolean>
+  (return (event-loop-running?)))
+
 (define-cproc run-event-loop ()
   ::<void>
-  (when running-event-loop
+  (when (event-loop-running?)
     (return))
 
-  (set! running-event-loop true)
+  (set-event-loop-status true)
   (let* ((packet::ScmEvalPacket))
     (Scm_EvalCString "(run-repl-if-needed)"
                      (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))
@@ -1493,9 +1515,9 @@ typedef enum {
   (while (not (SCM_NULLP grv-windows))
     (run-window-handlers)
     (update-window-contents))
-  (set! running-event-loop false)
+  (set-event-loop-status false)
   (let* ((packet::ScmEvalPacket))
-    (Scm_EvalCString "(close-all-repl)"
+    (Scm_EvalCString "(wait-all-repl-terminate)"
                      (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))
                      (& packet))
     (unless (SCM_FALSEP (ref packet exception))
@@ -2018,7 +2040,6 @@ typedef enum {
   (%message-box title message type))
 
 (define *repl-threads* '())
-(define *close-all-repl?* (atom #f))
 
 (define (is-interactive?)
   (let ((gosh? (and (not (null? (command-line)))
@@ -2035,7 +2056,7 @@ typedef enum {
                             (set! ready? #f)
                             (while (not ready?)
                               (let1 count (selector-select selector 500000)
-                                (when (and (= count 0) (atom-ref *close-all-repl?*))
+                                (when (and (= count 0) (not (event-loop-running?)))
                                   (set! expr (eof-object))
                                   (set! ready? #t))))
                             expr)
@@ -2056,13 +2077,11 @@ typedef enum {
     (push! *repl-threads* repl-thread)
     (thread-start! repl-thread)))
 
-(define (close-all-repl)
-  (atomic-update! *close-all-repl?* (^_ #t))
+(define (wait-all-repl-terminate)
   (unwind-protect
       (for-each (^t (thread-join! t)) *repl-threads*)
     (set! *repl-threads* '())))
 
 (define (run-repl-if-needed)
   (when (is-interactive?)
-    (atomic-update! *close-all-repl?* (^_ #f))
     (graviton-read-eval-print-loop (current-input-port))))
