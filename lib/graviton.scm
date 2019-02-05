@@ -758,9 +758,15 @@
                     (cond
                       ((SCM_PROCEDUREP proc)
                        (set! (-> gwin proc) SCM_FALSE)
-                       (Scm_ApplyRec0 proc))
+                       (let* ((packet::ScmEvalPacket))
+                         (Scm_Apply proc SCM_NIL (& packet))
+                         (unless (SCM_FALSEP (ref packet exception))
+                           (Scm_Raise (ref packet exception) 0))))
                       ((SCM_PROCEDUREP default-handler)
-                       (Scm_ApplyRec1 default-handler obj)))
+                       (let* ((packet::ScmEvalPacket))
+                         (Scm_Apply default-handler (SCM_LIST1 obj) (& packet))
+                         (unless (SCM_FALSEP (ref packet exception))
+                           (Scm_Raise (ref packet exception) 0)))))
                     (when (window-close-event-exists? (-> gwin events))
                       (set! will-close-windows (Scm_Cons obj will-close-windows)))))
                 grv-windows)
@@ -1523,6 +1529,14 @@ typedef enum {
     (unless (SCM_FALSEP (ref packet exception))
       (Scm_Raise (ref packet exception) 0))))
 
+(define-cproc destroy-all-windows ()
+  ::<void>
+  (for-each (lambda (obj)
+              (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
+                (destroy-window gwin)))
+            grv-windows)
+  (set! grv-windows SCM_NIL))
+
 (define-cproc close-window (gwin::<graviton-window>)
   ::<void>
   (unless (-> gwin window)
@@ -1748,10 +1762,12 @@ typedef enum {
                                   (get-window-events win))))
 
 (define (call-with-window title size thunk)
-  (let1 window (make-window title size)
-    (reset
-      (thunk window)))
-  (run-event-loop))
+  (guard (e (else (destroy-all-windows)
+                  (raise e)))
+    (let1 window (make-window title size)
+      (reset
+        (thunk window)))
+    (run-event-loop)))
 
 (define (display-image image :key (fullscreen? #f))
   (let ((img-w (border-width image))
