@@ -1058,8 +1058,6 @@ typedef enum {
     (update-rect gimage (?: (< x0 x1) x0 x1) (?: (< y0 y1) y0 y1) (+ (abs (- x0 x1)) 1) (+ (abs (- y0 y1)) 1)))
   )  ;; end of inline-stub
 
-(include "graviton/enum2sym.scm")
-
 (define-cproc make-window (title::<const-cstring> size)
   (let* ((width::int 0)
          (height::int 0)
@@ -1692,6 +1690,8 @@ typedef enum {
          (SCM_RETURN (Scm_Values args))))
       (else
        (Scm_Raise (-> packet exception) 0)))))
+
+(include "graviton/enum2sym.scm")
 
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
 
