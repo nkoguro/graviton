@@ -463,12 +463,16 @@
   )  ;; end of inline-stub
 
 (inline-stub
+  (define-cfn invalidate-sprite (gsprite::GrvSprite*)
+    ::void
+    (unless (SCM_FALSEP (-> gsprite image))
+      (release-texture (-> gsprite window) (GRV_IMAGE_PTR (-> gsprite image))))
+    (set! (-> gsprite window) SCM_FALSE))
+
   (define-cfn destroy-window (gwin::GrvWindow*)
     ::void
     (for-each (lambda (sprite)
-                (let* ((gsprite::GrvSprite* (GRV_SPRITE_PTR sprite)))
-                  (unless (SCM_FALSEP (-> gsprite image))
-                    (release-texture (-> gsprite window) (GRV_IMAGE_PTR (-> gsprite image))))))
+                (invalidate-sprite (GRV_SPRITE_PTR sprite)))
               (-> gwin sprites))
     (set! (-> gwin sprites) SCM_NIL)
 
