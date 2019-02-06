@@ -55,7 +55,8 @@
           set-window-resolution!
           close-window
 
-          match-events
+          window-events
+          window-events-match
           display-image
           create-image
           load-image
@@ -174,7 +175,6 @@
   (define-cvar main-thread-id::SDL_threadID :static)
   (define-cvar grv-windows :static SCM_NIL)
   (define-cvar event-loop-status::EventLoopStatus)
-  (define-cvar default-handler :static SCM_FALSE)
   (define-cvar graviton-event::Uint32 :static)
 
   (.define GRV_CALL_EVENT_CODE 1)
@@ -755,18 +755,12 @@
                   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj))
                          (proc (-> gwin proc)))
                     (set! (-> gwin events) (extract-window-events gwin all-events))
-                    (cond
-                      ((SCM_PROCEDUREP proc)
-                       (set! (-> gwin proc) SCM_FALSE)
-                       (let* ((packet::ScmEvalPacket))
-                         (Scm_Apply proc SCM_NIL (& packet))
-                         (unless (SCM_FALSEP (ref packet exception))
-                           (Scm_Raise (ref packet exception) 0))))
-                      ((SCM_PROCEDUREP default-handler)
-                       (let* ((packet::ScmEvalPacket))
-                         (Scm_Apply default-handler (SCM_LIST1 obj) (& packet))
-                         (unless (SCM_FALSEP (ref packet exception))
-                           (Scm_Raise (ref packet exception) 0)))))
+                    (when (SCM_PROCEDUREP proc)
+                      (set! (-> gwin proc) SCM_FALSE)
+                      (let* ((packet::ScmEvalPacket))
+                        (Scm_Apply proc SCM_NIL (& packet))
+                        (unless (SCM_FALSEP (ref packet exception))
+                          (Scm_Raise (ref packet exception) 0))))
                     (when (window-close-event-exists? (-> gwin events))
                       (set! will-close-windows (Scm_Cons obj will-close-windows)))))
                 grv-windows)
@@ -1490,16 +1484,12 @@ typedef enum {
 (define-cproc set-window-proc! (gwin::<graviton-window> proc)
   (set! (-> gwin proc) proc))
 
-(define-cproc get-window-events (gwin::<graviton-window>)
+(define-cproc %window-events (gwin::<graviton-window>)
   (return (-> gwin events)))
 
 (define-cproc clear-window-sprites! (gwin::<graviton-window>)
   ::<void>
   (set! (-> gwin sprites) SCM_NIL))
-
-(define-cproc set-default-handler! (proc)
-  ::<void>
-  (set! default-handler proc))
 
 (define-cproc event-loop-running? ()
   ::<boolean>
@@ -1740,26 +1730,22 @@ typedef enum {
 (define (image? obj)
   (is-a? obj <graviton-image>))
 
-(define (handle-events window handler)
-  (shift cont (set-window-proc! window
-                                (lambda ()
-                                  (for-each (lambda (event)
-                                              (handler event))
-                                            (get-window-events window))
-                                  (cont)))))
+(define (window-events window)
+  (shift cont
+    (set-window-proc! window
+                      (lambda ()
+                        (cont (%window-events window))))))
 
-(define-syntax match-events
+(define-syntax window-events-match
   (syntax-rules ()
-    ((_ window clause ...)
-     (handle-events window (match-lambda clause ... (_ #f))))))
-
-(set-default-handler! (lambda (win)
-                        (for-each (match-lambda
-                                    (('key-down _ 'escape _ _ _)
-                                     (close-window win))
-                                    (_
-                                     #f))
-                                  (get-window-events win))))
+    ((_ window (event-type (args ...) body ...) ...)
+     (for-each (match-lambda
+                 (('event-type args ...)
+                  body ...)
+                 ...
+                 (_
+                  #f))
+               (window-events window)))))
 
 (define (call-with-window title size thunk)
   (guard (e (else (destroy-all-windows)
@@ -1784,7 +1770,11 @@ typedef enum {
         (let* ((win-w (border-width win))
                (win-h (border-height win))
                (zoom (min (/. win-w img-w) (/. win-h img-h))))
-          (put-image win image (center-x win) (center-y win) :zoom-x zoom :zoom-y zoom))))))
+          (put-image win image (center-x win) (center-y win) :zoom-x zoom :zoom-y zoom)
+          (while #t
+            (window-events-match win
+              (key-down (_ 'escape _ _ _)
+               (close-window win)))))))))
 
 (define (set-border! window-or-image v0 :optional (v1 #f) (v2 #f) (v3 #f))
   (let ((top #f)
@@ -2052,8 +2042,17 @@ typedef enum {
                                     (loop (+ t dt) (cons (rotate-point x y) points)))))))))
                        :wait? #f))
 
+;;;
+;;; MessageBox
+;;;
+
 (define (message-box title message :key (type 'info))
   (%message-box title message type))
+
+
+;;;
+;;; REPL
+;;;
 
 (define *repl-threads* '())
 
