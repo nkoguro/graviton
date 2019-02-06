@@ -5,7 +5,7 @@
   (* (/ x 180.0) pi))
 
 (define (main args)
-  (let1 img (create-image 1024 768)
+  (let1 img (make-image 1024 768)
     (draw-circle img (center-point img) 350 (color 'teal) :radius-ratio 0.3 :thickness 10 :rotate (deg 30))
     (draw-circle img (center-point img) 350 (color 'teal) :radius-ratio 0.3 :thickness 10 :rotate (deg 90))
     (draw-circle img (center-point img) 350 (color 'teal) :radius-ratio 0.3 :thickness 10 :rotate (deg 150))

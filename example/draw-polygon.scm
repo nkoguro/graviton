@@ -3,7 +3,7 @@
 (use srfi-42)
 
 (define (main args)
-  (let1 img (create-image 640 480)
+  (let1 img (make-image 640 480)
     (set-border! img 1.2)
     (let1 d (* 2 (/ (* 2 pi) 5))
       (draw-polygon img

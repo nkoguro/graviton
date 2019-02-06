@@ -1,7 +1,7 @@
 (use graviton)
 
 (define (main args)
-  (let1 img (create-image 320 240)
+  (let1 img (make-image 320 240)
     (let* ((step 20)
            (dx (/ 320 step))
            (dy (/ 240 step)))

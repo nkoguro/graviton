@@ -1,7 +1,7 @@
 (use graviton)
 
 (define (main args)
-  (let1 img (create-image 640 480)
+  (let1 img (make-image 640 480)
     (set-border! img 4 6)
     (draw-line img `((,(border-left img) 0) (,(border-right img) 0)) (color 'aqua))
     (draw-line img `((0 ,(border-top img)) (0 ,(border-bottom img))) (color 'aqua))

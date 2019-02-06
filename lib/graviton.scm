@@ -58,7 +58,7 @@
           window-events
           window-events-match
           display-image
-          create-image
+          make-image
           load-image
           put-image
           image-rgba-pixels
@@ -1192,7 +1192,7 @@ typedef enum {
   ::<void>
   (compute-transform-param (& (-> gimage param)) (-> gimage surface w) (-> gimage surface h) left top right bottom))
 
-(define-cproc create-image (w::<int> h::<int>)
+(define-cproc make-image (w::<int> h::<int>)
   (let* ((surface::SDL_Surface* (SDL_CreateRGBSurfaceWithFormat 0 w h 32 SDL_PIXELFORMAT_RGBA32))
          (gimage::GrvImage* (SCM_NEW (.type GrvImage)))
          (obj (MAKE_GRV_IMAGE gimage)))
