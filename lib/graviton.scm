@@ -56,6 +56,9 @@
 
           window-events
           window-events-match
+          frame-per-second
+          set-frame-per-second!
+
           display-image
           make-image
           load-image
@@ -179,6 +182,8 @@
   (define-cvar grv-windows :static SCM_NIL)
   (define-cvar event-loop-status::EventLoopStatus)
   (define-cvar graviton-event::Uint32 :static)
+  (define-cvar frame-per-second::int :static 30)
+  (define-cvar event-loop-ticks::Uint32 :static 33)
 
   (.define GRV_CALL_EVENT_CODE 1)
 
@@ -1505,6 +1510,16 @@ typedef enum {
   ::<boolean>
   (return (event-loop-running?)))
 
+(define-cproc frame-per-second ()
+  ::<int>
+  (return frame-per-second))
+
+(define-cproc set-frame-per-second! (fps::<int>)
+  ::<void>
+  (let* ((t::Uint32 (cast Uint32 (floor (/ 1000.0 fps)))))
+    (set! frame-per-second fps
+          event-loop-ticks t)))
+
 (define-cproc run-event-loop ()
   ::<void>
   (when (event-loop-running?)
@@ -1518,9 +1533,17 @@ typedef enum {
     (unless (SCM_FALSEP (ref packet exception))
       (Scm_Raise (ref packet exception) 0)))
   (SDL_StartTextInput)
-  (while (not (SCM_NULLP grv-windows))
-    (run-window-handlers)
-    (update-window-contents))
+  (let* ((run-window-handlers-elapse::Uint32)
+         (update-window-contents-elapse::Uint32))
+    (while (not (SCM_NULLP grv-windows))
+      (let* ((t::Uint32 (SDL_GetTicks)))
+        (run-window-handlers)
+        (set! run-window-handlers-elapse (- (SDL_GetTicks) t)))
+      (let* ((t::Uint32 (SDL_GetTicks)))
+        (update-window-contents)
+        (set! update-window-contents-elapse (- (SDL_GetTicks) t)))
+      (when (< (+ run-window-handlers-elapse update-window-contents-elapse) event-loop-ticks)
+        (SDL_Delay (- event-loop-ticks (+ run-window-handlers-elapse update-window-contents-elapse))))))
   (set-event-loop-status false)
   (let* ((packet::ScmEvalPacket))
     (Scm_EvalCString "(wait-all-repl-terminate)"
