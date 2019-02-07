@@ -168,14 +168,21 @@
                                 h::int
                                 data::char*)))
 
-   (define-ctype EvalPacketHolder::(.struct
-                                    (lock::SDL_mutex*
-                                     cond::SDL_cond*
-                                     eval_packet::ScmEvalPacket*)))
-
    (define-ctype EventLoopStatus::(.struct
                                    (lock::SDL_SpinLock
                                     running?::bool)))
+
+   (define-ctype ProcPacket::(.struct
+                              (proc
+                               lock::SDL_mutex*
+                               cond::SDL_cond*
+                               eval-packet::ScmEvalPacket*)))
+
+   (define-ctype ProcQueue::(.struct
+                             (buf::ProcPacket**
+                              size::int
+                              start::int
+                              tail::int)))
    ) ;; end of declcode
 
   (define-cvar main-thread-id::SDL_threadID :static)
@@ -184,8 +191,10 @@
   (define-cvar graviton-event::Uint32 :static)
   (define-cvar frame-per-second::int :static 30)
   (define-cvar event-loop-ticks::Uint32 :static 33)
+  (define-cvar proc-queue::ProcQueue :static)
 
   (.define GRV_CALL_EVENT_CODE 1)
+  (.define INITIAL_PROC_QUEUE_LENGTH 1000)
 
   (define-cptr <graviton-window> :private
     "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
@@ -224,7 +233,12 @@
       (set! graviton-event event-type))
 
     (set! main-thread-id (SDL_ThreadID))
-    (set! (ref event-loop-status running?) false))
+    (set! (ref event-loop-status lock) 0
+          (ref event-loop-status running?) false)
+    (set! (ref proc-queue buf) (SCM_NEW_ARRAY (.type ProcPacket*) INITIAL_PROC_QUEUE_LENGTH)
+          (ref proc-queue size) INITIAL_PROC_QUEUE_LENGTH
+          (ref proc-queue start) 0
+          (ref proc-queue tail) 0))
 
   (initcode
    (initialize-libs))
@@ -494,6 +508,38 @@
   ) ;; end of inline-stub
 
 (inline-stub
+  (define-cfn enqueue-proc! (proc-packet::ProcPacket*)
+    ::void
+    (let* ((buf::ProcPacket** (ref proc-queue buf))
+           (len::int (ref proc-queue size)))
+      (set! (aref buf (ref proc-queue tail)) proc-packet)
+      (set! (ref proc-queue tail) (% (+ (ref proc-queue tail) 1) len))
+      (when (== (ref proc-queue start) (ref proc-queue tail))
+        (let* ((i::int (ref proc-queue start))
+               (j::int 0)
+               (new-buf::ProcPacket** (SCM_NEW_ARRAY (.type ProcPacket*) (* len 2))))
+          (while (< j len)
+            (set! (aref new-buf j) (aref buf i)
+                  i (% (+ i 1) len)
+                  j (+ j 1)))
+          (set! (ref proc-queue buf) new-buf
+                (ref proc-queue size) (* len 2)
+                (ref proc-queue start) 0
+                (ref proc-queue tail) len)))))
+
+  (define-cfn dequeue-proc! ()
+    ::ProcPacket*
+    (cond
+      ((== (ref proc-queue start) (ref proc-queue tail))
+       (return NULL))
+      (else
+       (let* ((buf::ProcPacket** (ref proc-queue buf))
+              (len::int (ref proc-queue size))
+              (proc-packet::ProcPacket* (aref buf (ref proc-queue start))))
+         (set! (aref buf (ref proc-queue start)) NULL
+               (ref proc-queue start) (% (+ (ref proc-queue start) 1) len))
+         (return proc-packet)))))
+
   (define-cfn get-events ()
     ::ScmObj
     (let* ((events SCM_NIL)
@@ -724,20 +770,35 @@
              ((== (ref sdl-event type) graviton-event)
               (case (ref sdl-event user code)
                 ((GRV_CALL_EVENT_CODE)
-                 (let* ((proc (cast ScmObj (ref sdl-event user data1)))
-                        (packet-holder::EvalPacketHolder* (cast EvalPacketHolder* (ref sdl-event user data2))))
-                   (cond
-                     (packet-holder
-                      (SDL_LockMutex (-> packet-holder lock))
-                      (Scm_Apply proc SCM_NIL (-> packet-holder eval_packet))
-                      (SDL_CondSignal (-> packet-holder cond))
-                      (SDL_UnlockMutex (-> packet-holder lock)))
-                     (else
-                      (let* ((packet::ScmEvalPacket))
-                        (Scm_Apply proc SCM_NIL (& packet))
-                        (unless (SCM_FALSEP (ref packet exception))
-                          (Scm_Raise (ref packet exception) 0)))))))))))))
+                 (enqueue-proc! (cast ProcPacket* (ref sdl-event user data1))))))))
+          )  ;; end of case
+        )  ;; end of while
       (return events)))
+
+  (define-cfn run-queued-procs (available-ticks::Uint32)
+    ::void
+    (let* ((start-ticks::Uint32 (SDL_GetTicks)))
+      (loop
+       (let* ((proc-packet::ProcPacket* (dequeue-proc!)))
+         (cond
+           ((== proc-packet NULL)
+            (return))
+           (else
+            (let* ((proc (-> proc-packet proc))
+                   (eval-packet::ScmEvalPacket* (-> proc-packet eval-packet)))
+              (cond
+                (eval-packet
+                 (SDL_LockMutex (-> proc-packet lock))
+                 (Scm_Apply proc SCM_NIL eval-packet)
+                 (SDL_CondSignal (-> proc-packet cond))
+                 (SDL_UnlockMutex (-> proc-packet lock)))
+                (else
+                 (let* ((packet::ScmEvalPacket))
+                   (Scm_Apply proc SCM_NIL (& packet))
+                   (unless (SCM_FALSEP (ref packet exception))
+                     (Scm_Raise (ref packet exception) 0)))))))))
+       (when (< available-ticks (- (SDL_GetTicks) start-ticks))
+         (return)))))
 
   ;; events must be reverse chronological order.
   (define-cfn extract-window-events (gwin::GrvWindow* all-events)
@@ -1533,18 +1594,30 @@ typedef enum {
     (unless (SCM_FALSEP (ref packet exception))
       (Scm_Raise (ref packet exception) 0)))
   (SDL_StartTextInput)
-  (let* ((run-window-handlers-elapse::Uint32)
-         (update-window-contents-elapse::Uint32))
+  (let* ((run-window-handlers-elapse::Uint32 0)
+         (run-queued-procs-elapse::Uint32 0)
+         (update-window-contents-elapse::Uint32 0))
     (while (not (SCM_NULLP grv-windows))
       (let* ((t::Uint32 (SDL_GetTicks)))
         (run-window-handlers)
         (set! run-window-handlers-elapse (- (SDL_GetTicks) t)))
+
+      (let* ((t::Uint32 (SDL_GetTicks))
+             (available-ticks::Uint32 (?: (< event-loop-ticks (+ run-window-handlers-elapse update-window-contents-elapse))
+                                          0
+                                          (- (+ run-window-handlers-elapse update-window-contents-elapse) event-loop-ticks))))
+        (run-queued-procs available-ticks)
+        (set! run-queued-procs-elapse (- (SDL_GetTicks) t)))
+
       (let* ((t::Uint32 (SDL_GetTicks)))
         (update-window-contents)
         (set! update-window-contents-elapse (- (SDL_GetTicks) t)))
-      (when (< (+ run-window-handlers-elapse update-window-contents-elapse) event-loop-ticks)
-        (SDL_Delay (- event-loop-ticks (+ run-window-handlers-elapse update-window-contents-elapse))))))
+
+      (when (< (+ run-window-handlers-elapse run-queued-procs-elapse update-window-contents-elapse) event-loop-ticks)
+        (SDL_Delay (- event-loop-ticks (+ run-window-handlers-elapse run-queued-procs-elapse update-window-contents-elapse))))))
+
   (set-event-loop-status false)
+
   (let* ((packet::ScmEvalPacket))
     (Scm_EvalCString "(wait-all-repl-terminate)"
                      (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))
@@ -1713,31 +1786,35 @@ typedef enum {
       ((== main-thread-id (SDL_ThreadID))
        (Scm_Apply proc SCM_NIL packet))
       ((not wait?)
-       (let* ((event::SDL_Event))
-         (SDL_zero event)
+       (let* ((proc-packet::ProcPacket* (SCM_NEW (.type ProcPacket)))
+              (event::SDL_Event))
+         (set! (-> proc-packet proc) proc
+               (-> proc-packet lock) NULL
+               (-> proc-packet cond) NULL
+               (-> proc-packet eval-packet) NULL)
          (set! (ref event type) graviton-event
                (ref event user code) GRV_CALL_EVENT_CODE
-               (ref event user data1) proc
+               (ref event user data1) proc-packet
                (ref event user data2) NULL)
          (SDL_PushEvent (& event))
          (return)))
       (else
-       (let* ((packet-holder::EvalPacketHolder* (SCM_NEW (.type EvalPacketHolder)))
+       (let* ((proc-packet::ProcPacket* (SCM_NEW (.type ProcPacket)))
               (event::SDL_Event))
-         (set! (-> packet-holder lock) (SDL_CreateMutex)
-               (-> packet-holder cond) (SDL_CreateCond)
-               (-> packet-holder eval_packet) packet)
-         (SDL_zero event)
+         (set! (-> proc-packet proc) proc
+               (-> proc-packet lock) (SDL_CreateMutex)
+               (-> proc-packet cond) (SDL_CreateCond)
+               (-> proc-packet eval-packet) packet)
          (set! (ref event type) graviton-event
                (ref event user code) GRV_CALL_EVENT_CODE
-               (ref event user data1) proc
-               (ref event user data2) packet-holder)
-         (SDL_LockMutex (-> packet-holder lock))
+               (ref event user data1) proc-packet
+               (ref event user data2) NULL)
+         (SDL_LockMutex (-> proc-packet lock))
          (SDL_PushEvent (& event))
-         (SDL_CondWait (-> packet-holder cond) (-> packet-holder lock))
-         (SDL_UnlockMutex (-> packet-holder lock))
-         (SDL_DestroyCond (-> packet-holder cond))
-         (SDL_DestroyMutex (-> packet-holder lock)))))
+         (SDL_CondWait (-> proc-packet cond) (-> proc-packet lock))
+         (SDL_UnlockMutex (-> proc-packet lock))
+         (SDL_DestroyCond (-> proc-packet cond))
+         (SDL_DestroyMutex (-> proc-packet lock)))))
     (cond
       ((SCM_FALSEP (-> packet exception))
        (let* ((i::int)
