@@ -105,6 +105,11 @@
 
 (select-module graviton)
 
+(define-record-type (<point> (pseudo-rtd <list>))
+  make-point point?
+  (x point-x)
+  (y point-y))
+
 (inline-stub
   (declcode
    (.include "SDL.h"
@@ -238,42 +243,19 @@
     (set! (ref proc-queue buf) (SCM_NEW_ARRAY (.type ProcPacket*) INITIAL_PROC_QUEUE_LENGTH)
           (ref proc-queue size) INITIAL_PROC_QUEUE_LENGTH
           (ref proc-queue start) 0
-          (ref proc-queue tail) 0))
+          (ref proc-queue tail) 0)
+    ;; (SDL_LogSetPriority SDL_LOG_CATEGORY_APPLICATION SDL_LOG_PRIORITY_DEBUG)
+    )
 
   (initcode
    (initialize-libs))
   )  ;; end of inline-stub
 
+;;;
+;;; Coordinate calculation
+;;;
+
 (inline-stub
-  (define-cfn finalize-sprite (z data::void*)
-    ::void
-    (when (GRV_SPRITE_P z)
-      (set! (-> (GRV_SPRITE_PTR z) window) SCM_FALSE
-            (-> (GRV_SPRITE_PTR z) image) SCM_FALSE)))
-
-
-
-  (define-cfn register-grv-window (gwin::GrvWindow*)
-    ::ScmObj
-    (let* ((obj (MAKE_GRV_WINDOW gwin)))
-      (set! grv-windows (Scm_Cons obj grv-windows))
-      (return obj)))
-
-  (define-cfn unregister-grv-window (gwin::GrvWindow*)
-    ::void
-    (let* ((prev SCM_NIL))
-      (pair-for-each (lambda (pair)
-                       (let* ((curwin::GrvWindow* (GRV_WINDOW_PTR (SCM_CAR pair))))
-                         (when (== gwin curwin)
-                           (cond
-                             ((SCM_NULLP prev)
-                              (set! grv-windows (SCM_CDR pair))
-                              (break))
-                             (else
-                              (SCM_SET_CDR prev (SCM_CDR pair))
-                              (break))))))
-                     grv-windows)))
-
   (define-cfn init-transform-param (param::TransformParam* width::int height::int)
     ::void
     (set! (-> param m00) 1.0
@@ -287,19 +269,109 @@
           (-> param right) (cast double (- width 1))
           (-> param bottom) (cast double (- height 1))))
 
-  (define-cfn create-scratch-area (x::int y::int w::int h::int)
-    ::ScratchArea*
-    (let* ((area::ScratchArea* (SCM_NEW (.type ScratchArea))))
-      (set! (-> area x) x
-            (-> area y) y
-            (-> area w) w
-            (-> area h) h
-            (-> area data) (SCM_NEW_ATOMIC_ARRAY (.type char) (* w h)))
-      (memset (-> area data) 0 (* w h))
-      (return area)))
-  )  ;; end of inline-stub
+  (define-cfn convert-coordinate (param::TransformParam* x::double y::double ox::int* oy::int*)
+    ::void
+    (let* ((m00::double (-> param m00))
+           (m10::double (-> param m10))
+           (m01::double (-> param m01))
+           (m11::double (-> param m11))
+           (x0::double (-> param x0))
+           (y0::double (-> param y0)))
+      (set! (* ox) (+ (* m00 x) (* m01 y) x0)
+            (* oy) (+ (* m10 x) (* m11 y) y0))))
+
+  (define-cfn compute-transform-param (param::TransformParam*
+                                       width::int
+                                       height::int
+                                       x0::double
+                                       y0::double
+                                       x1::double
+                                       y1::double)
+    ::void
+    (let* ((wex::int (- width 1))
+           (wey::int (- height 1))
+           (wcx::double (/ wex 2.0))
+           (wcy::double (/ wey 2.0))
+           (rx::double (/ (- x1 x0) wex))
+           (ry::double (/ (- y1 y0) wey))
+           (r::double (?: (< (fabs rx) (fabs ry)) (fabs ry) (fabs rx)))
+           (mx::double (?: (< rx 0.0) (- r) r))
+           (my::double (?: (< ry 0.0) (- r) r))
+           (cx::double (/ (+ x0 x1) 2.0))
+           (cy::double (/ (+ y0 y1) 2.0))
+           (sx::double (+ (* mx (- wcx)) cx))
+           (sy::double (+ (* my (- wcy)) cy))
+           (ex::double (+ (* mx wcx) cx))
+           (ey::double (+ (* my wcy) cy)))
+      (set! (-> param m00) (/ 1.0 mx)
+            (-> param m01) 0.0
+            (-> param m10) 0.0
+            (-> param m11) (/ 1.0 my)
+            (-> param x0) (- (/ sx mx))
+            (-> param y0) (- (/ sy my))
+            (-> param left) sx
+            (-> param top) sy
+            (-> param right) ex
+            (-> param bottom) ey)))
+
+  (define-cfn get-transform-param (window-or-image)
+    ::TransformParam*
+    (cond
+      ((GRV_WINDOW_P window-or-image)
+       (return (& (-> (GRV_WINDOW_PTR window-or-image) param))))
+      ((GRV_IMAGE_P window-or-image)
+       (return (& (-> (GRV_IMAGE_PTR window-or-image) param))))
+      (else
+       (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
+  ) ;; end of inline-stub
+
+;;;
+;;; Image and Texture
+;;;
 
 (inline-stub
+  (define-cfn finalize-image (z data::void*)
+    ::void
+    (when (GRV_IMAGE_P z)
+      (let* ((gimage::GrvImage* (GRV_IMAGE_PTR z)))
+        (unless (SCM_NULLP (-> gimage texture_alist))
+          (fprintf stderr "[BUG] texture_alist in <graviton-image> must be nil in finalizer. forgot to call release-texture?\n"))
+        (SDL_FreeSurface (-> gimage surface))
+        (set! (-> gimage surface) NULL
+              (-> gimage texture_alist) SCM_NIL))))
+
+  (define-cfn update-rect (gimage::GrvImage* x::int y::int w::int h::int)
+    ::void
+    (when (SCM_NULLP (-> gimage texture_alist))
+      (return))
+
+    (let* ((rect::SDL_Rect* (& (-> gimage update_rect))))
+      (cond
+        ((SDL_RectEmpty rect)
+         (set! (-> rect x) x
+               (-> rect y) y
+               (-> rect w) w
+               (-> rect h) h))
+        (else
+         (let* ((rect-a::SDL_Rect)
+                (rect-b::SDL_Rect)
+                (rect-c::SDL_Rect)
+                (rect-x::SDL_Rect))
+           (set! (ref rect-a x) (-> rect x)
+                 (ref rect-a y) (-> rect y)
+                 (ref rect-a w) (-> rect w)
+                 (ref rect-a h) (-> rect h)
+                 (ref rect-b x) x
+                 (ref rect-b y) y
+                 (ref rect-b w) w
+                 (ref rect-b h) h
+                 (ref rect-c x) 0
+                 (ref rect-c y) 0
+                 (ref rect-c w) (-> gimage surface w)
+                 (ref rect-c h) (-> gimage surface h))
+           (SDL_UnionRect (& rect-a) (& rect-b) (& rect-x))
+           (SDL_IntersectRect (& rect-c) (& rect-x) (& (-> gimage update_rect))))))))
+
   (define-cfn create-streaming-texture-from-surface (renderer::SDL_Renderer* surface::SDL_Surface*)
     ::SDL_Texture*
     (let* ((w::int (-> surface w))
@@ -448,17 +520,6 @@
 
       (return (-> (GRV_TEXTURE_PTR texture) texture))))
 
-  (define-cfn convert-coordinate (param::TransformParam* x::double y::double ox::int* oy::int*)
-    ::void
-    (let* ((m00::double (-> param m00))
-           (m10::double (-> param m10))
-           (m01::double (-> param m01))
-           (m11::double (-> param m11))
-           (x0::double (-> param x0))
-           (y0::double (-> param y0)))
-      (set! (* ox) (+ (* m00 x) (* m01 y) x0)
-            (* oy) (+ (* m10 x) (* m11 y) y0))))
-
   (define-cfn image-pixel-width (gimage::GrvImage*)
     ::double
     (return (/ 1.0 (fabs (ref (-> gimage param) m00)))))
@@ -467,29 +528,369 @@
     ::double
     (return (/ 1.0 (fabs (ref (-> gimage param) m11)))))
 
-  (define-cfn window-pixel-width (gwin::GrvWindow*)
-    ::double
-    (return (/ 1.0 (fabs (ref (-> gwin param) m00)))))
-
-  (define-cfn window-pixel-height (gwin::GrvWindow*)
-    ::double
-    (return (/ 1.0 (fabs (ref (-> gwin param) m11)))))
-
   (define-cfn image-coordinate (gimage::GrvImage* x::double y::double ox::int* oy::int*)
     ::void
     (convert-coordinate (& (-> gimage param)) x y ox oy))
+  ) ;; end of inline-stub
 
-  (define-cfn window-coordinate (gwin::GrvWindow* x::double y::double ox::int* oy::int*)
-    ::void
-    (convert-coordinate (& (-> gwin param)) x y ox oy))
-  )  ;; end of inline-stub
+(define-cproc make-image (w::<int> h::<int>)
+  (let* ((surface::SDL_Surface* (SDL_CreateRGBSurfaceWithFormat 0 w h 32 SDL_PIXELFORMAT_RGBA32))
+         (gimage::GrvImage* (SCM_NEW (.type GrvImage)))
+         (obj (MAKE_GRV_IMAGE gimage)))
+    (when (== surface NULL)
+      (Scm_Error "SDL_CreateRGBSurfaceWithFormat failed: %s" (SDL_GetError)))
+    (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
+    (set! (-> gimage surface) surface
+          (-> gimage texture_alist) SCM_NIL
+          (ref (-> gimage update_rect) x) 0
+          (ref (-> gimage update_rect) y) 0
+          (ref (-> gimage update_rect) w) 0
+          (ref (-> gimage update_rect) h) 0)
+    (init-transform-param (& (-> gimage param)) w h)
+    (Scm_RegisterFinalizer obj finalize-image NULL)
+    (return obj)))
+
+(define-cproc load-image (filename::<const-cstring>)
+  ::<graviton-image>
+  (let* ((img-surface::SDL_Surface* (IMG_Load filename)))
+    (when (== img-surface NULL)
+      (Scm_Error "IMG_Load failed: %s" (IMG_GetError)))
+    (let* ((image::GrvImage* (SCM_NEW (.type GrvImage)))
+           (surface::SDL_Surface* (SDL_ConvertSurfaceFormat img-surface SDL_PIXELFORMAT_RGBA32 0)))
+      (when (== surface NULL)
+        (Scm_Error "SDL_ConvertSurface failed: %s" (SDL_GetError)))
+      (SDL_FreeSurface img-surface)
+      (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
+      (set! (-> image surface) surface
+            (-> image texture_alist) SCM_NIL
+            (ref (-> image update_rect) x) 0
+            (ref (-> image update_rect) y) 0
+            (ref (-> image update_rect) w) 0
+            (ref (-> image update_rect) h) 0)
+      (return image))))
+
+(define-cproc set-image-border! (gimage::<graviton-image> top::<double> right::<double> bottom::<double> left::<double>)
+  ::<void>
+  (compute-transform-param (& (-> gimage param)) (-> gimage surface w) (-> gimage surface h) left top right bottom))
+
+(define-cproc image-size (image::<graviton-image>)
+  ::(<int> <int>)
+  (return (-> image surface w) (-> image surface h)))
+
+(define-cproc set-image-rgba-pixels! (image::<graviton-image> pixels::<u32vector>)
+  ::<void>
+  (let* ((surface::SDL_Surface* (-> image surface))
+         (len::int (* (-> surface w) (-> surface h) 4)))
+    (SDL_LockSurface surface)
+    (memcpy (-> surface pixels)
+            (SCM_U32VECTOR_ELEMENTS pixels)
+            (?: (< len (SCM_U32VECTOR_SIZE pixels)) len (SCM_U32VECTOR_SIZE pixels)))
+    (SDL_UnlockSurface surface)
+    (set! (ref (-> image update_rect) x) 0
+          (ref (-> image update_rect) y) 0
+          (ref (-> image update_rect) w) (-> surface w)
+          (ref (-> image update_rect) h) (-> surface h))))
+
+(define-cproc image-rgba (image::<graviton-image> x::<int> y::<int>)
+  ::<int32>
+  (unless (and (<= 0 x) (< x (-> image surface w))
+               (<= 0 y) (< y (-> image surface h)))
+    (Scm_Error "(x, y) must be in (0, 0)-(%d, %d), but got (%d, %d)" (-> image surface w) (-> image surface h) x y))
+  (SDL_LockSurface (-> image surface))
+  (let* ((i::int (+ (* y (-> image surface pitch)) (* x (-> image surface format BytesPerPixel))))
+         (v::Uint32 (aref (cast Uint32* (-> image surface pixels)) i)))
+    (SDL_UnlockSurface (-> image surface))
+    (return v)))
+
+(define-cproc image-rgba-pixels (image::<graviton-image>)
+  (let* ((surface::SDL_Surface* (-> image surface))
+         (len::int (* (-> surface w) (-> surface h) 4))
+         (vec (Scm_MakeU32Vector len 0)))
+    (SDL_LockSurface surface)
+    (memcpy (SCM_U32VECTOR_ELEMENTS vec) (-> surface pixels) len)
+    (SDL_UnlockSurface surface)
+    (return vec)))
+
+(define (image? obj)
+  (is-a? obj <graviton-image>))
+
+
+;;;
+;;; Sprite
+;;;
 
 (inline-stub
+  (define-cfn finalize-sprite (z data::void*)
+    ::void
+    (when (GRV_SPRITE_P z)
+      (set! (-> (GRV_SPRITE_PTR z) window) SCM_FALSE
+            (-> (GRV_SPRITE_PTR z) image) SCM_FALSE)))
+
   (define-cfn invalidate-sprite (gsprite::GrvSprite*)
     ::void
     (unless (SCM_FALSEP (-> gsprite image))
       (release-texture (-> gsprite window) (GRV_IMAGE_PTR (-> gsprite image))))
     (set! (-> gsprite window) SCM_FALSE))
+
+  (define-cfn render-sprite (gsprite::GrvSprite*)
+    ::void
+    (when (or (SCM_FALSEP (-> gsprite image))
+              (not (-> gsprite visible)))
+      (return))
+    (let* ((gimage::GrvImage* (GRV_IMAGE_PTR (-> gsprite image))))
+      (refresh-textures gimage)
+      (let* ((win (-> gsprite window))
+             (gwin::GrvWindow* (GRV_WINDOW_PTR win))
+             (texture::SDL_Texture* (get-texture win gimage))
+             (spr-center-x::int)
+             (spr-center-y::int)
+             (spr-w::double (* (ref (-> gsprite srcrect) w) (-> gsprite zoom_x)))
+             (spr-h::double (* (ref (-> gsprite srcrect) h) (-> gsprite zoom_y)))
+             (dstrect::SDL_Rect))
+        (window-coordinate gwin (-> gsprite center_x) (-> gsprite center_y) (& spr-center-x) (& spr-center-y))
+        (set! (ref dstrect x) (cast int (round (- spr-center-x (/ spr-w 2.0))))
+              (ref dstrect y) (cast int (round (- spr-center-y (/ spr-h 2.0))))
+              (ref dstrect w) (cast int (round spr-w))
+              (ref dstrect h) (cast int (round spr-h)))
+        (SDL_RenderCopyEx (-> gwin renderer)
+                          texture
+                          (& (-> gsprite srcrect))
+                          (& dstrect)
+                          (-> gsprite angle)
+                          NULL
+                          (-> gsprite flip)))))
+
+  (define-cfn remove-window-sprite (sprite)
+    ::void
+    (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR (-> (GRV_SPRITE_PTR sprite) window)))
+           (sprites (-> gwin sprites)))
+      (cond
+        ((and (== (Scm_Length sprites) 1)
+              (SCM_EQ (SCM_CAR sprites) sprite))
+         (set! (-> gwin sprites) SCM_NIL))
+        (else
+         (let* ((prev-pair (SCM_CAR sprites)))
+           (pair-for-each (lambda (pair)
+                            (when (SCM_EQ (SCM_CAR pair) sprite)
+                              (SCM_SET_CDR prev-pair (SCM_CDR pair))
+                              (break))
+                            (set! prev-pair pair))
+                          (SCM_CDR sprites)))))))
+
+  (define-cfn insert-window-sprite (sprite)
+    ::void
+    (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR (-> (GRV_SPRITE_PTR sprite) window)))
+           (gsprite::GrvSprite* (GRV_SPRITE_PTR sprite)))
+      (cond
+        ((SCM_NULLP (-> gwin sprites))
+         (set! (-> gwin sprites) (SCM_LIST1 sprite)))
+        (else
+         (pair-for-each (lambda (pair)
+                          (cond
+                            ((> (-> (GRV_SPRITE_PTR (SCM_CAR pair)) z) (-> gsprite z))
+                             (SCM_SET_CDR pair (Scm_Cons (SCM_CAR pair) (SCM_CDR pair)))
+                             (SCM_SET_CAR pair sprite)
+                             (break))
+                            ((SCM_NULLP (SCM_CDR pair))
+                             (SCM_SET_CDR pair (Scm_Cons sprite SCM_NIL))
+                             (break))))
+                        (-> gwin sprites))))))
+  ) ;; end of inline-stub
+
+(define-cproc make-sprite (window
+                           image
+                           center-x::<double>
+                           center-y::<double>
+                           z::<double>
+                           rect
+                           angle::<double>
+                           zoom_x::<double>
+                           zoom_y::<double>
+                           visible::<boolean>)
+  (unless (GRV_WINDOW_P window)
+    (Scm_Error "window must be <graviton-window>, but got %S" window))
+  (unless (or (SCM_FALSEP image)
+              (GRV_IMAGE_P image))
+    (Scm_Error "image must be <graviton-image> or #f, but got %S" image))
+  (unless (and (SCM_LISTP rect)
+               (== (Scm_Length rect) 4)
+               (SCM_INTP (Scm_ListRef rect 0 SCM_UNBOUND))
+               (SCM_INTP (Scm_ListRef rect 1 SCM_UNBOUND))
+               (SCM_INTP (Scm_ListRef rect 2 SCM_UNBOUND))
+               (SCM_INTP (Scm_ListRef rect 3 SCM_UNBOUND)))
+    (Scm_Error "rect must be (x y w h), but got %S" rect))
+  (let* ((sprite::GrvSprite* (SCM_NEW (.type GrvSprite)))
+         (flip::SDL_RendererFlip))
+    (cond
+      ((and (< zoom_x 0) (< zoom_y 0))
+       (set! zoom_x (- zoom_x)
+             zoom_y (- zoom_y)
+             angle (+ angle 180)
+             flip SDL_FLIP_NONE))
+      ((< zoom_x 0)
+       (set! zoom_x (- zoom_x)
+             flip SDL_FLIP_VERTICAL))
+      ((< zoom_y 0)
+       (set! zoom_y (- zoom_y)
+             flip SDL_FLIP_HORIZONTAL))
+      (else
+       (set! flip SDL_FLIP_NONE)))
+    (set! (-> sprite window) window
+          (-> sprite image) image
+          (-> sprite center_x) center-x
+          (-> sprite center_y) center-y
+          (-> sprite z) z
+          (ref (-> sprite srcrect) x) (SCM_INT_VALUE (Scm_ListRef rect 0 (SCM_MAKE_INT 0)))
+          (ref (-> sprite srcrect) y) (SCM_INT_VALUE (Scm_ListRef rect 1 (SCM_MAKE_INT 0)))
+          (ref (-> sprite srcrect) w) (SCM_INT_VALUE (Scm_ListRef rect 2 (SCM_MAKE_INT 0)))
+          (ref (-> sprite srcrect) h) (SCM_INT_VALUE (Scm_ListRef rect 3 (SCM_MAKE_INT 0)))
+          (-> sprite angle) angle
+          (-> sprite zoom_x) zoom_x
+          (-> sprite zoom_y) zoom_y
+          (-> sprite flip) flip
+          (-> sprite visible) visible)
+    (unless (SCM_FALSEP image)
+      (retain-texture window (GRV_IMAGE_PTR image)))
+    (let* ((sprite-obj (MAKE_GRV_SPRITE sprite)))
+      (Scm_RegisterFinalizer sprite-obj finalize-sprite NULL)
+      (insert-window-sprite sprite-obj)
+      (return sprite-obj))))
+
+(define-cproc %set-sprite-image! (sprite::<graviton-sprite> image rect)
+  ::<void>
+  (unless (or (SCM_FALSEP image)
+              (GRV_IMAGE_P image))
+    (Scm_Error "image must be <graviton-image> or #f, but got %S" image))
+  (unless (and (SCM_LISTP rect)
+               (== (Scm_Length rect) 4)
+               (SCM_INTP (Scm_ListRef rect 0 SCM_UNBOUND))
+               (SCM_INTP (Scm_ListRef rect 1 SCM_UNBOUND))
+               (SCM_INTP (Scm_ListRef rect 2 SCM_UNBOUND))
+               (SCM_INTP (Scm_ListRef rect 3 SCM_UNBOUND)))
+    (Scm_Error "rect must be (x y w h), but got %S" rect))
+  (unless (SCM_FALSEP (-> sprite image))
+    (release-texture (-> sprite window) (GRV_IMAGE_PTR (-> sprite image))))
+  (unless (SCM_FALSEP image)
+    (retain-texture (-> sprite window) (GRV_IMAGE_PTR image)))
+  (set! (-> sprite image) image
+        (ref (-> sprite srcrect) x) (SCM_INT_VALUE (Scm_ListRef rect 0 (SCM_MAKE_INT 0)))
+        (ref (-> sprite srcrect) y) (SCM_INT_VALUE (Scm_ListRef rect 1 (SCM_MAKE_INT 0)))
+        (ref (-> sprite srcrect) w) (SCM_INT_VALUE (Scm_ListRef rect 2 (SCM_MAKE_INT 0)))
+        (ref (-> sprite srcrect) h) (SCM_INT_VALUE (Scm_ListRef rect 3 (SCM_MAKE_INT 0)))))
+
+(define-cproc sprite-image (sprite::<graviton-sprite>)
+  ::(<top> <top>)
+  (return (-> sprite image)
+          (SCM_LIST4 (SCM_MAKE_INT (ref (-> sprite srcrect) x))
+                     (SCM_MAKE_INT (ref (-> sprite srcrect) y))
+                     (SCM_MAKE_INT (ref (-> sprite srcrect) w))
+                     (SCM_MAKE_INT (ref (-> sprite srcrect) h)))))
+
+(define-cproc set-sprite-center-position! (sprite::<graviton-sprite> x::<double> y::<double>)
+  ::<void>
+  (set! (-> sprite center_x) x
+        (-> sprite center_y) y))
+
+(define-cproc sprite-center-position (sprite::<graviton-sprite>)
+  ::(<double> <double>)
+  (return (-> sprite center_x) (-> sprite center_y)))
+
+(define-cproc set-sprite-z! (sprite z::<double>)
+  ::<void>
+  (unless (GRV_SPRITE_P sprite)
+    (Scm_Error "<graviton-sprite> required, but got %S" sprite))
+  (remove-window-sprite sprite)
+  (set! (-> (GRV_SPRITE_PTR sprite) z) z)
+  (insert-window-sprite sprite))
+
+(define-cproc sprite-z (sprite::<graviton-sprite>)
+  ::<double>
+  (return (-> sprite z)))
+
+(define-cproc set-sprite-angle! (sprite::<graviton-sprite> angle::<double>)
+  ::<void>
+  (set! (-> sprite angle) angle))
+
+(define-cproc sprite-angle (sprite::<graviton-sprite>)
+  ::<double>
+  (return (-> sprite angle)))
+
+(define-cproc set-sprite-zoom! (sprite::<graviton-sprite> zoom-x::<double> zoom-y::<double>)
+  ::<void>
+  (cond
+    ((and (< zoom-x 0) (< zoom-y 0))
+     (set! (-> sprite angle) (+ (-> sprite angle) 180)
+           (-> sprite zoom_x) (- zoom-x)
+           (-> sprite zoom_y) (- zoom-y)
+           (-> sprite flip) SDL_FLIP_NONE))
+    ((< zoom-x 0)
+     (set! (-> sprite zoom_x) (- zoom-x)
+           (-> sprite zoom_y) zoom_y
+           (-> sprite flip) SDL_FLIP_VERTICAL))
+    ((< zoom-y 0)
+     (set! (-> sprite zoom_x) zoom-x
+           (-> sprite zoom_y) (- zoom-y)
+           (-> sprite flip) SDL_FLIP_HORIZONTAL))
+    (else
+     (set! (-> sprite zoom_x) zoom-x
+           (-> sprite zoom_y) zoom-y
+           (-> sprite flip) SDL_FLIP_NONE))))
+
+(define-cproc sprite-zoom (sprite::<graviton-sprite>)
+  ::(<double> <double>)
+  (case (-> sprite flip)
+    ((SDL_FLIP_VERTICAL)
+     (return (- (-> sprite zoom_x)) (-> sprite zoom_y)))
+    ((SDL_FLIP_HORIZONTAL)
+     (return (-> sprite zoom_x) (- (-> sprite zoom_y))))
+    (else
+     (return (-> sprite zoom_x) (-> sprite zoom_y)))))
+
+(define-cproc set-sprite-visible! (sprite::<graviton-sprite> visible::<boolean>)
+  ::<void>
+  (set! (-> sprite visible) visible))
+
+(define-cproc sprite-visible? (sprite::<graviton-sprite>)
+  ::<boolean>
+  (return (-> sprite visible)))
+
+(define (set-sprite-image! sprite image :optional (rect (receive (w h) (image-size image)
+                                                          (list 0 0 w h))))
+  (%set-sprite-image! sprite image rect))
+
+(define (put-image window image center-x center-y :key rect (z 0) (angle 0) (zoom-x 1.0) (zoom-y 1.0) (visible #t))
+  (let1 rect (if (undefined? rect)
+                 (receive (w h) (image-size image)
+                   (list 0 0 w h))
+                 rect)
+    (make-sprite window image center-x center-y z rect angle zoom-x zoom-y visible)))
+
+
+;;;
+;;; Window
+;;;
+
+(inline-stub
+  (define-cfn register-grv-window (gwin::GrvWindow*)
+    ::ScmObj
+    (let* ((obj (MAKE_GRV_WINDOW gwin)))
+      (set! grv-windows (Scm_Cons obj grv-windows))
+      (return obj)))
+
+  (define-cfn unregister-grv-window (gwin::GrvWindow*)
+    ::void
+    (let* ((prev SCM_NIL))
+      (pair-for-each (lambda (pair)
+                       (let* ((curwin::GrvWindow* (GRV_WINDOW_PTR (SCM_CAR pair))))
+                         (when (== gwin curwin)
+                           (cond
+                             ((SCM_NULLP prev)
+                              (set! grv-windows (SCM_CDR pair))
+                              (break))
+                             (else
+                              (SCM_SET_CDR prev (SCM_CDR pair))
+                              (break))))))
+                     grv-windows)))
 
   (define-cfn destroy-window (gwin::GrvWindow*)
     ::void
@@ -505,7 +906,121 @@
           (-> gwin renderer) NULL
           (-> gwin proc) SCM_FALSE
           (-> gwin events) SCM_NIL))
+
+  (define-cfn window-pixel-width (gwin::GrvWindow*)
+    ::double
+    (return (/ 1.0 (fabs (ref (-> gwin param) m00)))))
+
+  (define-cfn window-pixel-height (gwin::GrvWindow*)
+    ::double
+    (return (/ 1.0 (fabs (ref (-> gwin param) m11)))))
+
+  (define-cfn window-coordinate (gwin::GrvWindow* x::double y::double ox::int* oy::int*)
+    ::void :static
+    (convert-coordinate (& (-> gwin param)) x y ox oy))
+
+  (define-cfn update-window-contents ()
+    ::void
+    (for-each (lambda (win)
+                (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win))
+                       (renderer::SDL_Renderer* (-> gwin renderer)))
+                  (SDL_SetRenderDrawBlendMode renderer SDL_BLENDMODE_BLEND)
+                  (SDL_SetRenderDrawColor renderer 0 0 0 255)
+                  (SDL_RenderClear renderer)
+                  (for-each (lambda (sprite)
+                              (render-sprite (GRV_SPRITE_PTR sprite)))
+                            (-> gwin sprites))
+                  (SDL_RenderPresent renderer)))
+              grv-windows))
   ) ;; end of inline-stub
+
+(define-cproc make-window (title::<const-cstring> size)
+  (let* ((width::int 0)
+         (height::int 0)
+         (flags::Uint32 0))
+    (cond
+      ((and (SCM_LISTP size)
+            (== (Scm_Length size) 2)
+            (SCM_INTP (Scm_ListRef size 0 SCM_UNBOUND))
+            (SCM_INTP (Scm_ListRef size 1 SCM_UNBOUND)))
+       (set! width (SCM_INT_VALUE (Scm_ListRef size 0 (SCM_MAKE_INT -1)))
+             height (SCM_INT_VALUE (Scm_ListRef size 1 (SCM_MAKE_INT -1)))))
+      ((SCM_EQ size 'fullscreen)
+       (set! flags SDL_WINDOW_FULLSCREEN))
+      (else
+       (Scm_Error "size must be a list of two integer elements or 'fullscreen, but got %S" size)))
+    (let* ((gwin::GrvWindow* (SCM_NEW (.type GrvWindow))))
+      (set! (-> gwin window) NULL
+            (-> gwin renderer) NULL
+            (-> gwin proc) SCM_FALSE
+            (-> gwin events) SCM_NIL
+            (-> gwin sprites) SCM_NIL)
+
+      (set! (-> gwin window) (SDL_CreateWindow title
+                                               SDL_WINDOWPOS_UNDEFINED
+                                               SDL_WINDOWPOS_UNDEFINED
+                                               width
+                                               height
+                                               flags))
+      (unless (-> gwin window)
+        (Scm_Error "SDL_CreateWindow failed: %s" (SDL_GetError)))
+
+      (let* ((w::int)
+             (h::int))
+        (SDL_GetWindowSize (-> gwin window) (& w) (& h))
+        (init-transform-param (& (-> gwin param)) w h))
+
+      (set! (-> gwin renderer) (SDL_CreateRenderer (-> gwin window) -1 SDL_RENDERER_PRESENTVSYNC))
+      (unless (-> gwin renderer)
+        (Scm_Error "SDL_CreateRenderer failed: %s" (SDL_GetError)))
+
+      (return (register-grv-window gwin)))))
+
+(define-cproc set-window-border! (gwin::<graviton-window> top::<double> right::<double> bottom::<double> left::<double>)
+  ::<void>
+  (let* ((width::int)
+         (height::int))
+    (SDL_GetWindowSize (-> gwin window) (& width) (& height))
+    (compute-transform-param (& (-> gwin param)) width height left top right bottom)))
+
+(define-cproc set-window-proc! (gwin::<graviton-window> proc)
+  (set! (-> gwin proc) proc))
+
+(define-cproc %window-events (gwin::<graviton-window>)
+  (return (-> gwin events)))
+
+(define-cproc clear-window-sprites! (gwin::<graviton-window>)
+  ::<void>
+  (for-each (lambda (sprite)
+              (let* ((gsprite::GrvSprite* (GRV_SPRITE_PTR gsprite)))
+                (invalidate-sprite gsprite)))
+            (-> gwin sprites))
+  (set! (-> gwin sprites) SCM_NIL))
+
+(define-cproc destroy-all-windows ()
+  ::<void>
+  (for-each (lambda (obj)
+              (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
+                (destroy-window gwin)))
+            grv-windows)
+  (set! grv-windows SCM_NIL))
+
+(define-cproc close-window (gwin::<graviton-window>)
+  ::<void>
+  (unless (-> gwin window)
+    (return))
+  (let* ((event::SDL_Event))
+    (set! (ref event window type) SDL_WINDOWEVENT
+          (ref event window windowID) (SDL_GetWindowID (-> gwin window))
+          (ref event window event) SDL_WINDOWEVENT_CLOSE)
+    (SDL_PushEvent (& event))))
+
+(define (window? obj)
+  (is-a? obj <graviton-window>))
+
+;;;
+;;; Event
+;;;
 
 (inline-stub
   (define-cfn enqueue-proc! (proc-packet::ProcPacket*)
@@ -540,7 +1055,32 @@
                (ref proc-queue start) (% (+ (ref proc-queue start) 1) len))
          (return proc-packet)))))
 
-  (define-cfn get-events ()
+  (define-cfn run-queued-procs (available-ticks::Uint32)
+    ::void
+    (let* ((start-ticks::Uint32 (SDL_GetTicks)))
+      (loop
+       (let* ((proc-packet::ProcPacket* (dequeue-proc!)))
+         (cond
+           ((== proc-packet NULL)
+            (return))
+           (else
+            (let* ((proc (-> proc-packet proc))
+                   (eval-packet::ScmEvalPacket* (-> proc-packet eval-packet)))
+              (cond
+                (eval-packet
+                 (SDL_LockMutex (-> proc-packet lock))
+                 (Scm_Apply proc SCM_NIL eval-packet)
+                 (SDL_CondSignal (-> proc-packet cond))
+                 (SDL_UnlockMutex (-> proc-packet lock)))
+                (else
+                 (let* ((packet::ScmEvalPacket))
+                   (Scm_Apply proc SCM_NIL (& packet))
+                   (unless (SCM_FALSEP (ref packet exception))
+                     (Scm_Raise (ref packet exception) 0)))))))))
+       (when (< available-ticks (- (SDL_GetTicks) start-ticks))
+         (return)))))
+
+  (define-cfn collect-all-events ()
     ::ScmObj
     (let* ((events SCM_NIL)
            (sdl-event::SDL_Event))
@@ -771,37 +1311,12 @@
               (case (ref sdl-event user code)
                 ((GRV_CALL_EVENT_CODE)
                  (enqueue-proc! (cast ProcPacket* (ref sdl-event user data1))))))))
-          )  ;; end of case
-        )  ;; end of while
+          ) ;; end of case
+        )   ;; end of while
       (return events)))
 
-  (define-cfn run-queued-procs (available-ticks::Uint32)
-    ::void
-    (let* ((start-ticks::Uint32 (SDL_GetTicks)))
-      (loop
-       (let* ((proc-packet::ProcPacket* (dequeue-proc!)))
-         (cond
-           ((== proc-packet NULL)
-            (return))
-           (else
-            (let* ((proc (-> proc-packet proc))
-                   (eval-packet::ScmEvalPacket* (-> proc-packet eval-packet)))
-              (cond
-                (eval-packet
-                 (SDL_LockMutex (-> proc-packet lock))
-                 (Scm_Apply proc SCM_NIL eval-packet)
-                 (SDL_CondSignal (-> proc-packet cond))
-                 (SDL_UnlockMutex (-> proc-packet lock)))
-                (else
-                 (let* ((packet::ScmEvalPacket))
-                   (Scm_Apply proc SCM_NIL (& packet))
-                   (unless (SCM_FALSEP (ref packet exception))
-                     (Scm_Raise (ref packet exception) 0)))))))))
-       (when (< available-ticks (- (SDL_GetTicks) start-ticks))
-         (return)))))
-
   ;; events must be reverse chronological order.
-  (define-cfn extract-window-events (gwin::GrvWindow* all-events)
+  (define-cfn collect-window-events (gwin::GrvWindow* all-events)
     ::ScmObj
     (let* ((win-events SCM_NIL)
            (winid (SCM_MAKE_INT (SDL_GetWindowID (-> gwin window)))))
@@ -822,12 +1337,12 @@
 
   (define-cfn run-window-handlers ()
     ::void
-    (let* ((all-events (get-events))
+    (let* ((all-events (collect-all-events))
            (will-close-windows SCM_NIL))
       (for-each (lambda (obj)
                   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj))
                          (proc (-> gwin proc)))
-                    (set! (-> gwin events) (extract-window-events gwin all-events))
+                    (set! (-> gwin events) (collect-window-events gwin all-events))
                     (when (SCM_PROCEDUREP proc)
                       (set! (-> gwin proc) SCM_FALSE)
                       (let* ((packet::ScmEvalPacket))
@@ -841,48 +1356,6 @@
                   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
                     (destroy-window gwin)))
                 will-close-windows)))
-
-  (define-cfn render-sprite (gsprite::GrvSprite*)
-    ::void
-    (when (or (SCM_FALSEP (-> gsprite image))
-              (not (-> gsprite visible)))
-      (return))
-    (let* ((gimage::GrvImage* (GRV_IMAGE_PTR (-> gsprite image))))
-      (refresh-textures gimage)
-      (let* ((win (-> gsprite window))
-             (gwin::GrvWindow* (GRV_WINDOW_PTR win))
-             (texture::SDL_Texture* (get-texture win gimage))
-             (spr-center-x::int)
-             (spr-center-y::int)
-             (spr-w::double (* (ref (-> gsprite srcrect) w) (-> gsprite zoom_x)))
-             (spr-h::double (* (ref (-> gsprite srcrect) h) (-> gsprite zoom_y)))
-             (dstrect::SDL_Rect))
-        (window-coordinate gwin (-> gsprite center_x) (-> gsprite center_y) (& spr-center-x) (& spr-center-y))
-        (set! (ref dstrect x) (cast int (round (- spr-center-x (/ spr-w 2.0))))
-              (ref dstrect y) (cast int (round (- spr-center-y (/ spr-h 2.0))))
-              (ref dstrect w) (cast int (round spr-w))
-              (ref dstrect h) (cast int (round spr-h)))
-        (SDL_RenderCopyEx (-> gwin renderer)
-                          texture
-                          (& (-> gsprite srcrect))
-                          (& dstrect)
-                          (-> gsprite angle)
-                          NULL
-                          (-> gsprite flip)))))
-
-  (define-cfn update-window-contents ()
-    ::void
-    (for-each (lambda (win)
-                (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win))
-                       (renderer::SDL_Renderer* (-> gwin renderer)))
-                  (SDL_SetRenderDrawBlendMode renderer SDL_BLENDMODE_BLEND)
-                  (SDL_SetRenderDrawColor renderer 0 0 0 255)
-                  (SDL_RenderClear renderer)
-                  (for-each (lambda (sprite)
-                              (render-sprite (GRV_SPRITE_PTR sprite)))
-                            (-> gwin sprites))
-                  (SDL_RenderPresent renderer)))
-              grv-windows))
 
   (define-cfn set-event-loop-status (running?::bool)
     ::void
@@ -899,121 +1372,73 @@
       (return running?)))
   )  ;; end of inline-stub
 
-(inline-stub
-  (define-cfn remove-window-sprite (sprite)
-    ::void
-    (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR (-> (GRV_SPRITE_PTR sprite) window)))
-           (sprites (-> gwin sprites)))
-      (cond
-        ((and (== (Scm_Length sprites) 1)
-              (SCM_EQ (SCM_CAR sprites) sprite))
-         (set! (-> gwin sprites) SCM_NIL))
-        (else
-         (let* ((prev-pair (SCM_CAR sprites)))
-           (pair-for-each (lambda (pair)
-                            (when (SCM_EQ (SCM_CAR pair) sprite)
-                              (SCM_SET_CDR prev-pair (SCM_CDR pair))
-                              (break))
-                            (set! prev-pair pair))
-                          (SCM_CDR sprites)))))))
+(define-cproc event-loop-running? ()
+  ::<boolean>
+  (return (event-loop-running?)))
 
-  (define-cfn insert-window-sprite (sprite)
-    ::void
-    (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR (-> (GRV_SPRITE_PTR sprite) window)))
-           (gsprite::GrvSprite* (GRV_SPRITE_PTR sprite)))
-      (cond
-        ((SCM_NULLP (-> gwin sprites))
-         (set! (-> gwin sprites) (SCM_LIST1 sprite)))
-        (else
-         (pair-for-each (lambda (pair)
-                          (cond
-                            ((> (-> (GRV_SPRITE_PTR (SCM_CAR pair)) z) (-> gsprite z))
-                             (SCM_SET_CDR pair (Scm_Cons (SCM_CAR pair) (SCM_CDR pair)))
-                             (SCM_SET_CAR pair sprite)
-                             (break))
-                            ((SCM_NULLP (SCM_CDR pair))
-                             (SCM_SET_CDR pair (Scm_Cons sprite SCM_NIL))
-                             (break))))
-                        (-> gwin sprites))))))
-  )  ;; end of inline-stub
+(define-cproc frame-per-second ()
+  ::<int>
+  (return frame-per-second))
 
-(define-cproc make-window (title::<const-cstring> size)
-  (let* ((width::int 0)
-         (height::int 0)
-         (flags::Uint32 0))
-    (cond
-      ((and (SCM_LISTP size)
-            (== (Scm_Length size) 2)
-            (SCM_INTP (Scm_ListRef size 0 SCM_UNBOUND))
-            (SCM_INTP (Scm_ListRef size 1 SCM_UNBOUND)))
-       (set! width (SCM_INT_VALUE (Scm_ListRef size 0 (SCM_MAKE_INT -1)))
-             height (SCM_INT_VALUE (Scm_ListRef size 1 (SCM_MAKE_INT -1)))))
-      ((SCM_EQ size 'fullscreen)
-       (set! flags SDL_WINDOW_FULLSCREEN))
-      (else
-       (Scm_Error "size must be a list of two integer elements or 'fullscreen, but got %S" size)))
-    (let* ((gwin::GrvWindow* (SCM_NEW (.type GrvWindow))))
-      (set! (-> gwin window) NULL
-            (-> gwin renderer) NULL
-            (-> gwin proc) SCM_FALSE
-            (-> gwin events) SCM_NIL
-            (-> gwin sprites) SCM_NIL)
+(define-cproc set-frame-per-second! (fps::<int>)
+  ::<void>
+  (let* ((t::Uint32 (cast Uint32 (floor (/ 1000.0 fps)))))
+    (set! frame-per-second fps
+          event-loop-ticks t)))
 
-      (set! (-> gwin window) (SDL_CreateWindow title
-                                               SDL_WINDOWPOS_UNDEFINED
-                                               SDL_WINDOWPOS_UNDEFINED
-                                               width
-                                               height
-                                               flags))
-      (unless (-> gwin window)
-        (Scm_Error "SDL_CreateWindow failed: %s" (SDL_GetError)))
+(define-cproc run-event-loop ()
+  ::<void>
+  (when (event-loop-running?)
+    (return))
 
-      (let* ((w::int)
-             (h::int))
-        (SDL_GetWindowSize (-> gwin window) (& w) (& h))
-        (init-transform-param (& (-> gwin param)) w h))
+  (set-event-loop-status true)
+  (let* ((packet::ScmEvalPacket))
+    (Scm_EvalCString "(run-repl-if-needed)"
+                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))
+                     (& packet))
+    (unless (SCM_FALSEP (ref packet exception))
+      (Scm_Raise (ref packet exception) 0)))
+  (SDL_StartTextInput)
+  (let* ((run-window-handlers-elapse::Uint32 0)
+         (run-queued-procs-elapse::Uint32 0)
+         (update-window-contents-elapse::Uint32 0))
+    (while (not (SCM_NULLP grv-windows))
+      (let* ((t::Uint32 (SDL_GetTicks)))
+        (run-window-handlers)
+        (set! run-window-handlers-elapse (- (SDL_GetTicks) t)))
 
-      (set! (-> gwin renderer) (SDL_CreateRenderer (-> gwin window) -1 SDL_RENDERER_PRESENTVSYNC))
-      (unless (-> gwin renderer)
-        (Scm_Error "SDL_CreateRenderer failed: %s" (SDL_GetError)))
+      (let* ((t::Uint32 (SDL_GetTicks))
+             (available-ticks::Uint32 (?: (< event-loop-ticks (+ run-window-handlers-elapse update-window-contents-elapse))
+                                          0
+                                          (- (+ run-window-handlers-elapse update-window-contents-elapse) event-loop-ticks))))
+        (run-queued-procs available-ticks)
+        (set! run-queued-procs-elapse (- (SDL_GetTicks) t)))
 
-      (return (register-grv-window gwin)))))
+      (let* ((t::Uint32 (SDL_GetTicks)))
+        (update-window-contents)
+        (set! update-window-contents-elapse (- (SDL_GetTicks) t)))
 
-(inline-stub
-  (define-cfn compute-transform-param (param::TransformParam*
-                                       width::int
-                                       height::int
-                                       x0::double
-                                       y0::double
-                                       x1::double
-                                       y1::double)
-    ::void
-    (let* ((wex::int (- width 1))
-           (wey::int (- height 1))
-           (wcx::double (/ wex 2.0))
-           (wcy::double (/ wey 2.0))
-           (rx::double (/ (- x1 x0) wex))
-           (ry::double (/ (- y1 y0) wey))
-           (r::double (?: (< (fabs rx) (fabs ry)) (fabs ry) (fabs rx)))
-           (mx::double (?: (< rx 0.0) (- r) r))
-           (my::double (?: (< ry 0.0) (- r) r))
-           (cx::double (/ (+ x0 x1) 2.0))
-           (cy::double (/ (+ y0 y1) 2.0))
-           (sx::double (+ (* mx (- wcx)) cx))
-           (sy::double (+ (* my (- wcy)) cy))
-           (ex::double (+ (* mx wcx) cx))
-           (ey::double (+ (* my wcy) cy)))
-      (set! (-> param m00) (/ 1.0 mx)
-            (-> param m01) 0.0
-            (-> param m10) 0.0
-            (-> param m11) (/ 1.0 my)
-            (-> param x0) (- (/ sx mx))
-            (-> param y0) (- (/ sy my))
-            (-> param left) sx
-            (-> param top) sy
-            (-> param right) ex
-            (-> param bottom) ey)))
-  )  ;; end of inline-stub
+      (let* ((total-elapse::Uint32 (+ run-window-handlers-elapse run-queued-procs-elapse update-window-contents-elapse)))
+        (SDL_LogDebug SDL_LOG_CATEGORY_APPLICATION "run-window-handlers:    %d ms" run-window-handlers-elapse)
+        (SDL_LogDebug SDL_LOG_CATEGORY_APPLICATION "run-queued-procs:       %d ms" run-queued-procs-elapse)
+        (SDL_LogDebug SDL_LOG_CATEGORY_APPLICATION "update-window-contents: %d ms" update-window-contents-elapse)
+        (SDL_LogDebug SDL_LOG_CATEGORY_APPLICATION "total:                  %d ms" total-elapse)
+        (SDL_LogDebug SDL_LOG_CATEGORY_APPLICATION "event-loop-ticks:       %d ms" event-loop-ticks)
+        (when (< total-elapse event-loop-ticks)
+          (SDL_Delay (- event-loop-ticks total-elapse))))))
+
+  (set-event-loop-status false)
+
+  (let* ((packet::ScmEvalPacket))
+    (Scm_EvalCString "(wait-all-repl-terminate)"
+                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))
+                     (& packet))
+    (unless (SCM_FALSEP (ref packet exception))
+      (Scm_Raise (ref packet exception) 0))))
+
+;;;
+;;; Image & Window coordinate utilities
+;;;
 
 (define-cproc pixel-size (window-or-image)
   ::(<double> <double>)
@@ -1033,28 +1458,110 @@
 (define (pixel-height window-or-image)
   (values-ref (pixel-size window-or-image) 1))
 
-(define-cproc set-window-border! (gwin::<graviton-window> top::<double> right::<double> bottom::<double> left::<double>)
-  ::<void>
-  (let* ((width::int)
-         (height::int))
-    (SDL_GetWindowSize (-> gwin window) (& width) (& height))
-    (compute-transform-param (& (-> gwin param)) width height left top right bottom)))
+(define-cproc border-size (window-or-image)
+  ::(<int> <int>)
+  (cond
+    ((GRV_WINDOW_P window-or-image)
+     (let* ((w::int)
+            (h::int))
+       (SDL_GetWindowSize (-> (GRV_WINDOW_PTR window-or-image) window) (& w) (& h))
+       (return w h)))
+    ((GRV_IMAGE_P window-or-image)
+     (return (-> (GRV_IMAGE_PTR window-or-image) surface w)
+             (-> (GRV_IMAGE_PTR window-or-image) surface h)))
+    (else
+     (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
+
+(define-cproc border-left (window-or-image)
+  ::<double>
+  (return (-> (get-transform-param window-or-image) left)))
+
+(define-cproc border-top (window-or-image)
+  ::<double>
+  (return (-> (get-transform-param window-or-image) top)))
+
+(define-cproc border-right (window-or-image)
+  ::<double>
+  (return (-> (get-transform-param window-or-image) right)))
+
+(define-cproc border-bottom (window-or-image)
+  ::<double>
+  (return (-> (get-transform-param window-or-image) bottom)))
+
+(define-cproc center-point (window-or-image)
+  ::<list>
+  (let* ((param::TransformParam* (get-transform-param window-or-image)))
+    (return (SCM_LIST2 (Scm_MakeFlonum (/ (+ (-> param left) (-> param right)) 2.0))
+                       (Scm_MakeFlonum (/ (+ (-> param top) (-> param bottom)) 2.0))))))
+
+(define-cproc center-x (window-or-image)
+  ::<double>
+  (let* ((param::TransformParam* (get-transform-param window-or-image)))
+    (return (/ (+ (-> param left) (-> param right)) 2.0))))
+
+(define-cproc center-y (window-or-image)
+  ::<double>
+  (let* ((param::TransformParam* (get-transform-param window-or-image)))
+    (return (/ (+ (-> param top) (-> param bottom)) 2.0))))
+
+(define (set-border! window-or-image v0 :optional (v1 #f) (v2 #f) (v3 #f))
+  (let ((top #f)
+        (bottom #f)
+        (left #f)
+        (right #f))
+    (cond
+      ((not v1)                         ; # of args = 1
+       (set! top v0)
+       (set! right v0)
+       (set! bottom (- v0))
+       (set! left (- v0)))
+      ((not v2)                         ; # of args = 2
+       (set! top v0)
+       (set! right v1)
+       (set! bottom (- v0))
+       (set! left (- v1)))
+      ((not v3)                         ; # of args = 3
+       (set! top v0)
+       (set! right v1)
+       (set! bottom v2)
+       (set! left (- v1)))
+      (else                             ; # of args = 4
+       (set! top v0)
+       (set! right v1)
+       (set! bottom v2)
+       (set! left v3)))
+    (cond
+      ((window? window-or-image)
+       (set-window-border! window-or-image top right bottom left))
+      ((image? window-or-image)
+       (set-image-border! window-or-image top right bottom left))
+      (else
+       (errorf "<graviton-window> or <graviton-image> required, but got %S" window-or-image)))))
+
+(define (border-width window-or-image)
+  (values-ref (border-size window-or-image) 0))
+
+(define (border-height window-or-image)
+  (values-ref (border-size window-or-image) 1))
+
+(define (border-min-x window-or-image)
+  (min (border-left window-or-image) (border-right window-or-image)))
+
+(define (border-max-x window-or-image)
+  (max (border-left window-or-image) (border-right window-or-image)))
+
+(define (border-min-y window-or-image)
+  (min (border-top window-or-image) (border-bottom window-or-image)))
+
+(define (border-max-y window-or-image)
+  (max (border-top window-or-image) (border-bottom window-or-image)))
+
 
 ;;;
-;;; Image
+;;; Draw
 ;;;
 
 (inline-stub
-  (define-cfn finalize-image (z data::void*)
-    ::void
-    (when (GRV_IMAGE_P z)
-      (let* ((gimage::GrvImage* (GRV_IMAGE_PTR z)))
-        (unless (SCM_NULLP (-> gimage texture_alist))
-          (fprintf stderr "[BUG] texture_alist in <graviton-image> must be nil in finalizer. forgot to call release-texture?\n"))
-        (SDL_FreeSurface (-> gimage surface))
-        (set! (-> gimage surface) NULL
-              (-> gimage texture_alist) SCM_NIL))))
-
   (define-cfn sign (a::int)
     ::int
     (cond
@@ -1065,37 +1572,16 @@
       (else
        (return 1))))
 
-  (define-cfn update-rect (gimage::GrvImage* x::int y::int w::int h::int)
-    ::void
-    (when (SCM_NULLP (-> gimage texture_alist))
-      (return))
-
-    (let* ((rect::SDL_Rect* (& (-> gimage update_rect))))
-      (cond
-        ((SDL_RectEmpty rect)
-         (set! (-> rect x) x
-               (-> rect y) y
-               (-> rect w) w
-               (-> rect h) h))
-        (else
-         (let* ((rect-a::SDL_Rect)
-                (rect-b::SDL_Rect)
-                (rect-c::SDL_Rect)
-                (rect-x::SDL_Rect))
-           (set! (ref rect-a x) (-> rect x)
-                 (ref rect-a y) (-> rect y)
-                 (ref rect-a w) (-> rect w)
-                 (ref rect-a h) (-> rect h)
-                 (ref rect-b x) x
-                 (ref rect-b y) y
-                 (ref rect-b w) w
-                 (ref rect-b h) h
-                 (ref rect-c x) 0
-                 (ref rect-c y) 0
-                 (ref rect-c w) (-> gimage surface w)
-                 (ref rect-c h) (-> gimage surface h))
-           (SDL_UnionRect (& rect-a) (& rect-b) (& rect-x))
-           (SDL_IntersectRect (& rect-c) (& rect-x) (& (-> gimage update_rect))))))))
+  (define-cfn create-scratch-area (x::int y::int w::int h::int)
+    ::ScratchArea*
+    (let* ((area::ScratchArea* (SCM_NEW (.type ScratchArea))))
+      (set! (-> area x) x
+            (-> area y) y
+            (-> area w) w
+            (-> area h) h
+            (-> area data) (SCM_NEW_ATOMIC_ARRAY (.type char) (* w h)))
+      (memset (-> area data) 0 (* w h))
+      (return area)))
 
   "
 typedef enum {
@@ -1264,385 +1750,6 @@ typedef enum {
     (update-rect gimage (?: (< x0 x1) x0 x1) (?: (< y0 y1) y0 y1) (+ (abs (- x0 x1)) 1) (+ (abs (- y0 y1)) 1)))
   )  ;; end of inline-stub
 
-(define-cproc make-image (w::<int> h::<int>)
-  (let* ((surface::SDL_Surface* (SDL_CreateRGBSurfaceWithFormat 0 w h 32 SDL_PIXELFORMAT_RGBA32))
-         (gimage::GrvImage* (SCM_NEW (.type GrvImage)))
-         (obj (MAKE_GRV_IMAGE gimage)))
-    (when (== surface NULL)
-      (Scm_Error "SDL_CreateRGBSurfaceWithFormat failed: %s" (SDL_GetError)))
-    (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
-    (set! (-> gimage surface) surface
-          (-> gimage texture_alist) SCM_NIL
-          (ref (-> gimage update_rect) x) 0
-          (ref (-> gimage update_rect) y) 0
-          (ref (-> gimage update_rect) w) 0
-          (ref (-> gimage update_rect) h) 0)
-    (init-transform-param (& (-> gimage param)) w h)
-    (Scm_RegisterFinalizer obj finalize-image NULL)
-    (return obj)))
-
-(define-cproc load-image (filename::<const-cstring>)
-  ::<graviton-image>
-  (let* ((img-surface::SDL_Surface* (IMG_Load filename)))
-    (when (== img-surface NULL)
-      (Scm_Error "IMG_Load failed: %s" (IMG_GetError)))
-    (let* ((image::GrvImage* (SCM_NEW (.type GrvImage)))
-           (surface::SDL_Surface* (SDL_ConvertSurfaceFormat img-surface SDL_PIXELFORMAT_RGBA32 0)))
-      (when (== surface NULL)
-        (Scm_Error "SDL_ConvertSurface failed: %s" (SDL_GetError)))
-      (SDL_FreeSurface img-surface)
-      (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
-      (set! (-> image surface) surface
-            (-> image texture_alist) SCM_NIL
-            (ref (-> image update_rect) x) 0
-            (ref (-> image update_rect) y) 0
-            (ref (-> image update_rect) w) 0
-            (ref (-> image update_rect) h) 0)
-      (return image))))
-
-(define-cproc set-image-border! (gimage::<graviton-image> top::<double> right::<double> bottom::<double> left::<double>)
-  ::<void>
-  (compute-transform-param (& (-> gimage param)) (-> gimage surface w) (-> gimage surface h) left top right bottom))
-
-(define-cproc image-size (image::<graviton-image>)
-  ::(<int> <int>)
-  (return (-> image surface w) (-> image surface h)))
-
-(inline-stub
-  (define-cfn get-transform-param (window-or-image)
-    ::TransformParam*
-    (cond
-      ((GRV_WINDOW_P window-or-image)
-       (return (& (-> (GRV_WINDOW_PTR window-or-image) param))))
-      ((GRV_IMAGE_P window-or-image)
-       (return (& (-> (GRV_IMAGE_PTR window-or-image) param))))
-      (else
-       (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
-  ) ;; end of inline-stub
-
-(define-cproc border-size (window-or-image)
-  ::(<int> <int>)
-  (cond
-    ((GRV_WINDOW_P window-or-image)
-     (let* ((w::int)
-            (h::int))
-       (SDL_GetWindowSize (-> (GRV_WINDOW_PTR window-or-image) window) (& w) (& h))
-       (return w h)))
-    ((GRV_IMAGE_P window-or-image)
-     (return (-> (GRV_IMAGE_PTR window-or-image) surface w)
-             (-> (GRV_IMAGE_PTR window-or-image) surface h)))
-    (else
-     (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
-
-(define-cproc border-left (window-or-image)
-  ::<double>
-  (return (-> (get-transform-param window-or-image) left)))
-
-(define-cproc border-top (window-or-image)
-  ::<double>
-  (return (-> (get-transform-param window-or-image) top)))
-
-(define-cproc border-right (window-or-image)
-  ::<double>
-  (return (-> (get-transform-param window-or-image) right)))
-
-(define-cproc border-bottom (window-or-image)
-  ::<double>
-  (return (-> (get-transform-param window-or-image) bottom)))
-
-(define-cproc center-point (window-or-image)
-  ::<list>
-  (let* ((param::TransformParam* (get-transform-param window-or-image)))
-    (return (SCM_LIST2 (Scm_MakeFlonum (/ (+ (-> param left) (-> param right)) 2.0))
-                       (Scm_MakeFlonum (/ (+ (-> param top) (-> param bottom)) 2.0))))))
-
-(define-cproc center-x (window-or-image)
-  ::<double>
-  (let* ((param::TransformParam* (get-transform-param window-or-image)))
-    (return (/ (+ (-> param left) (-> param right)) 2.0))))
-
-(define-cproc center-y (window-or-image)
-  ::<double>
-  (let* ((param::TransformParam* (get-transform-param window-or-image)))
-    (return (/ (+ (-> param top) (-> param bottom)) 2.0))))
-
-(define-cproc image-rgba-pixels (image::<graviton-image>)
-  (let* ((surface::SDL_Surface* (-> image surface))
-         (len::int (* (-> surface w) (-> surface h) 4))
-         (vec (Scm_MakeU32Vector len 0)))
-    (SDL_LockSurface surface)
-    (memcpy (SCM_U32VECTOR_ELEMENTS vec) (-> surface pixels) len)
-    (SDL_UnlockSurface surface)
-    (return vec)))
-
-(define-cproc set-image-rgba-pixels! (image::<graviton-image> pixels::<u32vector>)
-  ::<void>
-  (let* ((surface::SDL_Surface* (-> image surface))
-         (len::int (* (-> surface w) (-> surface h) 4)))
-    (SDL_LockSurface surface)
-    (memcpy (-> surface pixels)
-            (SCM_U32VECTOR_ELEMENTS pixels)
-            (?: (< len (SCM_U32VECTOR_SIZE pixels)) len (SCM_U32VECTOR_SIZE pixels)))
-    (SDL_UnlockSurface surface)
-    (set! (ref (-> image update_rect) x) 0
-          (ref (-> image update_rect) y) 0
-          (ref (-> image update_rect) w) (-> surface w)
-          (ref (-> image update_rect) h) (-> surface h))))
-
-(define-cproc image-rgba (image::<graviton-image> x::<int> y::<int>)
-  ::<int32>
-  (unless (and (<= 0 x) (< x (-> image surface w))
-               (<= 0 y) (< y (-> image surface h)))
-    (Scm_Error "(x, y) must be in (0, 0)-(%d, %d), but got (%d, %d)" (-> image surface w) (-> image surface h) x y))
-  (SDL_LockSurface (-> image surface))
-  (let* ((i::int (+ (* y (-> image surface pitch)) (* x (-> image surface format BytesPerPixel))))
-         (v::Uint32 (aref (cast Uint32* (-> image surface pixels)) i)))
-    (SDL_UnlockSurface (-> image surface))
-    (return v)))
-
-(define-cproc make-sprite (window
-                           image
-                           center-x::<double>
-                           center-y::<double>
-                           z::<double>
-                           rect
-                           angle::<double>
-                           zoom_x::<double>
-                           zoom_y::<double>
-                           visible::<boolean>)
-  (unless (GRV_WINDOW_P window)
-    (Scm_Error "window must be <graviton-window>, but got %S" window))
-  (unless (or (SCM_FALSEP image)
-              (GRV_IMAGE_P image))
-    (Scm_Error "image must be <graviton-image> or #f, but got %S" image))
-  (unless (and (SCM_LISTP rect)
-               (== (Scm_Length rect) 4)
-               (SCM_INTP (Scm_ListRef rect 0 SCM_UNBOUND))
-               (SCM_INTP (Scm_ListRef rect 1 SCM_UNBOUND))
-               (SCM_INTP (Scm_ListRef rect 2 SCM_UNBOUND))
-               (SCM_INTP (Scm_ListRef rect 3 SCM_UNBOUND)))
-    (Scm_Error "rect must be (x y w h), but got %S" rect))
-  (let* ((sprite::GrvSprite* (SCM_NEW (.type GrvSprite)))
-         (flip::SDL_RendererFlip))
-    (cond
-      ((and (< zoom_x 0) (< zoom_y 0))
-       (set! zoom_x (- zoom_x)
-             zoom_y (- zoom_y)
-             angle (+ angle 180)
-             flip SDL_FLIP_NONE))
-      ((< zoom_x 0)
-       (set! zoom_x (- zoom_x)
-             flip SDL_FLIP_VERTICAL))
-      ((< zoom_y 0)
-       (set! zoom_y (- zoom_y)
-             flip SDL_FLIP_HORIZONTAL))
-      (else
-       (set! flip SDL_FLIP_NONE)))
-    (set! (-> sprite window) window
-          (-> sprite image) image
-          (-> sprite center_x) center-x
-          (-> sprite center_y) center-y
-          (-> sprite z) z
-          (ref (-> sprite srcrect) x) (SCM_INT_VALUE (Scm_ListRef rect 0 (SCM_MAKE_INT 0)))
-          (ref (-> sprite srcrect) y) (SCM_INT_VALUE (Scm_ListRef rect 1 (SCM_MAKE_INT 0)))
-          (ref (-> sprite srcrect) w) (SCM_INT_VALUE (Scm_ListRef rect 2 (SCM_MAKE_INT 0)))
-          (ref (-> sprite srcrect) h) (SCM_INT_VALUE (Scm_ListRef rect 3 (SCM_MAKE_INT 0)))
-          (-> sprite angle) angle
-          (-> sprite zoom_x) zoom_x
-          (-> sprite zoom_y) zoom_y
-          (-> sprite flip) flip
-          (-> sprite visible) visible)
-    (unless (SCM_FALSEP image)
-      (retain-texture window (GRV_IMAGE_PTR image)))
-    (let* ((sprite-obj (MAKE_GRV_SPRITE sprite)))
-      (Scm_RegisterFinalizer sprite-obj finalize-sprite NULL)
-      (insert-window-sprite sprite-obj)
-      (return sprite-obj))))
-
-(define-cproc %set-sprite-image! (sprite::<graviton-sprite> image rect)
-  ::<void>
-  (unless (or (SCM_FALSEP image)
-              (GRV_IMAGE_P image))
-    (Scm_Error "image must be <graviton-image> or #f, but got %S" image))
-  (unless (and (SCM_LISTP rect)
-               (== (Scm_Length rect) 4)
-               (SCM_INTP (Scm_ListRef rect 0 SCM_UNBOUND))
-               (SCM_INTP (Scm_ListRef rect 1 SCM_UNBOUND))
-               (SCM_INTP (Scm_ListRef rect 2 SCM_UNBOUND))
-               (SCM_INTP (Scm_ListRef rect 3 SCM_UNBOUND)))
-    (Scm_Error "rect must be (x y w h), but got %S" rect))
-  (unless (SCM_FALSEP (-> sprite image))
-    (release-texture (-> sprite window) (GRV_IMAGE_PTR (-> sprite image))))
-  (unless (SCM_FALSEP image)
-    (retain-texture (-> sprite window) (GRV_IMAGE_PTR image)))
-  (set! (-> sprite image) image
-        (ref (-> sprite srcrect) x) (SCM_INT_VALUE (Scm_ListRef rect 0 (SCM_MAKE_INT 0)))
-        (ref (-> sprite srcrect) y) (SCM_INT_VALUE (Scm_ListRef rect 1 (SCM_MAKE_INT 0)))
-        (ref (-> sprite srcrect) w) (SCM_INT_VALUE (Scm_ListRef rect 2 (SCM_MAKE_INT 0)))
-        (ref (-> sprite srcrect) h) (SCM_INT_VALUE (Scm_ListRef rect 3 (SCM_MAKE_INT 0)))))
-
-(define-cproc sprite-image (sprite::<graviton-sprite>)
-  ::(<top> <top>)
-  (return (-> sprite image)
-          (SCM_LIST4 (SCM_MAKE_INT (ref (-> sprite srcrect) x))
-                     (SCM_MAKE_INT (ref (-> sprite srcrect) y))
-                     (SCM_MAKE_INT (ref (-> sprite srcrect) w))
-                     (SCM_MAKE_INT (ref (-> sprite srcrect) h)))))
-
-(define-cproc set-sprite-center-position! (sprite::<graviton-sprite> x::<double> y::<double>)
-  ::<void>
-  (set! (-> sprite center_x) x
-        (-> sprite center_y) y))
-
-(define-cproc sprite-center-position (sprite::<graviton-sprite>)
-  ::(<double> <double>)
-  (return (-> sprite center_x) (-> sprite center_y)))
-
-(define-cproc set-sprite-z! (sprite z::<double>)
-  ::<void>
-  (unless (GRV_SPRITE_P sprite)
-    (Scm_Error "<graviton-sprite> required, but got %S" sprite))
-  (remove-window-sprite sprite)
-  (set! (-> (GRV_SPRITE_PTR sprite) z) z)
-  (insert-window-sprite sprite))
-
-(define-cproc sprite-z (sprite::<graviton-sprite>)
-  ::<double>
-  (return (-> sprite z)))
-
-(define-cproc set-sprite-angle! (sprite::<graviton-sprite> angle::<double>)
-  ::<void>
-  (set! (-> sprite angle) angle))
-
-(define-cproc sprite-angle (sprite::<graviton-sprite>)
-  ::<double>
-  (return (-> sprite angle)))
-
-(define-cproc set-sprite-zoom! (sprite::<graviton-sprite> zoom-x::<double> zoom-y::<double>)
-  ::<void>
-  (cond
-    ((and (< zoom-x 0) (< zoom-y 0))
-     (set! (-> sprite angle) (+ (-> sprite angle) 180)
-           (-> sprite zoom_x) (- zoom-x)
-           (-> sprite zoom_y) (- zoom-y)
-           (-> sprite flip) SDL_FLIP_NONE))
-    ((< zoom-x 0)
-     (set! (-> sprite zoom_x) (- zoom-x)
-           (-> sprite zoom_y) zoom_y
-           (-> sprite flip) SDL_FLIP_VERTICAL))
-    ((< zoom-y 0)
-     (set! (-> sprite zoom_x) zoom-x
-           (-> sprite zoom_y) (- zoom-y)
-           (-> sprite flip) SDL_FLIP_HORIZONTAL))
-    (else
-     (set! (-> sprite zoom_x) zoom-x
-           (-> sprite zoom_y) zoom-y
-           (-> sprite flip) SDL_FLIP_NONE))))
-
-(define-cproc sprite-zoom (sprite::<graviton-sprite>)
-  ::(<double> <double>)
-  (case (-> sprite flip)
-    ((SDL_FLIP_VERTICAL)
-     (return (- (-> sprite zoom_x)) (-> sprite zoom_y)))
-    ((SDL_FLIP_HORIZONTAL)
-     (return (-> sprite zoom_x) (- (-> sprite zoom_y))))
-    (else
-     (return (-> sprite zoom_x) (-> sprite zoom_y)))))
-
-(define-cproc set-sprite-visible! (sprite::<graviton-sprite> visible::<boolean>)
-  ::<void>
-  (set! (-> sprite visible) visible))
-
-(define-cproc sprite-visible? (sprite::<graviton-sprite>)
-  ::<boolean>
-  (return (-> sprite visible)))
-
-(define-cproc set-window-proc! (gwin::<graviton-window> proc)
-  (set! (-> gwin proc) proc))
-
-(define-cproc %window-events (gwin::<graviton-window>)
-  (return (-> gwin events)))
-
-(define-cproc clear-window-sprites! (gwin::<graviton-window>)
-  ::<void>
-  (set! (-> gwin sprites) SCM_NIL))
-
-(define-cproc event-loop-running? ()
-  ::<boolean>
-  (return (event-loop-running?)))
-
-(define-cproc frame-per-second ()
-  ::<int>
-  (return frame-per-second))
-
-(define-cproc set-frame-per-second! (fps::<int>)
-  ::<void>
-  (let* ((t::Uint32 (cast Uint32 (floor (/ 1000.0 fps)))))
-    (set! frame-per-second fps
-          event-loop-ticks t)))
-
-(define-cproc run-event-loop ()
-  ::<void>
-  (when (event-loop-running?)
-    (return))
-
-  (set-event-loop-status true)
-  (let* ((packet::ScmEvalPacket))
-    (Scm_EvalCString "(run-repl-if-needed)"
-                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))
-                     (& packet))
-    (unless (SCM_FALSEP (ref packet exception))
-      (Scm_Raise (ref packet exception) 0)))
-  (SDL_StartTextInput)
-  (let* ((run-window-handlers-elapse::Uint32 0)
-         (run-queued-procs-elapse::Uint32 0)
-         (update-window-contents-elapse::Uint32 0))
-    (while (not (SCM_NULLP grv-windows))
-      (let* ((t::Uint32 (SDL_GetTicks)))
-        (run-window-handlers)
-        (set! run-window-handlers-elapse (- (SDL_GetTicks) t)))
-
-      (let* ((t::Uint32 (SDL_GetTicks))
-             (available-ticks::Uint32 (?: (< event-loop-ticks (+ run-window-handlers-elapse update-window-contents-elapse))
-                                          0
-                                          (- (+ run-window-handlers-elapse update-window-contents-elapse) event-loop-ticks))))
-        (run-queued-procs available-ticks)
-        (set! run-queued-procs-elapse (- (SDL_GetTicks) t)))
-
-      (let* ((t::Uint32 (SDL_GetTicks)))
-        (update-window-contents)
-        (set! update-window-contents-elapse (- (SDL_GetTicks) t)))
-
-      (when (< (+ run-window-handlers-elapse run-queued-procs-elapse update-window-contents-elapse) event-loop-ticks)
-        (SDL_Delay (- event-loop-ticks (+ run-window-handlers-elapse run-queued-procs-elapse update-window-contents-elapse))))))
-
-  (set-event-loop-status false)
-
-  (let* ((packet::ScmEvalPacket))
-    (Scm_EvalCString "(wait-all-repl-terminate)"
-                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))
-                     (& packet))
-    (unless (SCM_FALSEP (ref packet exception))
-      (Scm_Raise (ref packet exception) 0))))
-
-(define-cproc destroy-all-windows ()
-  ::<void>
-  (for-each (lambda (obj)
-              (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
-                (destroy-window gwin)))
-            grv-windows)
-  (set! grv-windows SCM_NIL))
-
-(define-cproc close-window (gwin::<graviton-window>)
-  ::<void>
-  (unless (-> gwin window)
-    (return))
-  (let* ((event::SDL_Event))
-    (set! (ref event window type) SDL_WINDOWEVENT
-          (ref event window windowID) (SDL_GetWindowID (-> gwin window))
-          (ref event window event) SDL_WINDOWEVENT_CLOSE)
-    (SDL_PushEvent (& event))))
-
 (define-cproc %draw-rect (gimage::<graviton-image> point0::<list> point1::<list> color::<int> fill?::<boolean>)
   ::<void>
   (let* ((x0::double (Scm_GetDouble (Scm_ListRef point0 0 SCM_UNBOUND)))
@@ -1763,220 +1870,6 @@ typedef enum {
          (when fill?
            (scratch-fill-border! area)
            (fill-inside gimage area color)))))))
-
-(define-cproc %message-box (title::<const-cstring> message::<const-cstring> message-type)
-  ::<void>
-  (let* ((flags::Uint32))
-    (cond
-      ((SCM_EQ message-type 'info)
-       (set! flags SDL_MESSAGEBOX_INFORMATION))
-      ((SCM_EQ message-type 'warning)
-       (set! flags SDL_MESSAGEBOX_WARNING))
-      ((SCM_EQ message-type 'error)
-       (set! flags SDL_MESSAGEBOX_ERROR))
-      (else
-       (Scm_Error "type must be info, warning or error, but got %S" message-type)))
-    (when (< (SDL_ShowSimpleMessageBox flags title message NULL) 0)
-      (Scm_Error "SDL_ShowSimpleMessageBox failed: %s" (SDL_GetError)))))
-
-(define-cproc call-on-main-thread (proc :key (wait?::<boolean> #t))
-  ::<void>
-  (let* ((packet::ScmEvalPacket* (SCM_NEW (.type ScmEvalPacket))))
-    (cond
-      ((== main-thread-id (SDL_ThreadID))
-       (Scm_Apply proc SCM_NIL packet))
-      ((not wait?)
-       (let* ((proc-packet::ProcPacket* (SCM_NEW (.type ProcPacket)))
-              (event::SDL_Event))
-         (set! (-> proc-packet proc) proc
-               (-> proc-packet lock) NULL
-               (-> proc-packet cond) NULL
-               (-> proc-packet eval-packet) NULL)
-         (set! (ref event type) graviton-event
-               (ref event user code) GRV_CALL_EVENT_CODE
-               (ref event user data1) proc-packet
-               (ref event user data2) NULL)
-         (SDL_PushEvent (& event))
-         (return)))
-      (else
-       (let* ((proc-packet::ProcPacket* (SCM_NEW (.type ProcPacket)))
-              (event::SDL_Event))
-         (set! (-> proc-packet proc) proc
-               (-> proc-packet lock) (SDL_CreateMutex)
-               (-> proc-packet cond) (SDL_CreateCond)
-               (-> proc-packet eval-packet) packet)
-         (set! (ref event type) graviton-event
-               (ref event user code) GRV_CALL_EVENT_CODE
-               (ref event user data1) proc-packet
-               (ref event user data2) NULL)
-         (SDL_LockMutex (-> proc-packet lock))
-         (SDL_PushEvent (& event))
-         (SDL_CondWait (-> proc-packet cond) (-> proc-packet lock))
-         (SDL_UnlockMutex (-> proc-packet lock))
-         (SDL_DestroyCond (-> proc-packet cond))
-         (SDL_DestroyMutex (-> proc-packet lock)))))
-    (cond
-      ((SCM_FALSEP (-> packet exception))
-       (let* ((i::int)
-              (args SCM_NIL))
-         (for ((set! i (- (-> packet numResults) 1)) (<= 0 i) (pre-- i))
-           (set! args (Scm_Cons (aref (-> packet results) i) args)))
-         (SCM_RETURN (Scm_Values args))))
-      (else
-       (Scm_Raise (-> packet exception) 0)))))
-
-(include "graviton/enum2sym.scm")
-
-(compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
-
-(define-record-type (<point> (pseudo-rtd <list>))
-  make-point point?
-  (x point-x)
-  (y point-y))
-
-(define (window? obj)
-  (is-a? obj <graviton-window>))
-
-(define (image? obj)
-  (is-a? obj <graviton-image>))
-
-(define (window-events window)
-  (shift cont
-    (set-window-proc! window
-                      (lambda ()
-                        (cont (%window-events window))))))
-
-(define-syntax window-events-match
-  (syntax-rules ()
-    ((_ window (event-type (args ...) body ...) ...)
-     (for-each (match-lambda
-                 (('event-type args ...)
-                  body ...)
-                 ...
-                 (_
-                  #f))
-               (window-events window)))))
-
-(define (call-with-window title size thunk)
-  (guard (e (else (destroy-all-windows)
-                  (raise e)))
-    (let1 window (make-window title size)
-      (reset
-        (thunk window)))
-    (run-event-loop)))
-
-(define (display-image image :key (fullscreen? #f))
-  (let ((img-w (border-width image))
-        (img-h (border-height image))
-        (title (match (command-line)
-                 ((program-name args ...)
-                  (values-ref (decompose-path program-name) 1))
-                 (_
-                  "Untitled"))))
-    (call-with-window title (if fullscreen?
-                                'fullscreen
-                                (list img-w img-h))
-      (lambda (win)
-        (let* ((win-w (border-width win))
-               (win-h (border-height win))
-               (zoom (min (/. win-w img-w) (/. win-h img-h))))
-          (put-image win image (center-x win) (center-y win) :zoom-x zoom :zoom-y zoom)
-          (while #t
-            (window-events-match win
-              (key-down (_ 'escape _ _ _)
-               (close-window win)))))))))
-
-(define (set-border! window-or-image v0 :optional (v1 #f) (v2 #f) (v3 #f))
-  (let ((top #f)
-        (bottom #f)
-        (left #f)
-        (right #f))
-    (cond
-      ((not v1)                         ; # of args = 1
-       (set! top v0)
-       (set! right v0)
-       (set! bottom (- v0))
-       (set! left (- v0)))
-      ((not v2)                         ; # of args = 2
-       (set! top v0)
-       (set! right v1)
-       (set! bottom (- v0))
-       (set! left (- v1)))
-      ((not v3)                         ; # of args = 3
-       (set! top v0)
-       (set! right v1)
-       (set! bottom v2)
-       (set! left (- v1)))
-      (else                             ; # of args = 4
-       (set! top v0)
-       (set! right v1)
-       (set! bottom v2)
-       (set! left v3)))
-    (cond
-      ((window? window-or-image)
-       (set-window-border! window-or-image top right bottom left))
-      ((image? window-or-image)
-       (set-image-border! window-or-image top right bottom left))
-      (else
-       (errorf "<graviton-window> or <graviton-image> required, but got %S" window-or-image)))))
-
-(define-method set-coordinate! ((window <graviton-window>)
-                                (x0 <real>)
-                                (y0 <real>)
-                                (x1 <real>)
-                                (y1 <real>))
-  (set-window-coordinate! window x0 y0 x1 y1))
-
-(define-method set-coordinate! ((image <graviton-image>)
-                                (x0 <real>)
-                                (y0 <real>)
-                                (x1 <real>)
-                                (y1 <real>))
-  (set-image-coordinate! image x0 y0 x1 y1))
-
-(define (border-width window-or-image)
-  (values-ref (border-size window-or-image) 0))
-
-(define (border-height window-or-image)
-  (values-ref (border-size window-or-image) 1))
-
-(define (border-min-x window-or-image)
-  (min (border-left window-or-image) (border-right window-or-image)))
-
-(define (border-max-x window-or-image)
-  (max (border-left window-or-image) (border-right window-or-image)))
-
-(define (border-min-y window-or-image)
-  (min (border-top window-or-image) (border-bottom window-or-image)))
-
-(define (border-max-y window-or-image)
-  (max (border-top window-or-image) (border-bottom window-or-image)))
-
-(define-method set-sprite-image! ((sprite <graviton-sprite>) (image <graviton-image>))
-  (receive (w h) (image-size image)
-    (%set-sprite-image! sprite image (list 0 0 w h))))
-
-(define-method set-sprite-image! ((sprite <graviton-sprite>)
-                                  (image <graviton-image>)
-                                  (rect <list>))
-  (%set-sprite-image! sprite image rect))
-
-(define-method put-image ((window <graviton-window>)
-                          (image <graviton-image>)
-                          (center-x <real>)
-                          (center-y <real>)
-                          :key
-                          rect
-                          (z 0)
-                          (angle 0)
-                          (zoom-x 1.0)
-                          (zoom-y 1.0)
-                          (visible #t))
-  (let1 rect (if (undefined? rect)
-                 (receive (w h) (image-size image)
-                   (list 0 0 w h))
-                 rect)
-    (make-sprite window image center-x center-y z rect angle zoom-x zoom-y visible)))
 
 (define (draw-point image point color :key (thickness 0))
   (call-on-main-thread (lambda ()
@@ -2153,13 +2046,125 @@ typedef enum {
                                     (loop (+ t dt) (cons (rotate-point x y) points)))))))))
                        :wait? #f))
 
+
 ;;;
 ;;; MessageBox
 ;;;
 
+(define-cproc %message-box (title::<const-cstring> message::<const-cstring> message-type)
+  ::<void>
+  (let* ((flags::Uint32))
+    (cond
+      ((SCM_EQ message-type 'info)
+       (set! flags SDL_MESSAGEBOX_INFORMATION))
+      ((SCM_EQ message-type 'warning)
+       (set! flags SDL_MESSAGEBOX_WARNING))
+      ((SCM_EQ message-type 'error)
+       (set! flags SDL_MESSAGEBOX_ERROR))
+      (else
+       (Scm_Error "type must be info, warning or error, but got %S" message-type)))
+    (when (< (SDL_ShowSimpleMessageBox flags title message NULL) 0)
+      (Scm_Error "SDL_ShowSimpleMessageBox failed: %s" (SDL_GetError)))))
+
 (define (message-box title message :key (type 'info))
   (%message-box title message type))
 
+(define-cproc call-on-main-thread (proc :key (wait?::<boolean> #t))
+  ::<void>
+  (let* ((packet::ScmEvalPacket* (SCM_NEW (.type ScmEvalPacket))))
+    (cond
+      ((== main-thread-id (SDL_ThreadID))
+       (Scm_Apply proc SCM_NIL packet))
+      ((not wait?)
+       (let* ((proc-packet::ProcPacket* (SCM_NEW (.type ProcPacket)))
+              (event::SDL_Event))
+         (set! (-> proc-packet proc) proc
+               (-> proc-packet lock) NULL
+               (-> proc-packet cond) NULL
+               (-> proc-packet eval-packet) NULL)
+         (set! (ref event type) graviton-event
+               (ref event user code) GRV_CALL_EVENT_CODE
+               (ref event user data1) proc-packet
+               (ref event user data2) NULL)
+         (SDL_PushEvent (& event))
+         (return)))
+      (else
+       (let* ((proc-packet::ProcPacket* (SCM_NEW (.type ProcPacket)))
+              (event::SDL_Event))
+         (set! (-> proc-packet proc) proc
+               (-> proc-packet lock) (SDL_CreateMutex)
+               (-> proc-packet cond) (SDL_CreateCond)
+               (-> proc-packet eval-packet) packet)
+         (set! (ref event type) graviton-event
+               (ref event user code) GRV_CALL_EVENT_CODE
+               (ref event user data1) proc-packet
+               (ref event user data2) NULL)
+         (SDL_LockMutex (-> proc-packet lock))
+         (SDL_PushEvent (& event))
+         (SDL_CondWait (-> proc-packet cond) (-> proc-packet lock))
+         (SDL_UnlockMutex (-> proc-packet lock))
+         (SDL_DestroyCond (-> proc-packet cond))
+         (SDL_DestroyMutex (-> proc-packet lock)))))
+    (cond
+      ((SCM_FALSEP (-> packet exception))
+       (let* ((i::int)
+              (args SCM_NIL))
+         (for ((set! i (- (-> packet numResults) 1)) (<= 0 i) (pre-- i))
+           (set! args (Scm_Cons (aref (-> packet results) i) args)))
+         (SCM_RETURN (Scm_Values args))))
+      (else
+       (Scm_Raise (-> packet exception) 0)))))
+
+(include "graviton/enum2sym.scm")
+
+(compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
+
+
+(define (window-events window)
+  (shift cont
+    (set-window-proc! window
+                      (lambda ()
+                        (cont (%window-events window))))))
+
+(define-syntax window-events-match
+  (syntax-rules ()
+    ((_ window (event-type (args ...) body ...) ...)
+     (for-each (match-lambda
+                 (('event-type args ...)
+                  body ...)
+                 ...
+                 (_
+                  #f))
+               (window-events window)))))
+
+(define (call-with-window title size thunk)
+  (guard (e (else (destroy-all-windows)
+                  (raise e)))
+    (let1 window (make-window title size)
+      (reset
+        (thunk window)))
+    (run-event-loop)))
+
+(define (display-image image :key (fullscreen? #f))
+  (let ((img-w (border-width image))
+        (img-h (border-height image))
+        (title (match (command-line)
+                 ((program-name args ...)
+                  (values-ref (decompose-path program-name) 1))
+                 (_
+                  "Untitled"))))
+    (call-with-window title (if fullscreen?
+                                'fullscreen
+                                (list img-w img-h))
+      (lambda (win)
+        (let* ((win-w (border-width win))
+               (win-h (border-height win))
+               (zoom (min (/. win-w img-w) (/. win-h img-h))))
+          (put-image win image (center-x win) (center-y win) :zoom-x zoom :zoom-y zoom)
+          (while #t
+            (window-events-match win
+              (key-down (_ 'escape _ _ _)
+               (close-window win)))))))))
 
 ;;;
 ;;; REPL
