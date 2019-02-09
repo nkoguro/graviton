@@ -51,13 +51,15 @@
           point-x
           point-y
 
-          call-with-window
+          make-window
+          display-new-window
           close-window
 
           window-events
           window-events-match
           frame-per-second
           set-frame-per-second!
+          start-event-loop
 
           display-image
           make-image
@@ -249,7 +251,7 @@
 
   (initcode
    (initialize-libs))
-  )  ;; end of inline-stub
+  ) ;; end of inline-stub
 
 ;;;
 ;;; Coordinate calculation
@@ -934,7 +936,7 @@
               grv-windows))
   ) ;; end of inline-stub
 
-(define-cproc make-window (title::<const-cstring> size)
+(define-cproc make-window (title::<const-cstring> size proc)
   (let* ((width::int 0)
          (height::int 0)
          (flags::Uint32 0))
@@ -952,7 +954,7 @@
     (let* ((gwin::GrvWindow* (SCM_NEW (.type GrvWindow))))
       (set! (-> gwin window) NULL
             (-> gwin renderer) NULL
-            (-> gwin proc) SCM_FALSE
+            (-> gwin proc) proc
             (-> gwin events) SCM_NIL
             (-> gwin sprites) SCM_NIL)
 
@@ -1339,18 +1341,25 @@
     ::void
     (let* ((all-events (collect-all-events))
            (will-close-windows SCM_NIL))
-      (for-each (lambda (obj)
-                  (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj))
+      (for-each (lambda (win)
+                  (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win))
                          (proc (-> gwin proc)))
                     (set! (-> gwin events) (collect-window-events gwin all-events))
                     (when (SCM_PROCEDUREP proc)
                       (set! (-> gwin proc) SCM_FALSE)
-                      (let* ((packet::ScmEvalPacket))
-                        (Scm_Apply proc SCM_NIL (& packet))
+                      (let* ((packet::ScmEvalPacket)
+                             (arity::int (SCM_PROCEDURE_REQUIRED proc)))
+                        (cond
+                          ((== arity 0)
+                           (Scm_Apply proc SCM_NIL (& packet)))
+                          ((== arity 1)
+                           (Scm_Apply proc (SCM_LIST1 win) (& packet)))
+                          (else
+                           (Scm_Error "The arity of window handler must be 0 or 1, but got %d" arity)))
                         (unless (SCM_FALSEP (ref packet exception))
                           (Scm_Raise (ref packet exception) 0))))
                     (when (window-close-event-exists? (-> gwin events))
-                      (set! will-close-windows (Scm_Cons obj will-close-windows)))))
+                      (set! will-close-windows (Scm_Cons win will-close-windows)))))
                 grv-windows)
       (for-each (lambda (obj)
                   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
@@ -1386,7 +1395,7 @@
     (set! frame-per-second fps
           event-loop-ticks t)))
 
-(define-cproc run-event-loop ()
+(define-cproc %start-event-loop ()
   ::<void>
   (when (event-loop-running?)
     (return))
@@ -1435,6 +1444,12 @@
                      (& packet))
     (unless (SCM_FALSEP (ref packet exception))
       (Scm_Raise (ref packet exception) 0))))
+
+(define (start-event-loop)
+  (guard (e (else (destroy-all-windows)
+                  (raise e)))
+    (%start-event-loop)))
+
 
 ;;;
 ;;; Image & Window coordinate utilities
@@ -2137,13 +2152,9 @@ typedef enum {
                   #f))
                (window-events window)))))
 
-(define (call-with-window title size thunk)
-  (guard (e (else (destroy-all-windows)
-                  (raise e)))
-    (let1 window (make-window title size)
-      (reset
-        (thunk window)))
-    (run-event-loop)))
+(define (display-new-window title size proc)
+  (make-window title size proc)
+  (start-event-loop))
 
 (define (display-image image :key (fullscreen? #f))
   (let ((img-w (border-width image))
@@ -2153,9 +2164,9 @@ typedef enum {
                   (values-ref (decompose-path program-name) 1))
                  (_
                   "Untitled"))))
-    (call-with-window title (if fullscreen?
-                                'fullscreen
-                                (list img-w img-h))
+    (display-new-window title (if fullscreen?
+                                  'fullscreen
+                                  (list img-w img-h))
       (lambda (win)
         (let* ((win-w (border-width win))
                (win-h (border-height win))
@@ -2164,7 +2175,7 @@ typedef enum {
           (while #t
             (window-events-match win
               (key-down (_ 'escape _ _ _)
-               (close-window win)))))))))
+                        (close-window win)))))))))
 
 ;;;
 ;;; REPL
