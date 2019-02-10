@@ -1118,6 +1118,8 @@
     ((and (SCM_LISTP size)
           (SCM_INTP (Scm_ListRef size 0 SCM_UNBOUND))
           (SCM_INTP (Scm_ListRef size 1 SCM_UNBOUND)))
+     (when (< (SDL_SetWindowFullscreen (-> gwin window) 0) 0)
+       (Scm_Error "SDL_SetWindowFullscreen failed: %s" (SDL_GetError)))
      (SDL_SetWindowSize (-> gwin window)
                         (SCM_INT_VALUE (Scm_ListRef size 0 SCM_UNBOUND))
                         (SCM_INT_VALUE (Scm_ListRef size 1 SCM_UNBOUND))))
