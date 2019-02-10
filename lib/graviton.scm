@@ -52,14 +52,42 @@
           point-y
 
           make-window
-          display-new-window
-          close-window
+          close-event-stream
+          clear-window-sprites!
+          destroy-all-windows
+          send-close-window-event
+          window-size
+          set-window-size!
+          window-maximized?
+          maximize-window
+          window-minimized?
+          minimize-window
+          window-position
+          set-window-position!
+          window-title
+          set-window-title!
+          window-resizable?
+          set-window-resizable!
+          show-window
+          window-shown?
+          hide-window
+          window-hidden?
+          raise-window
+          restore-window
+          window-focused?
+          window-icon
+          set-window-icon!
+          window?
+          focus-window
+          blur-window
 
-          window-events
-          window-events-match
+          display-new-window
+
+          next-event
+          event-for-each
           frame-per-second
           set-frame-per-second!
-          start-event-loop
+          start-global-event-loop
 
           display-image
           make-image
@@ -69,11 +97,11 @@
           set-image-rgba-pixels!
           sprite-center-position
           set-sprite-center-position!
+          image-size
+          image-width
+          image-height
 
           set-border!
-          border-size
-          border-width
-          border-height
           border-left
           border-top
           border-right
@@ -166,6 +194,7 @@
                               proc
                               events
                               sprites
+                              icon
                               param::TransformParam)))
 
    (define-ctype ScratchArea::(.struct
@@ -576,8 +605,14 @@
   (compute-transform-param (& (-> gimage param)) (-> gimage surface w) (-> gimage surface h) left top right bottom))
 
 (define-cproc image-size (image::<graviton-image>)
-  ::(<int> <int>)
-  (return (-> image surface w) (-> image surface h)))
+  ::<list>
+  (return (SCM_LIST2 (SCM_MAKE_INT (-> image surface w)) (SCM_MAKE_INT (-> image surface h)))))
+
+(define (image-width image)
+  (list-ref (image-size image) 0))
+
+(define (image-height image)
+  (list-ref (image-size image) 1))
 
 (define-cproc set-image-rgba-pixels! (image::<graviton-image> pixels::<u32vector>)
   ::<void>
@@ -817,26 +852,40 @@
   ::<double>
   (return (-> sprite angle)))
 
-(define-cproc set-sprite-zoom! (sprite::<graviton-sprite> zoom-x::<double> zoom-y::<double>)
+(define-cproc set-sprite-zoom! (sprite::<graviton-sprite> zoom)
   ::<void>
-  (cond
-    ((and (< zoom-x 0) (< zoom-y 0))
-     (set! (-> sprite angle) (+ (-> sprite angle) 180)
-           (-> sprite zoom_x) (- zoom-x)
-           (-> sprite zoom_y) (- zoom-y)
-           (-> sprite flip) SDL_FLIP_NONE))
-    ((< zoom-x 0)
-     (set! (-> sprite zoom_x) (- zoom-x)
-           (-> sprite zoom_y) zoom_y
-           (-> sprite flip) SDL_FLIP_VERTICAL))
-    ((< zoom-y 0)
-     (set! (-> sprite zoom_x) zoom-x
-           (-> sprite zoom_y) (- zoom-y)
-           (-> sprite flip) SDL_FLIP_HORIZONTAL))
-    (else
-     (set! (-> sprite zoom_x) zoom-x
-           (-> sprite zoom_y) zoom-y
-           (-> sprite flip) SDL_FLIP_NONE))))
+  (let* ((zoom-x::double)
+         (zoom-y::double))
+    (cond
+      ((SCM_REALP zoom)
+       (let* ((z::double (Scm_GetDouble zoom)))
+         (set! zoom-x z
+               zoom-y z)))
+      ((and (SCM_LISTP zoom)
+            (SCM_REALP (Scm_ListRef zoom 0 SCM_UNBOUND))
+            (SCM_REALP (Scm_ListRef zoom 1 SCM_UNBOUND)))
+       (set! zoom-x (Scm_GetDouble (Scm_ListRef zoom 0 SCM_UNBOUND))
+             zoom-y (Scm_GetDouble (Scm_ListRef zoom 1 SCM_UNBOUND))))
+      (else
+       (Scm_Error "zoom must be <real> or (<real> <real>), but bot %S" zoom)))
+    (cond
+      ((and (< zoom-x 0) (< zoom-y 0))
+       (set! (-> sprite angle) (+ (-> sprite angle) 180)
+             (-> sprite zoom_x) (- zoom-x)
+             (-> sprite zoom_y) (- zoom-y)
+             (-> sprite flip) SDL_FLIP_NONE))
+      ((< zoom-x 0)
+       (set! (-> sprite zoom_x) (- zoom-x)
+             (-> sprite zoom_y) zoom_y
+             (-> sprite flip) SDL_FLIP_VERTICAL))
+      ((< zoom-y 0)
+       (set! (-> sprite zoom_x) zoom-x
+             (-> sprite zoom_y) (- zoom-y)
+             (-> sprite flip) SDL_FLIP_HORIZONTAL))
+      (else
+       (set! (-> sprite zoom_x) zoom-x
+             (-> sprite zoom_y) zoom-y
+             (-> sprite flip) SDL_FLIP_NONE)))))
 
 (define-cproc sprite-zoom (sprite::<graviton-sprite>)
   ::(<double> <double>)
@@ -862,8 +911,7 @@
 
 (define (put-image window image center-x center-y :key rect (z 0) (angle 0) (zoom-x 1.0) (zoom-y 1.0) (visible #t))
   (let1 rect (if (undefined? rect)
-                 (receive (w h) (image-size image)
-                   (list 0 0 w h))
+                 (list 0 0 (image-width image) (image-height image))
                  rect)
     (make-sprite window image center-x center-y z rect angle zoom-x zoom-y visible)))
 
@@ -936,7 +984,7 @@
               grv-windows))
   ) ;; end of inline-stub
 
-(define-cproc make-window (title::<const-cstring> size proc)
+(define-cproc make-window (title::<const-cstring> size proc :key (resizable?::<boolean> #f) (icon #f) (shown?::<boolean> #t) (maximized?::<boolean> #f) (minimized?::<boolean> #f))
   (let* ((width::int 0)
          (height::int 0)
          (flags::Uint32 0))
@@ -948,15 +996,30 @@
        (set! width (SCM_INT_VALUE (Scm_ListRef size 0 (SCM_MAKE_INT -1)))
              height (SCM_INT_VALUE (Scm_ListRef size 1 (SCM_MAKE_INT -1)))))
       ((SCM_EQ size 'fullscreen)
-       (set! flags SDL_WINDOW_FULLSCREEN))
+       (set! flags SDL_WINDOW_FULLSCREEN_DESKTOP))
       (else
        (Scm_Error "size must be a list of two integer elements or 'fullscreen, but got %S" size)))
+    (when resizable?
+      (set! flags (logior flags SDL_WINDOW_RESIZABLE)))
+    (when maximized?
+      (set! flags (logior flags SDL_WINDOW_MAXIMIZED)))
+    (when minimized?
+      (set! flags (logior flags SDL_WINDOW_MINIMIZED)))
+    (cond
+      (shown?
+       (set! flags (logior flags SDL_WINDOW_SHOWN)))
+      (else
+       (set! flags (logior flags SDL_WINDOW_HIDDEN))))
+    (unless (or (SCM_FALSEP icon) (GRV_IMAGE_P icon))
+      (Scm_Error "icon must be <graviton-image> or #f, but got %S" icon))
+
     (let* ((gwin::GrvWindow* (SCM_NEW (.type GrvWindow))))
       (set! (-> gwin window) NULL
             (-> gwin renderer) NULL
             (-> gwin proc) proc
             (-> gwin events) SCM_NIL
-            (-> gwin sprites) SCM_NIL)
+            (-> gwin sprites) SCM_NIL
+            (-> gwin icon) icon)
 
       (set! (-> gwin window) (SDL_CreateWindow title
                                                SDL_WINDOWPOS_UNDEFINED
@@ -966,6 +1029,9 @@
                                                flags))
       (unless (-> gwin window)
         (Scm_Error "SDL_CreateWindow failed: %s" (SDL_GetError)))
+
+      (when (GRV_IMAGE_P icon)
+        (SDL_SetWindowIcon (-> gwin window) (-> (GRV_IMAGE_PTR icon) surface)))
 
       (let* ((w::int)
              (h::int))
@@ -988,8 +1054,19 @@
 (define-cproc set-window-proc! (gwin::<graviton-window> proc)
   (set! (-> gwin proc) proc))
 
-(define-cproc %window-events (gwin::<graviton-window>)
-  (return (-> gwin events)))
+(define-cproc %next-event (gwin::<graviton-window>)
+  (cond
+    ((SCM_NULLP (-> gwin events))
+     (return SCM_FALSE))
+    ((SCM_FALSEP (-> gwin events))
+     (return SCM_EOF))
+    (else
+     (let* ((event (SCM_CAR (-> gwin events))))
+       (set! (-> gwin events) (SCM_CDR (-> gwin events)))
+       (return event)))))
+
+(define-cproc close-event-stream (gwin::<graviton-window>)
+  (set! (-> gwin events) SCM_FALSE))
 
 (define-cproc clear-window-sprites! (gwin::<graviton-window>)
   ::<void>
@@ -1007,7 +1084,7 @@
             grv-windows)
   (set! grv-windows SCM_NIL))
 
-(define-cproc close-window (gwin::<graviton-window>)
+(define-cproc send-close-window-event (gwin::<graviton-window>)
   ::<void>
   (unless (-> gwin window)
     (return))
@@ -1017,8 +1094,154 @@
           (ref event window event) SDL_WINDOWEVENT_CLOSE)
     (SDL_PushEvent (& event))))
 
+(define-cproc window-size (gwin::<graviton-window>)
+  ::<list>
+  (let* ((w::int)
+         (h::int))
+    (SDL_GetWindowSize (-> gwin window) (& w) (& h))
+    (return (SCM_LIST2 (SCM_MAKE_INT w) (SCM_MAKE_INT h)))))
+
+(define (window-width window)
+  (list-ref (window-size window) 0))
+
+(define (window-height window)
+  (list-ref (window-size window) 1))
+
+(define-cproc set-window-size! (gwin::<graviton-window> size)
+  ::<void>
+  (cond
+    ((SCM_EQ size 'fullscreen)
+     (when (< (SDL_SetWindowFullscreen (-> gwin window) SDL_WINDOW_FULLSCREEN_DESKTOP) 0)
+       (Scm_Error "SDL_SetWindowFullscreen failed: %s" (SDL_GetError))))
+    ((and (SCM_LISTP size)
+          (SCM_INTP (Scm_ListRef size 0 SCM_UNBOUND))
+          (SCM_INTP (Scm_ListRef size 1 SCM_UNBOUND)))
+     (SDL_SetWindowSize (-> gwin window)
+                        (SCM_INT_VALUE (Scm_ListRef size 0 SCM_UNBOUND))
+                        (SCM_INT_VALUE (Scm_ListRef size 1 SCM_UNBOUND))))
+    (else
+     (Scm_Error "(<integer> <integer>) or 'fullscreen required, but got %S" size))))
+
+(define-cproc window-fullscreen? (gwin::<graviton-window>)
+  ::<boolean>
+  (let* ((flags::Uint32 (SDL_GetWindowFlags (-> gwin window))))
+    (return (logand flags (logior SDL_WINDOW_FULLSCREEN_DESKTOP SDL_WINDOW_FULLSCREEN)))))
+
+(define-cproc window-maximized? (gwin::<graviton-window>)
+  ::<boolean>
+  (let* ((flags::Uint32 (SDL_GetWindowFlags (-> gwin window))))
+    (return (logand flags SDL_WINDOW_MAXIMIZED))))
+
+(define-cproc maximize-window (gwin::<graviton-window>)
+  ::<void>
+  (SDL_MaximizeWindow (-> gwin window)))
+
+(define (set-window-maximized! window maximized?)
+  (if maximized?
+      (maximize-window window)
+      (restore-window window)))
+
+(define-cproc window-minimized? (gwin::<graviton-window>)
+  ::<boolean>
+  (let* ((flags::Uint32 (SDL_GetWindowFlags (-> gwin window))))
+    (return (logand flags SDL_WINDOW_MINIMIZED))))
+
+(define-cproc minimize-window (gwin::<graviton-window>)
+  ::<void>
+  (SDL_MinimizeWindow (-> gwin window)))
+
+(define (set-window-minimized! window minimized?)
+  (if minimized?
+      (minimize-window window)
+      (restore-window window)))
+
+(define-cproc window-position (gwin::<graviton-window>)
+  ::<list>
+  (let* ((w::int)
+         (h::int))
+    (SDL_GetWindowPosition (-> gwin window) (& w) (& h))
+    (return (SCM_LIST2 (SCM_MAKE_INT w) (SCM_MAKE_INT h)))))
+
+(define-cproc set-window-position! (gwin::<graviton-window> position)
+  ::<void>
+  (cond
+    ((and (SCM_LISTP position)
+          (SCM_REALP (Scm_ListRef position 0 SCM_UNBOUND))
+          (SCM_REALP (Scm_ListRef position 1 SCM_UNBOUND)))
+     (SDL_SetWindowPosition (-> gwin window)
+                            (cast int (round (Scm_GetDouble (Scm_ListRef position 0 SCM_UNBOUND))))
+                            (cast int (round (Scm_GetDouble (Scm_ListRef position 1 SCM_UNBOUND))))))))
+
+(define-cproc window-title (gwin::<graviton-window>)
+  (return (SCM_MAKE_STR_COPYING (SDL_GetWindowTitle (-> gwin window)))))
+
+(define-cproc set-window-title! (gwin::<graviton-window> title::<const-cstring>)
+  ::<void>
+  (SDL_SetWindowTitle (-> gwin window) title))
+
+(define-cproc window-resizable? (gwin::<graviton-window>)
+  ::<boolean>
+  (let* ((flags::Uint32 (SDL_GetWindowFlags (-> gwin window))))
+    (return (logand flags SDL_WINDOW_RESIZABLE))))
+
+(define-cproc set-window-resizable! (gwin::<graviton-window> resizable?::<boolean>)
+  ::<void>
+  (SDL_SetWindowResizable (-> gwin window) resizable?))
+
+(define-cproc show-window (gwin::<graviton-window>)
+  ::<void>
+  (SDL_ShowWindow (-> gwin window)))
+
+(define-cproc window-shown? (gwin::<graviton-window>)
+  ::<boolean>
+  (let* ((flags::Uint32 (SDL_GetWindowFlags (-> gwin window))))
+    (return (logand flags SDL_WINDOW_SHOWN))))
+
+(define-cproc hide-window (gwin::<graviton-window>)
+  ::<void>
+  (SDL_HideWindow (-> gwin window)))
+
+(define-cproc window-hidden? (gwin::<graviton-window>)
+  ::<boolean>
+  (let* ((flags::Uint32 (SDL_GetWindowFlags (-> gwin window))))
+    (return (logand flags SDL_WINDOW_HIDDEN))))
+
+(define-cproc raise-window (gwin::<graviton-window>)
+  ::<void>
+  (SDL_RaiseWindow (-> gwin window)))
+
+(define-cproc restore-window (gwin::<graviton-window>)
+  ::<void>
+  (SDL_RestoreWindow (-> gwin window)))
+
+(define-cproc window-focused? (gwin::<graviton-window>)
+  ::<boolean>
+  (return (SDL_GetWindowGrab (-> gwin window))))
+
+(define-cproc set-window-focus! (gwin::<graviton-window> focus?::<boolean>)
+  ::<void>
+  (SDL_SetWindowGrab (-> gwin window) focus?))
+
+(define-cproc window-icon (gwin::<graviton-window>)
+  (return (-> gwin icon)))
+
+(define-cproc set-window-icon! (gwin::<graviton-window> icon)
+  ::<void>
+  (cond
+    ((GRV_IMAGE_P icon)
+     (SDL_SetWindowIcon (-> gwin window) (-> (GRV_IMAGE_PTR icon) surface))
+     (set! (-> gwin icon) icon))
+    (else
+     (Scm_Error "<graviton-image> required, but got %S" icon))))
+
 (define (window? obj)
   (is-a? obj <graviton-window>))
+
+(define (focus-window window)
+  (set-window-focus! window #t))
+
+(define (blur-window window)
+  (set-window-focus! window #f))
 
 ;;;
 ;;; Event
@@ -1075,14 +1298,11 @@
                  (SDL_CondSignal (-> proc-packet cond))
                  (SDL_UnlockMutex (-> proc-packet lock)))
                 (else
-                 (let* ((packet::ScmEvalPacket))
-                   (Scm_Apply proc SCM_NIL (& packet))
-                   (unless (SCM_FALSEP (ref packet exception))
-                     (Scm_Raise (ref packet exception) 0)))))))))
+                 (Scm_ApplyRec0 proc)))))))
        (when (< available-ticks (- (SDL_GetTicks) start-ticks))
          (return)))))
 
-  (define-cfn collect-all-events ()
+  (define-cfn process-all-events! ()
     ::ScmObj
     (let* ((events SCM_NIL)
            (sdl-event::SDL_Event))
@@ -1096,7 +1316,24 @@
                                                 (Scm_MakeIntegerU (ref sdl-event window timestamp))
                                                 (SCM_MAKE_INT (ref sdl-event window data1))
                                                 (SCM_MAKE_INT (ref sdl-event window data2)))
-                                     events)))
+                                     events))
+              ;; Compute transform param when the window is resized.
+              (when (== (ref sdl-event window event) SDL_WINDOWEVENT_RESIZED)
+                (let* ((target-gwin::GrvWindow* NULL))
+                  (for-each (lambda (win)
+                              (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
+                                (when (== (SDL_GetWindowID (-> gwin window)) (ref sdl-event window windowID))
+                                  (set! target-gwin gwin)
+                                  (break))))
+                            grv-windows)
+                  (when target-gwin
+                    (compute-transform-param (& (-> target-gwin param))
+                                             (cast int (ref sdl-event window data1)) ; width
+                                             (cast int (ref sdl-event window data2)) ; height
+                                             (ref (-> target-gwin param) left)
+                                             (ref (-> target-gwin param) top)
+                                             (ref (-> target-gwin param) right)
+                                             (ref (-> target-gwin param) bottom))))))
              (else
               (set! events (Scm_Cons (SCM_LIST3 (SCM_MAKE_INT (ref sdl-event window windowID))
                                                 (window-event->symbol (ref sdl-event window event))
@@ -1320,14 +1557,14 @@
   ;; events must be reverse chronological order.
   (define-cfn collect-window-events (gwin::GrvWindow* all-events)
     ::ScmObj
-    (let* ((win-events SCM_NIL)
+    (let* ((win-events (SCM_LIST1 (SCM_LIST1 'frame-end)))
            (winid (SCM_MAKE_INT (SDL_GetWindowID (-> gwin window)))))
       (for-each (lambda (event)
                   (when (or (SCM_FALSEP (SCM_CAR event))
                             (SCM_EQ (SCM_CAR event) winid))
                     (set! win-events (Scm_Cons (SCM_CDR event) win-events))))
                 all-events)
-      (return win-events)))
+      (return (Scm_Cons (SCM_LIST1 'frame-start) win-events))))
 
   (define-cfn window-close-event-exists? (win-events)
     ::bool
@@ -1339,26 +1576,24 @@
 
   (define-cfn run-window-handlers ()
     ::void
-    (let* ((all-events (collect-all-events))
+    (let* ((all-events (process-all-events!))
            (will-close-windows SCM_NIL))
       (for-each (lambda (win)
                   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win))
                          (proc (-> gwin proc)))
-                    (set! (-> gwin events) (collect-window-events gwin all-events))
+                    (unless (SCM_FALSEP (-> gwin events))
+                      (set! (-> gwin events) (collect-window-events gwin all-events)))
                     (when (SCM_PROCEDUREP proc)
                       (set! (-> gwin proc) SCM_FALSE)
-                      (let* ((packet::ScmEvalPacket)
-                             (arity::int (SCM_PROCEDURE_REQUIRED proc)))
+                      (let* ((arity::int (SCM_PROCEDURE_REQUIRED proc)))
                         (cond
                           ((== arity 0)
-                           (Scm_Apply proc SCM_NIL (& packet)))
+                           (Scm_ApplyRec0 proc))
                           ((== arity 1)
-                           (Scm_Apply proc (SCM_LIST1 win) (& packet)))
+                           (Scm_ApplyRec1 proc win))
                           (else
-                           (Scm_Error "The arity of window handler must be 0 or 1, but got %d" arity)))
-                        (unless (SCM_FALSEP (ref packet exception))
-                          (Scm_Raise (ref packet exception) 0))))
-                    (when (window-close-event-exists? (-> gwin events))
+                           (Scm_Error "The arity of window handler must be 0 or 1, but got %d" arity)))))
+                    (when (SCM_FALSEP (-> gwin proc))
                       (set! will-close-windows (Scm_Cons win will-close-windows)))))
                 grv-windows)
       (for-each (lambda (obj)
@@ -1395,7 +1630,7 @@
     (set! frame-per-second fps
           event-loop-ticks t)))
 
-(define-cproc %start-event-loop ()
+(define-cproc %start-global-event-loop ()
   ::<void>
   (when (event-loop-running?)
     (return))
@@ -1445,10 +1680,56 @@
     (unless (SCM_FALSEP (ref packet exception))
       (Scm_Raise (ref packet exception) 0))))
 
-(define (start-event-loop)
+(define-cproc call-on-main-thread (proc :key (wait?::<boolean> #t))
+  ::<void>
+  (let* ((packet::ScmEvalPacket* (SCM_NEW (.type ScmEvalPacket))))
+    (cond
+      ((== main-thread-id (SDL_ThreadID))
+       (Scm_Apply proc SCM_NIL packet))
+      ((not wait?)
+       (let* ((proc-packet::ProcPacket* (SCM_NEW (.type ProcPacket)))
+              (event::SDL_Event))
+         (set! (-> proc-packet proc) proc
+               (-> proc-packet lock) NULL
+               (-> proc-packet cond) NULL
+               (-> proc-packet eval-packet) NULL)
+         (set! (ref event type) graviton-event
+               (ref event user code) GRV_CALL_EVENT_CODE
+               (ref event user data1) proc-packet
+               (ref event user data2) NULL)
+         (SDL_PushEvent (& event))
+         (return)))
+      (else
+       (let* ((proc-packet::ProcPacket* (SCM_NEW (.type ProcPacket)))
+              (event::SDL_Event))
+         (set! (-> proc-packet proc) proc
+               (-> proc-packet lock) (SDL_CreateMutex)
+               (-> proc-packet cond) (SDL_CreateCond)
+               (-> proc-packet eval-packet) packet)
+         (set! (ref event type) graviton-event
+               (ref event user code) GRV_CALL_EVENT_CODE
+               (ref event user data1) proc-packet
+               (ref event user data2) NULL)
+         (SDL_LockMutex (-> proc-packet lock))
+         (SDL_PushEvent (& event))
+         (SDL_CondWait (-> proc-packet cond) (-> proc-packet lock))
+         (SDL_UnlockMutex (-> proc-packet lock))
+         (SDL_DestroyCond (-> proc-packet cond))
+         (SDL_DestroyMutex (-> proc-packet lock)))))
+    (cond
+      ((SCM_FALSEP (-> packet exception))
+       (let* ((i::int)
+              (args SCM_NIL))
+         (for ((set! i (- (-> packet numResults) 1)) (<= 0 i) (pre-- i))
+           (set! args (Scm_Cons (aref (-> packet results) i) args)))
+         (SCM_RETURN (Scm_Values args))))
+      (else
+       (Scm_Raise (-> packet exception) 0)))))
+
+(define (start-global-event-loop)
   (guard (e (else (destroy-all-windows)
                   (raise e)))
-    (%start-event-loop)))
+    (%start-global-event-loop)))
 
 
 ;;;
@@ -1472,20 +1753,6 @@
 
 (define (pixel-height window-or-image)
   (values-ref (pixel-size window-or-image) 1))
-
-(define-cproc border-size (window-or-image)
-  ::(<int> <int>)
-  (cond
-    ((GRV_WINDOW_P window-or-image)
-     (let* ((w::int)
-            (h::int))
-       (SDL_GetWindowSize (-> (GRV_WINDOW_PTR window-or-image) window) (& w) (& h))
-       (return w h)))
-    ((GRV_IMAGE_P window-or-image)
-     (return (-> (GRV_IMAGE_PTR window-or-image) surface w)
-             (-> (GRV_IMAGE_PTR window-or-image) surface h)))
-    (else
-     (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
 
 (define-cproc border-left (window-or-image)
   ::<double>
@@ -1552,12 +1819,6 @@
        (set-image-border! window-or-image top right bottom left))
       (else
        (errorf "<graviton-window> or <graviton-image> required, but got %S" window-or-image)))))
-
-(define (border-width window-or-image)
-  (values-ref (border-size window-or-image) 0))
-
-(define (border-height window-or-image)
-  (values-ref (border-size window-or-image) 1))
 
 (define (border-min-x window-or-image)
   (min (border-left window-or-image) (border-right window-or-image)))
@@ -2084,81 +2345,40 @@ typedef enum {
 (define (message-box title message :key (type 'info))
   (%message-box title message type))
 
-(define-cproc call-on-main-thread (proc :key (wait?::<boolean> #t))
-  ::<void>
-  (let* ((packet::ScmEvalPacket* (SCM_NEW (.type ScmEvalPacket))))
-    (cond
-      ((== main-thread-id (SDL_ThreadID))
-       (Scm_Apply proc SCM_NIL packet))
-      ((not wait?)
-       (let* ((proc-packet::ProcPacket* (SCM_NEW (.type ProcPacket)))
-              (event::SDL_Event))
-         (set! (-> proc-packet proc) proc
-               (-> proc-packet lock) NULL
-               (-> proc-packet cond) NULL
-               (-> proc-packet eval-packet) NULL)
-         (set! (ref event type) graviton-event
-               (ref event user code) GRV_CALL_EVENT_CODE
-               (ref event user data1) proc-packet
-               (ref event user data2) NULL)
-         (SDL_PushEvent (& event))
-         (return)))
-      (else
-       (let* ((proc-packet::ProcPacket* (SCM_NEW (.type ProcPacket)))
-              (event::SDL_Event))
-         (set! (-> proc-packet proc) proc
-               (-> proc-packet lock) (SDL_CreateMutex)
-               (-> proc-packet cond) (SDL_CreateCond)
-               (-> proc-packet eval-packet) packet)
-         (set! (ref event type) graviton-event
-               (ref event user code) GRV_CALL_EVENT_CODE
-               (ref event user data1) proc-packet
-               (ref event user data2) NULL)
-         (SDL_LockMutex (-> proc-packet lock))
-         (SDL_PushEvent (& event))
-         (SDL_CondWait (-> proc-packet cond) (-> proc-packet lock))
-         (SDL_UnlockMutex (-> proc-packet lock))
-         (SDL_DestroyCond (-> proc-packet cond))
-         (SDL_DestroyMutex (-> proc-packet lock)))))
-    (cond
-      ((SCM_FALSEP (-> packet exception))
-       (let* ((i::int)
-              (args SCM_NIL))
-         (for ((set! i (- (-> packet numResults) 1)) (<= 0 i) (pre-- i))
-           (set! args (Scm_Cons (aref (-> packet results) i) args)))
-         (SCM_RETURN (Scm_Values args))))
-      (else
-       (Scm_Raise (-> packet exception) 0)))))
 
 (include "graviton/enum2sym.scm")
 
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
 
 
-(define (window-events window)
-  (shift cont
-    (set-window-proc! window
-                      (lambda ()
-                        (cont (%window-events window))))))
+(define (next-event window)
+  (let1 event (%next-event window)
+    (cond
+      (event
+       event)
+      (else
+       (shift cont
+         (set-window-proc! window
+                           (lambda ()
+                             (cont (next-event window)))))))))
 
-(define-syntax window-events-match
-  (syntax-rules ()
-    ((_ window (event-type (args ...) body ...) ...)
-     (for-each (match-lambda
-                 (('event-type args ...)
-                  body ...)
-                 ...
-                 (_
-                  #f))
-               (window-events window)))))
+(define (event-for-each window proc)
+  (let loop ()
+    (let1 event (next-event window)
+      (cond
+        ((eof-object? event)
+         #f)
+        (else
+         (proc event)
+         (loop))))))
 
-(define (display-new-window title size proc)
-  (make-window title size proc)
-  (start-event-loop))
+(define (display-new-window title size proc :rest rest)
+  (apply make-window title size proc rest)
+  (start-global-event-loop))
 
-(define (display-image image :key (fullscreen? #f))
-  (let ((img-w (border-width image))
-        (img-h (border-height image))
+(define (display-image image :key (fullscreen? #f) (resizable? #f))
+  (let ((img-w (image-width image))
+        (img-h (image-height image))
         (title (match (command-line)
                  ((program-name args ...)
                   (values-ref (decompose-path program-name) 1))
@@ -2168,14 +2388,23 @@ typedef enum {
                                   'fullscreen
                                   (list img-w img-h))
       (lambda (win)
-        (let* ((win-w (border-width win))
-               (win-h (border-height win))
-               (zoom (min (/. win-w img-w) (/. win-h img-h))))
-          (put-image win image (center-x win) (center-y win) :zoom-x zoom :zoom-y zoom)
-          (while #t
-            (window-events-match win
-              (key-down (_ 'escape _ _ _)
-                        (close-window win)))))))))
+        (let* ((win-w (window-width win))
+               (win-h (window-height win))
+               (zoom (min (/. win-w img-w) (/. win-h img-h)))
+               (sprite (put-image win image (center-x win) (center-y win) :zoom-x zoom :zoom-y zoom))
+               (close? #f))
+          (event-for-each win
+            (match-lambda
+              (('window-resized _ w h)
+               (set-sprite-zoom! sprite (min (/. w img-w) (/. h img-h))))
+              (('window-close _)
+               (close-event-stream win))
+              (('key-down _ 'escape _ _ _)
+               (close-event-stream win))
+              (event
+               #f)))))
+      :resizable? resizable?)))
+
 
 ;;;
 ;;; REPL
@@ -2227,3 +2456,17 @@ typedef enum {
 (define (run-repl-if-needed)
   (when (is-interactive?)
     (graviton-read-eval-print-loop (current-input-port))))
+
+
+;;;
+;;; setter
+;;;
+
+(set! (setter window-size) set-window-size!)
+(set! (setter window-position) set-window-position!)
+(set! (setter window-title) set-window-title!)
+(set! (setter window-resizable?) set-window-resizable!)
+(set! (setter window-focused?) set-window-focus!)
+(set! (setter window-icon) set-window-icon!)
+(set! (setter window-maximized?) set-window-maximized!)
+(set! (setter window-minimized?) set-window-minimized!)
