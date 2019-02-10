@@ -80,6 +80,8 @@
           window?
           focus-window
           blur-window
+          all-windows
+          last-window
 
           display-new-window
 
@@ -1233,6 +1235,17 @@
      (set! (-> gwin icon) icon))
     (else
      (Scm_Error "<graviton-image> required, but got %S" icon))))
+
+(define-cproc all-windows ()
+  (return grv-windows))
+
+(define (last-window)
+  (let1 wins (all-windows)
+    (cond
+      ((null? wins)
+       #f)
+      (else
+       (car wins)))))
 
 (define (window? obj)
   (is-a? obj <graviton-window>))
