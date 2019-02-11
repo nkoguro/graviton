@@ -54,7 +54,6 @@
           make-window
           close-event-stream
           clear-window-sprites!
-          destroy-all-windows
           send-close-window-event
           window-size
           set-window-size!
@@ -74,15 +73,12 @@
           window-hidden?
           raise-window
           restore-window
-          window-focused?
           window-icon
           set-window-icon!
           window?
-          focus-window
           blur-window
           all-windows
           last-window
-
           display-new-window
 
           next-event
@@ -221,6 +217,15 @@
                               size::int
                               start::int
                               tail::int)))
+
+   (define-ctype Task::(.struct
+                        (lock::SDL_mutex*
+                         cond::SDL_cond*
+                         result
+                         exception
+                         message::char*
+                         continuation
+                         consumed?::bool)))
    ) ;; end of declcode
 
   (define-cvar main-thread-id::SDL_threadID :static)
@@ -1068,6 +1073,7 @@
        (return event)))))
 
 (define-cproc close-event-stream (gwin::<graviton-window>)
+  ::<void>
   (set! (-> gwin events) SCM_FALSE))
 
 (define-cproc clear-window-sprites! (gwin::<graviton-window>)
@@ -1218,14 +1224,6 @@
   ::<void>
   (SDL_RestoreWindow (-> gwin window)))
 
-(define-cproc window-focused? (gwin::<graviton-window>)
-  ::<boolean>
-  (return (SDL_GetWindowGrab (-> gwin window))))
-
-(define-cproc set-window-focus! (gwin::<graviton-window> focus?::<boolean>)
-  ::<void>
-  (SDL_SetWindowGrab (-> gwin window) focus?))
-
 (define-cproc window-icon (gwin::<graviton-window>)
   (return (-> gwin icon)))
 
@@ -1251,12 +1249,6 @@
 
 (define (window? obj)
   (is-a? obj <graviton-window>))
-
-(define (focus-window window)
-  (set-window-focus! window #t))
-
-(define (blur-window window)
-  (set-window-focus! window #f))
 
 ;;;
 ;;; Event
@@ -1849,7 +1841,7 @@
 
 
 ;;;
-;;; Draw
+;;; Draw vector graphics
 ;;;
 
 (inline-stub
@@ -2163,132 +2155,124 @@ typedef enum {
            (fill-inside gimage area color)))))))
 
 (define (draw-point image point color :key (thickness 0))
-  (call-on-main-thread (lambda ()
-                         (cond
-                           ((= thickness 0)
-                            (draw-rect image point point color))
-                           (else
-                            (draw-circle image point (/. thickness 2) color :fill? #t))))
-                       :wait? #f))
+  (cond
+    ((= thickness 0)
+     (draw-rect image point point color))
+    (else
+     (draw-circle image point (/. thickness 2) color :fill? #t))))
 
 (define (draw-rect image point0 point1 color :key (fill? #f) (thickness 0))
-  (call-on-main-thread (lambda ()
-                         (cond
-                           ((= thickness 0)
-                            (%draw-rect image point0 point1 color fill?))
-                           (else
-                            (let ((x0 (point-x point0))
-                                  (y0 (point-y point0))
-                                  (x1 (point-x point1))
-                                  (y1 (point-y point1)))
-                              (draw-polygon image
-                                            (list (make-point x0 y0)
-                                                  (make-point x0 y1)
-                                                  (make-point x1 y1)
-                                                  (make-point x1 y0))
-                                            color
-                                            :fill? fill?
-                                            :thinkness thickness)))))
-                       :wait? #f))
+  (cond
+    ((= thickness 0)
+     (%draw-rect image point0 point1 color fill?))
+    (else
+     (let ((x0 (point-x point0))
+           (y0 (point-y point0))
+           (x1 (point-x point1))
+           (y1 (point-y point1)))
+       (draw-polygon image
+                     (list (make-point x0 y0)
+                           (make-point x0 y1)
+                           (make-point x1 y1)
+                           (make-point x1 y0))
+                     color
+                     :fill? fill?
+                     :thinkness thickness)))))
 
 (define (draw-line image points color :key (thickness 0))
-  (call-on-main-thread (lambda ()
-                         (cond
-                           ((= thickness 0)
-                            (%draw-line image points color))
-                           ((null? points)
-                            #f)
-                           (else
-                            (draw-point image (car points) color :thickness thickness)
-                            (let loop ((point0 (car points))
-                                       (points (cdr points)))
-                              (cond
-                                ((null? points)
-                                 #f)
-                                ((< (abs (- (point-y point0) (point-y (car points)))) (pixel-height image))
-                                 (let* ((x0 (point-x point0))
-                                        (y0 (point-y point0))
-                                        (x1 (point-x (car points)))
-                                        (y1 (point-y (car points)))
-                                        (x00 x0)
-                                        (x01 x0)
-                                        (x10 x1)
-                                        (x11 x1)
-                                        (d (/. thickness 2))
-                                        (y00 (- y0 d))
-                                        (y01 (+ y0 d))
-                                        (y10 (- y1 d))
-                                        (y11 (+ y1 d)))
-                                   (draw-polygon image
-                                                 (list (make-point x00 y00)
-                                                       (make-point x01 y01)
-                                                       (make-point x11 y11)
-                                                       (make-point x10 y10))
-                                                 color
-                                                 :fill? #t)
-                                   (draw-point image (make-point x1 y1) color :thickness thickness)
-                                   (loop (car points) (cdr points))))
-                                ((< (abs (- (point-x point0) (point-x (car points)))) (pixel-width image))
-                                 (let* ((x0 (point-x point0))
-                                        (y0 (point-y point0))
-                                        (x1 (point-x (car points)))
-                                        (y1 (point-y (car points)))
-                                        (d (/. thickness 2))
-                                        (x00 (- x0 d))
-                                        (x01 (+ x0 d))
-                                        (x10 (- x1 d))
-                                        (x11 (+ x1 d))
-                                        (y00 y0)
-                                        (y01 y0)
-                                        (y10 y1)
-                                        (y11 y1))
-                                   (draw-polygon image
-                                                 (list (make-point x00 y00)
-                                                       (make-point x01 y01)
-                                                       (make-point x11 y11)
-                                                       (make-point x10 y10))
-                                                 color
-                                                 :fill? #t)
-                                   (draw-point image (make-point x1 y1) color :thickness thickness)
-                                   (loop (car points) (cdr points))))
-                                (else
-                                 (let* ((x0 (point-x point0))
-                                        (y0 (point-y point0))
-                                        (x1 (point-x (car points)))
-                                        (y1 (point-y (car points)))
-                                        (a (/. (- y0 y1) (- x0 x1)))
-                                        (c (* thickness (sqrt (/. (* a a) (+ (* a a) 1))) 0.5))
-                                        (x00 (- x0 c))
-                                        (x01 (+ x0 c))
-                                        (x10 (- x1 c))
-                                        (x11 (+ x1 c))
-                                        (y00 (+ (* (/. -1 a) (- x00 x0)) y0))
-                                        (y01 (+ (* (/. -1 a) (- x01 x0)) y0))
-                                        (y10 (+ (* (/. -1 a) (- x10 x1)) y1))
-                                        (y11 (+ (* (/. -1 a) (- x11 x1)) y1)))
-                                   (draw-polygon image
-                                                 (list (make-point x00 y00)
-                                                       (make-point x01 y01)
-                                                       (make-point x11 y11)
-                                                       (make-point x10 y10))
-                                                 color
-                                                 :fill? #t)
-                                   (draw-point image (make-point x1 y1) color :thickness thickness)
-                                   (loop (car points) (cdr points)))))))))
-                       :wait? #f))
+(cond
+  ((= thickness 0)
+   (%draw-line image points color))
+  ((null? points)
+   #f)
+  (else
+   (draw-point image (car points) color :thickness thickness)
+   (let loop ((point0 (car points))
+              (points (cdr points)))
+     (cond
+       ((null? points)
+        #f)
+       ((< (abs (- (point-y point0) (point-y (car points)))) (pixel-height image))
+        (let* ((x0 (point-x point0))
+               (y0 (point-y point0))
+               (x1 (point-x (car points)))
+               (y1 (point-y (car points)))
+               (x00 x0)
+               (x01 x0)
+               (x10 x1)
+               (x11 x1)
+               (d (/. thickness 2))
+               (y00 (- y0 d))
+               (y01 (+ y0 d))
+               (y10 (- y1 d))
+               (y11 (+ y1 d)))
+          (draw-polygon image
+                        (list (make-point x00 y00)
+                              (make-point x01 y01)
+                              (make-point x11 y11)
+                              (make-point x10 y10))
+                        color
+                        :fill? #t)
+          (draw-point image (make-point x1 y1) color :thickness thickness)
+          (loop (car points) (cdr points))))
+       ((< (abs (- (point-x point0) (point-x (car points)))) (pixel-width image))
+        (let* ((x0 (point-x point0))
+               (y0 (point-y point0))
+               (x1 (point-x (car points)))
+               (y1 (point-y (car points)))
+               (d (/. thickness 2))
+               (x00 (- x0 d))
+               (x01 (+ x0 d))
+               (x10 (- x1 d))
+               (x11 (+ x1 d))
+               (y00 y0)
+               (y01 y0)
+               (y10 y1)
+               (y11 y1))
+          (draw-polygon image
+                        (list (make-point x00 y00)
+                              (make-point x01 y01)
+                              (make-point x11 y11)
+                              (make-point x10 y10))
+                        color
+                        :fill? #t)
+          (draw-point image (make-point x1 y1) color :thickness thickness)
+          (loop (car points) (cdr points))))
+       (else
+        (let* ((x0 (point-x point0))
+               (y0 (point-y point0))
+               (x1 (point-x (car points)))
+               (y1 (point-y (car points)))
+               (a (/. (- y0 y1) (- x0 x1)))
+               (c (* thickness (sqrt (/. (* a a) (+ (* a a) 1))) 0.5))
+               (x00 (- x0 c))
+               (x01 (+ x0 c))
+               (x10 (- x1 c))
+               (x11 (+ x1 c))
+               (y00 (+ (* (/. -1 a) (- x00 x0)) y0))
+               (y01 (+ (* (/. -1 a) (- x01 x0)) y0))
+               (y10 (+ (* (/. -1 a) (- x10 x1)) y1))
+               (y11 (+ (* (/. -1 a) (- x11 x1)) y1)))
+          (draw-polygon image
+                        (list (make-point x00 y00)
+                              (make-point x01 y01)
+                              (make-point x11 y11)
+                              (make-point x10 y10))
+                        color
+                        :fill? #t)
+          (draw-point image (make-point x1 y1) color :thickness thickness)
+          (loop (car points) (cdr points)))))))))
 
 (define (draw-polygon image points color :key (fill? #f) (thickness 0))
-  (call-on-main-thread (lambda ()
-                         (cond
-                           ((= thickness 0)
-                            (%draw-polygon image points color fill?))
-                           ((null? points)
-                            #f)
-                           (else
-                            (draw-line image (cons (last points) points) color :thickness thickness)
-                            (when fill?
-                              (%draw-polygon image points color #t)))))
-                       :wait? #f))
+  (cond
+    ((= thickness 0)
+     (%draw-polygon image points color fill?))
+    ((null? points)
+     #f)
+    (else
+     (draw-line image (cons (last points) points) color :thickness thickness)
+     (when fill?
+       (%draw-polygon image points color #t)))))
 
 (define (draw-circle image
                      center-point
@@ -2302,40 +2286,38 @@ typedef enum {
                      (fill? #f)
                      (draw-radius? (if angle #t #f))
                      (thickness 0))
-  (call-on-main-thread (lambda ()
-                         (let ((center-x (point-x center-point))
-                               (center-y (point-y center-point)))
-                           (define rotate-point
-                             (let ((m00 (cos rotate))
-                                   (m01 (- (sin rotate)))
-                                   (m10 (sin rotate))
-                                   (m11 (cos rotate)))
-                               (lambda (x y)
-                                 (let ((x1 (- x center-x))
-                                       (y1 (- y center-y)))
-                                   (make-point (+ (* m00 x1) (* m01 y1) center-x)
-                                               (+ (* m10 x1) (* m11 y1) center-y))))))
+  (let ((center-x (point-x center-point))
+        (center-y (point-y center-point)))
+    (define rotate-point
+      (let ((m00 (cos rotate))
+            (m01 (- (sin rotate)))
+            (m10 (sin rotate))
+            (m11 (cos rotate)))
+        (lambda (x y)
+          (let ((x1 (- x center-x))
+                (y1 (- y center-y)))
+            (make-point (+ (* m00 x1) (* m01 y1) center-x)
+                        (+ (* m10 x1) (* m11 y1) center-y))))))
 
-                           (let ((dt (/ pi/2 (/ radius (receive (w h) (pixel-size image)
-                                                         (min w h)))))
-                                 (et (+ start (or angle (* 2 pi)))))
-                             (let loop ((t start)
-                                        (points (if (or draw-radius?
-                                                        (and angle fill?))
-                                                    (list center-point)
-                                                    '())))
-                               (cond
-                                 ((<= et t)
-                                  (let ((x (+ center-x (* radius (cos et))))
-                                        (y (+ center-y (* (* radius radius-ratio) (sin et)))))
-                                    (if (or draw-radius? fill?)
-                                        (draw-polygon image (cons (rotate-point x y) points) color :fill? fill? :thickness thickness)
-                                        (draw-line image (cons (rotate-point x y) points) color :thickness thickness))))
-                                 (else
-                                  (let ((x (+ center-x (* radius (cos t))))
-                                        (y (+ center-y (* (* radius radius-ratio) (sin t)))))
-                                    (loop (+ t dt) (cons (rotate-point x y) points)))))))))
-                       :wait? #f))
+    (let ((dt (/ pi/2 (/ radius (receive (w h) (pixel-size image)
+                                  (min w h)))))
+          (et (+ start (or angle (* 2 pi)))))
+      (let loop ((t start)
+                 (points (if (or draw-radius?
+                                 (and angle fill?))
+                             (list center-point)
+                             '())))
+        (cond
+          ((<= et t)
+           (let ((x (+ center-x (* radius (cos et))))
+                 (y (+ center-y (* (* radius radius-ratio) (sin et)))))
+             (if (or draw-radius? fill?)
+                 (draw-polygon image (cons (rotate-point x y) points) color :fill? fill? :thickness thickness)
+                 (draw-line image (cons (rotate-point x y) points) color :thickness thickness))))
+          (else
+           (let ((x (+ center-x (* radius (cos t))))
+                 (y (+ center-y (* (* radius radius-ratio) (sin t)))))
+             (loop (+ t dt) (cons (rotate-point x y) points)))))))))
 
 
 ;;;
@@ -2359,7 +2341,6 @@ typedef enum {
 
 (define (message-box title message :key (type 'info))
   (%message-box title message type))
-
 
 (include "graviton/enum2sym.scm")
 
@@ -2388,7 +2369,14 @@ typedef enum {
          (loop))))))
 
 (define (display-new-window title size proc :rest rest)
-  (apply make-window title size proc rest)
+  (define (default-handler win)
+    (event-for-each win
+      (match-lambda
+        (('window-close _)
+         (close-event-stream win))
+        (_
+         #f))))
+  (apply make-window title size (or proc default-handler) rest)
   (start-global-event-loop))
 
 (define (display-image image :key (fullscreen? #f) (resizable? #f))
@@ -2472,6 +2460,74 @@ typedef enum {
   (when (is-interactive?)
     (graviton-read-eval-print-loop (current-input-port))))
 
+;;;
+;;; Thread-safe
+;;;
+
+(define-syntax redefine-thread-safe-sync-function!
+  (syntax-rules ()
+    ((_)
+     (begin))
+    ((_ func rest ...)
+     (begin
+       (let ((%func func))
+         (set! func (lambda args
+                      (call-on-main-thread (cut apply %func args) :wait? #t))))
+       (redefine-thread-safe-sync-function! rest ...)))))
+
+(define-syntax redefine-thread-safe-async-function!
+  (syntax-rules ()
+    ((_)
+     (begin))
+    ((_ func rest ...)
+     (begin
+       (let ((%func func))
+         (set! func (lambda args
+                      (call-on-main-thread (cut apply %func args) :wait? #f))))
+       (redefine-thread-safe-async-function! rest ...)))))
+
+(redefine-thread-safe-sync-function!
+  make-window
+  window-size
+  window-maximized?
+  window-minimized?
+  window-position
+  window-title
+  window-resizable?
+  window-shown?
+  window-hidden?
+  window-icon
+  all-windows
+  last-window
+
+  message-box
+  )
+
+(redefine-thread-safe-async-function!
+  close-event-stream
+  clear-window-sprites!
+  send-close-window-event
+  set-window-size!
+  maximize-window
+  minimize-window
+  set-window-position!
+  set-window-title!
+  set-window-resizable!
+  show-window
+  hide-window
+  raise-window
+  restore-window
+  set-window-icon!
+  display-new-window
+
+  draw-point
+  draw-rect
+  draw-line
+  draw-polygon
+  draw-circle
+
+  )
+
 
 ;;;
 ;;; setter
@@ -2481,7 +2537,6 @@ typedef enum {
 (set! (setter window-position) set-window-position!)
 (set! (setter window-title) set-window-title!)
 (set! (setter window-resizable?) set-window-resizable!)
-(set! (setter window-focused?) set-window-focus!)
 (set! (setter window-icon) set-window-icon!)
 (set! (setter window-maximized?) set-window-maximized!)
 (set! (setter window-minimized?) set-window-minimized!)
