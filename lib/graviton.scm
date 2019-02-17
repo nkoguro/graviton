@@ -1623,13 +1623,6 @@
 
 (define-cproc reflect-resized-window-parameter (gwin::<graviton-window> actual-width::<int> actual-height::<int>)
   ::<void>
-  (printf "actual-width: %d, actual-height: %d\n" actual-width actual-height)
-  (printf "virtual-width: %d, virtual-height: %d\n" (-> gwin virtual-width) (-> gwin virtual-height))
-  (printf "left: %f, top: %f, right: %f, bottom: %f\n"
-          (ref (-> gwin param) left)
-          (ref (-> gwin param) top)
-          (ref (-> gwin param) right)
-          (ref (-> gwin param) bottom))
   (compute-transform-param (& (-> gwin param))
                            actual-width
                            actual-height
