@@ -32,6 +32,8 @@
 
 (define-module graviton
   (use compile-stub)
+  (use control.thread-pool)
+  (use data.queue)
   (use file.util)
   (use gauche.parameter)
   (use gauche.partcont)
@@ -44,6 +46,7 @@
   (export <graviton-window>
           <graviton-image>
           <graviton-sprite>
+          <graviton-future>
 
           <point>
           make-point
@@ -51,12 +54,29 @@
           point-x
           point-y
 
+          async
+          async*
+          async-apply
+          async*-apply
+          main-async
+          await
+          yield
+          await-sleep
+
           make-window
-          close-event-stream
+          destroy-window
           clear-window-sprites!
           send-close-window-event
           window-size
+          window-width
+          window-height
           set-window-size!
+          window-resolution
+          window-resolution-width
+          window-resolution-height
+          set-window-resolution!
+          window-fullscreen?
+          set-window-fullscreen!
           window-maximized?
           maximize-window
           window-minimized?
@@ -76,25 +96,96 @@
           window-icon
           set-window-icon!
           window?
-          blur-window
           all-windows
           last-window
-          display-new-window
+          set-window-handler!
+          reflect-resized-window-parameter
 
           next-event
           event-for-each
           frame-per-second
           set-frame-per-second!
+          actual-frame-per-second
+          load-average
+          frame-duration
           start-global-event-loop
+          set-global-handler!
+          grv-begin
+          grv-exit
+
+          on-window-shown
+          on-window-hidden
+          on-window-exposed
+          on-window-moved
+          on-window-resized
+          on-window-size-changed
+          on-window-minimized
+          on-window-maximized
+          on-window-restored
+          on-window-enter
+          on-window-leave
+          on-window-focus-gained
+          on-window-focus-lost
+          on-window-close
+          on-window-take-focus
+          on-window-hit-test
+          on-key-down
+          on-key-up
+          on-text-editing
+          on-text-input
+          on-mouse-motion
+          on-mouse-button-down
+          on-mouse-button-up
+          on-mouse-wheel
+          on-drop-file
+          on-drop-text
+          on-drop-begin
+          on-drop-complete
+          on-update
+
+          on-joystick-axis-motion
+          on-joystick-ball-motion
+          on-joystick-hat-motion
+          on-joystick-button-down
+          on-joystick-button-up
+          on-joystick-device-added
+          on-joystick-device-removed
+          on-controller-axis-motion
+          on-controller-button-down
+          on-controller-button-up
+          on-controller-device-added
+          on-controller-device-removed
+          on-controller-device-remapped
+          on-audio-device-added
+          on-audio-device-removed
+          on-quit
+          on-finger-motion
+          on-finger-down
+          on-finger-up
+          on-multi-gesture
+          on-dollar-gesture
+          on-dollar-record
 
           display-image
           make-image
           load-image
-          put-image
           image-rgba-pixels
           set-image-rgba-pixels!
-          sprite-center-position
-          set-sprite-center-position!
+
+          make-sprite
+          set-sprite-image!
+          sprite-image
+          set-sprite-center!
+          sprite-center
+          set-sprite-z!
+          sprite-z
+          set-sprite-angle!
+          sprite-angle
+          set-sprite-zoom!
+          sprite-zoom
+          set-sprite-visible!
+          sprite-visible?
+
           image-size
           image-width
           image-height
@@ -123,8 +214,6 @@
           draw-circle
 
           message-box
-
-          call-on-main-thread
 
           graviton-read-eval-print-loop
           )
@@ -176,24 +265,25 @@
    (define-ctype GrvSprite::(.struct
                              (window
                               image
-                              srcrect::SDL_Rect
-                              center_x::double
-                              center_y::double
+                              srcrect::SDL_Rect*
+                              center-x::double
+                              center-y::double
                               z::double
                               angle::double
-                              zoom_x::double
-                              zoom_y::double
-                              flip::SDL_RendererFlip
+                              zoom-x::double
+                              zoom-y::double
                               visible::bool)))
 
    (define-ctype GrvWindow::(.struct
                              (window::SDL_Window*
                               renderer::SDL_Renderer*
-                              proc
-                              events
                               sprites
                               icon
-                              param::TransformParam)))
+                              param::TransformParam
+                              virtual-width::int
+                              virtual-height::int
+                              zoom::double
+                              handler-table)))
 
    (define-ctype ScratchArea::(.struct
                                (x::int
@@ -206,38 +296,28 @@
                                    (lock::SDL_SpinLock
                                     running?::bool)))
 
-   (define-ctype ProcPacket::(.struct
-                              (proc
-                               lock::SDL_mutex*
-                               cond::SDL_cond*
-                               eval-packet::ScmEvalPacket*)))
-
-   (define-ctype ProcQueue::(.struct
-                             (buf::ProcPacket**
-                              size::int
-                              start::int
-                              tail::int)))
-
-   (define-ctype Task::(.struct
-                        (lock::SDL_mutex*
-                         cond::SDL_cond*
-                         result
-                         exception
-                         message::char*
-                         continuation
-                         consumed?::bool)))
+   (define-ctype GrvFuture::(.struct
+                             (lock::SDL_mutex*
+                              cond::SDL_cond*
+                              result
+                              exception
+                              message::char*
+                              continuation
+                              consumed?::bool)))
    ) ;; end of declcode
 
   (define-cvar main-thread-id::SDL_threadID :static)
   (define-cvar grv-windows :static SCM_NIL)
   (define-cvar event-loop-status::EventLoopStatus)
-  (define-cvar graviton-event::Uint32 :static)
   (define-cvar frame-per-second::int :static 30)
   (define-cvar event-loop-ticks::Uint32 :static 33)
-  (define-cvar proc-queue::ProcQueue :static)
-
-  (.define GRV_CALL_EVENT_CODE 1)
-  (.define INITIAL_PROC_QUEUE_LENGTH 1000)
+  (define-cvar actual-frame-per-second::double :static)
+  (define-cvar frame-duration::double :static)
+  (define-cvar load-average::double :static)
+  (define-cvar global-handler-table :static)
+  (define-cvar repl-thread :static)
+  (define-cvar repl-channel :static)
+  (define-cvar graviton-event-type::Uint32 :static)
 
   (define-cptr <graviton-window> :private
     "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
@@ -250,6 +330,12 @@
 
   (define-cptr <graviton-sprite> :private
     "GrvSprite*" "GravitonSpriteClass" "GRV_SPRITE_P" "MAKE_GRV_SPRITE" "GRV_SPRITE_PTR")
+
+  (define-cptr <graviton-future> :private
+    "GrvFuture*" "GravitonFutureClass" "GRV_FUTURE_P" "MAKE_GRV_FUTURE" "GRV_FUTURE_PTR")
+
+  (.define GRAVITON_EXCEPTION_CODE 1)
+  (.define GRAVITON_UNCAUGHT_EXCEPTION_CODE 2)
   )  ;; end of inline-stub
 
 (inline-stub
@@ -270,18 +356,16 @@
 
     (Scm_AddCleanupHandler teardown-libs NULL)
 
-    (let* ((event-type::Uint32 (SDL_RegisterEvents 1)))
-      (when (== event-type #xffffffff)
-        (Scm_Error "SDL_RegisterEvents failed: %s" (SDL_GetError)))
-      (set! graviton-event event-type))
+    (set! graviton-event-type (SDL_RegisterEvents 1))
+    (when (== graviton-event-type #xffffffff)
+      (Scm_Error "SDL_RegisterEvents failed: %s" (SDL_GetError)))
 
-    (set! main-thread-id (SDL_ThreadID))
+    (set! main-thread-id (SDL_ThreadID)
+          global-handler-table (Scm_MakeHashTableSimple SCM_HASH_EQ 16)
+          repl-thread SCM_FALSE
+          repl-channel SCM_FALSE)
     (set! (ref event-loop-status lock) 0
           (ref event-loop-status running?) false)
-    (set! (ref proc-queue buf) (SCM_NEW_ARRAY (.type ProcPacket*) INITIAL_PROC_QUEUE_LENGTH)
-          (ref proc-queue size) INITIAL_PROC_QUEUE_LENGTH
-          (ref proc-queue start) 0
-          (ref proc-queue tail) 0)
     ;; (SDL_LogSetPriority SDL_LOG_CATEGORY_APPLICATION SDL_LOG_PRIORITY_DEBUG)
     )
 
@@ -289,24 +373,304 @@
    (initialize-libs))
   ) ;; end of inline-stub
 
+(define-cproc current-ticks ()
+  ::<int>
+  (return (SDL_GetTicks)))
+
+
+;;;
+;;; Scheduler
+;;;
+
+(define *scheduler-thread* #f)
+(define *scheduler-channel* #f)
+
+(define (current-timeofday)
+  (receive (sec usec) (sys-gettimeofday)
+    (+ sec (/. usec 1000000))))
+
+(define (run-scheduler)
+  (let1 channel (make-mtqueue)
+    (set! *scheduler-thread*
+          (make-thread
+            (lambda ()
+              (guard (e (else (notify-exception e)))
+                (define (handle-event event schedules)
+                  (match event
+                    ('exit
+                      #f)
+                    (#f
+                     (next-schedule schedules))
+                    ((sec . thunk)
+                     (next-schedule (sort (acons sec thunk schedules)
+                                          (lambda (s0 s1)
+                                            (< (car s0) (car s1))))))))
+                (define (next-schedule schedules)
+                  (let1 now-sec (current-timeofday)
+                    (match schedules
+                      (()
+                       (handle-event (dequeue/wait! channel) '()))
+                      (((next-sec . thunk) rest ...)
+                       (cond
+                         ((<= next-sec now-sec)
+                          (guard (e (else (notify-exception e)))
+                            (thunk))
+                          (next-schedule rest))
+                         (else
+                          (handle-event (dequeue/wait! channel (- next-sec now-sec)) schedules)))))))
+                (next-schedule '())))))
+    (set! *scheduler-channel* channel)
+    (thread-start! *scheduler-thread*)))
+
+(define (shutdown-scheduler)
+  (when *scheduler-thread*
+    (enqueue! *scheduler-channel* 'exit)
+    (thread-join! *scheduler-thread*)
+    (set! *scheduler-thread* #f)
+    (set! *scheduler-channel* #f)))
+
+(define (kill-scheduler)
+  (when *scheduler-thread*
+    (thread-terminate! *scheduler-thread*)
+    (set! *scheduler-thread* #f)
+    (set! *scheduler-channel* #f)))
+
+(define (add-timer! sec thunk)
+  (enqueue! *scheduler-channel* (cons (+ (current-timeofday) sec) thunk)))
+
+
+;;;
+;;; Future
+;;;
+
+(inline-stub
+  (define-cfn notify-uncaught-exception (msg)
+    ::void
+    (let* ((event::SDL_Event))
+      (set! (ref event type) graviton-event-type
+            (ref event user code) GRAVITON_UNCAUGHT_EXCEPTION_CODE
+            (ref event user data1) msg)
+      (SDL_PushEvent (& event))))
+
+  (define-cfn finalize-future (z data::void*)
+    ::void
+    (when (GRV_FUTURE_P z)
+      (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR z)))
+        (SDL_DestroyCond (-> gfuture cond))
+        (SDL_DestroyMutex (-> gfuture lock))
+        (when (and (not (-> gfuture consumed?)) (-> gfuture message))
+          (notify-uncaught-exception (SCM_MAKE_STR_COPYING (-> gfuture message)))
+          (free (-> gfuture message))))))
+
+  (.define MAX_MESSAGE_LENGTH 1024)
+  ) ;; end of inline-stub
+
+(define-cproc make-future ()
+  (let* ((gfuture::GrvFuture* (SCM_NEW GrvFuture))
+         (obj (MAKE_GRV_FUTURE gfuture)))
+    (set! (-> gfuture lock) (SDL_CreateMutex)
+          (-> gfuture cond) (SDL_CreateCond)
+          (-> gfuture result) SCM_FALSE
+          (-> gfuture exception) SCM_FALSE
+          (-> gfuture message) NULL
+          (-> gfuture continuation) SCM_FALSE
+          (-> gfuture consumed?) false)
+    (Scm_RegisterFinalizer obj finalize-future NULL)
+    (return obj)))
+
+(define-cproc set-future-result! (gfuture::<graviton-future> result)
+  ::<void>
+  (let* ((cont SCM_FALSE)
+         (err?::bool false))
+    (SDL_LockMutex (-> gfuture lock))
+    (cond
+      ((and (SCM_FALSEP (-> gfuture result)) (SCM_FALSEP (-> gfuture exception)))
+       (set! (-> gfuture result) result
+             cont (-> gfuture continuation))
+       (SDL_CondSignal (-> gfuture cond)))
+      (else
+       (set! err? true)))
+    (SDL_UnlockMutex (-> gfuture lock))
+    (when err?
+      (Scm_Error "result has been already set in <graviton-future>"))
+    (when (SCM_PROCEDUREP cont)
+      (SDL_LockMutex (-> gfuture lock))
+      (set! (-> gfuture consumed?) true)
+      (SDL_UnlockMutex (-> gfuture lock))
+      (Scm_ApplyRec cont (SCM_LIST2 result SCM_FALSE)))))
+
+(define-cproc set-future-exception! (gfuture::<graviton-future> exception error-message::<const-cstring>)
+  ::<void>
+  (let* ((cont SCM_FALSE)
+         (err?::bool false))
+    (SDL_LockMutex (-> gfuture lock))
+    (cond
+      ((and (SCM_FALSEP (-> gfuture result)) (SCM_FALSEP (-> gfuture exception)))
+       (let* ((msg::char* (malloc MAX_MESSAGE_LENGTH)))
+         (bzero msg MAX_MESSAGE_LENGTH)
+         (strncpy msg error-message (- MAX_MESSAGE_LENGTH 1))
+         (set! (-> gfuture exception) exception
+               (-> gfuture message) msg
+               cont (-> gfuture continuation))
+         (SDL_CondSignal (-> gfuture cond))))
+      (else
+       (set! err? true)))
+    (SDL_UnlockMutex (-> gfuture lock))
+    (when err?
+      (Scm_Error "result has been already set in <graviton-future>"))
+    (when (SCM_PROCEDUREP cont)
+      (SDL_LockMutex (-> gfuture lock))
+      (set! (-> gfuture consumed?) true)
+      (SDL_UnlockMutex (-> gfuture lock))
+      (Scm_ApplyRec cont (SCM_LIST2 SCM_FALSE exception)))))
+
+(define-cproc future-result&exception (gfuture::<graviton-future>)
+  ::(<top> <top>)
+  (let* ((result SCM_FALSE)
+         (exception SCM_FALSE))
+    (SDL_LockMutex (-> gfuture lock))
+    (loop
+     (set! result (-> gfuture result)
+           exception (-> gfuture exception))
+     (cond
+       ((and (SCM_FALSEP result) (SCM_FALSEP exception))
+        (SDL_CondWait (-> gfuture cond) (-> gfuture lock)))
+       (else
+        (break))))
+    (set! (-> gfuture consumed?) true)
+    (SDL_UnlockMutex (-> gfuture lock))
+    (return result exception)))
+
+(define-cproc set-future-continuation! (gfuture::<graviton-future> cont)
+  ::<void>
+  (let* ((result SCM_FALSE)
+         (exception SCM_FALSE))
+    (SDL_LockMutex (-> gfuture lock))
+    (set! (-> gfuture continuation) cont
+          result (-> gfuture result)
+          exception (-> gfuture exception))
+    (SDL_UnlockMutex (-> gfuture lock))
+    (unless (and (SCM_FALSEP result) (SCM_FALSEP exception))
+      (SDL_LockMutex (-> gfuture lock))
+      (set! (-> gfuture consumed?) true)
+      (SDL_UnlockMutex (-> gfuture lock))
+      (Scm_ApplyRec cont (SCM_LIST2 result exception)))))
+
+(define-cproc on-main-thread? ()
+  ::<boolean>
+  (return (== main-thread-id (SDL_ThreadID))))
+
+(define graviton-thread-pool (make-parameter (make-thread-pool 1)))
+
+(define main-thread-thunk-queue (make-mtqueue))
+
+(define (submit-main-thread thunk)
+  (enqueue! main-thread-thunk-queue thunk))
+
+(define (submit-thread-pool thunk)
+  (add-job! (graviton-thread-pool) thunk))
+
+(define (submit thunk :optional (type (if (on-main-thread?) 'main 'pool)))
+  (let1 %submit (case type
+                  ((main) submit-main-thread)
+                  ((pool) submit-thread-pool)
+                  (else
+                   (errorf "type must be 'main or 'pool, but got ~s" thread)))
+    (%submit thunk)))
+
+(define (process-thunk-on-main-thread available-ticks)
+  (let1 start-ticks (current-ticks)
+    (let loop ()
+      (cond
+        ((and (< (- (current-ticks) start-ticks) available-ticks)
+              (dequeue/wait! main-thread-thunk-queue (max (/. (- available-ticks (- (current-ticks) start-ticks)) 1000)
+                                                          0)))
+         => (lambda (thunk)
+              (thunk)
+              (loop)))
+        (else
+         (queue-length main-thread-thunk-queue))))))
+
+(define (force-future future)
+  (receive (result exception) (future-result&exception future)
+    (cond
+      (result
+       (apply values result))
+      (exception
+       (raise exception))
+      (else
+       (errorf "[BUG] result or exception must have a value.")))))
+
+(define (%async-apply type proc args)
+  (let ((args (apply list args))
+        (future (make-future)))
+    (submit (lambda ()
+              (reset
+                (guard (e (else (set-future-exception! future e (report-error e #f))))
+                  (receive result (apply proc args)
+                    (set-future-result! future result)))))
+            type)
+    future))
+
+(define (async-apply proc :rest args)
+  (%async-apply 'pool proc args))
+
+(define (async*-apply proc :rest args)
+  (%async-apply 'main proc args))
+
+(define-syntax async
+  (syntax-rules ()
+    ((_ expr ...)
+     (async-apply (lambda () expr ...)))))
+
+(define-syntax async*
+  (syntax-rules ()
+    ((_ expr ...)
+     (async*-apply (lambda () expr ...)))))
+
+(define (await future)
+  (cond
+    ((is-a? future <graviton-future>)
+     (let1 %submit (if (on-main-thread?)
+                       submit-main-thread
+                       submit-thread-pool)
+       (shift cont
+         (set-future-continuation! future
+                                   (lambda (result exception)
+                                     (let1 thunk (cond
+                                                   (result
+                                                    (apply cont result))
+                                                   (exception
+                                                    (raise exception))
+                                                   (else
+                                                    (errorf "[BUG] result and exception aren't specified.")))
+                                       (%submit thunk)))))))
+    (else
+     future)))
+
+(define (await-sleep sec)
+  (let1 %submit (if (on-main-thread?)
+                    submit-main-thread
+                    submit-thread-pool)
+    (shift cont
+      (add-timer! sec (lambda ()
+                        (%submit cont))))))
+
+(define (report-uncaught-future-exceptions messages)
+  (for-each (lambda (msg)
+              (display msg (current-error-port))
+              (newline (current-error-port)))
+            messages)
+  (error "async failed, but the exception wasn't caught."))
+
+(define (yield)
+  (shift cont (submit cont)))
+
 ;;;
 ;;; Coordinate calculation
 ;;;
 
 (inline-stub
-  (define-cfn init-transform-param (param::TransformParam* width::int height::int)
-    ::void
-    (set! (-> param m00) 1.0
-          (-> param m01) 0.0
-          (-> param m10) 0.0
-          (-> param m11) 1.0
-          (-> param x0) 0.0
-          (-> param y0) 0.0
-          (-> param left) 0.0
-          (-> param top) 0.0
-          (-> param right) (cast double (- width 1))
-          (-> param bottom) (cast double (- height 1))))
-
   (define-cfn convert-coordinate (param::TransformParam* x::double y::double ox::int* oy::int*)
     ::void
     (let* ((m00::double (-> param m00))
@@ -315,8 +679,8 @@
            (m11::double (-> param m11))
            (x0::double (-> param x0))
            (y0::double (-> param y0)))
-      (set! (* ox) (+ (* m00 x) (* m01 y) x0)
-            (* oy) (+ (* m10 x) (* m11 y) y0))))
+      (set! (* ox) (cast int (round (+ (* m00 x) (* m01 y) x0)))
+            (* oy) (cast int (round (+ (* m10 x) (* m11 y) y0))))))
 
   (define-cfn compute-transform-param (param::TransformParam*
                                        width::int
@@ -324,7 +688,8 @@
                                        x0::double
                                        y0::double
                                        x1::double
-                                       y1::double)
+                                       y1::double
+                                       clip?::bool)
     ::void
     (let* ((wex::int (- width 1))
            (wey::int (- height 1))
@@ -347,10 +712,10 @@
             (-> param m11) (/ 1.0 my)
             (-> param x0) (- (/ sx mx))
             (-> param y0) (- (/ sy my))
-            (-> param left) sx
-            (-> param top) sy
-            (-> param right) ex
-            (-> param bottom) ey)))
+            (-> param left) (?: clip? x0 sx)
+            (-> param top) (?: clip? y0 sy)
+            (-> param right) (?: clip? x1 ex)
+            (-> param bottom) (?: clip? y1 ey))))
 
   (define-cfn get-transform-param (window-or-image)
     ::TransformParam*
@@ -584,7 +949,7 @@
           (ref (-> gimage update_rect) y) 0
           (ref (-> gimage update_rect) w) 0
           (ref (-> gimage update_rect) h) 0)
-    (init-transform-param (& (-> gimage param)) w h)
+    (compute-transform-param (& (-> gimage param)) w h 0 0 (- w 1) (- h 1) false)
     (Scm_RegisterFinalizer obj finalize-image NULL)
     (return obj)))
 
@@ -609,7 +974,7 @@
 
 (define-cproc set-image-border! (gimage::<graviton-image> top::<double> right::<double> bottom::<double> left::<double>)
   ::<void>
-  (compute-transform-param (& (-> gimage param)) (-> gimage surface w) (-> gimage surface h) left top right bottom))
+  (compute-transform-param (& (-> gimage param)) (-> gimage surface w) (-> gimage surface h) left top right bottom false))
 
 (define-cproc image-size (image::<graviton-image>)
   ::<list>
@@ -676,6 +1041,31 @@
       (release-texture (-> gsprite window) (GRV_IMAGE_PTR (-> gsprite image))))
     (set! (-> gsprite window) SCM_FALSE))
 
+  (define-cfn compute-sprite-actual-params (gsprite::GrvSprite* angle-deg::double* zoom-x::double* zoom-y::double* flip::SDL_RendererFlip*)
+    ::void
+    (let* ((deg::double (/ (* 180 (-> gsprite angle)) M_PI)))
+      (cond
+        ((and (< (-> gsprite zoom-x) 0) (< (-> gsprite zoom-y) 0))
+         (set! (* angle-deg) (+ deg 180)
+               (* zoom-x) (- (-> gsprite zoom-x))
+               (* zoom-y) (- (-> gsprite zoom-y))
+               (* flip) SDL_FLIP_NONE))
+        ((< zoom-x 0)
+         (set! (* angle-deg) deg
+               (* zoom-x) (- (-> gsprite zoom-x))
+               (* zoom-y) (-> gsprite zoom-y)
+               (* flip) SDL_FLIP_VERTICAL))
+        ((< zoom-y 0)
+         (set! (* angle-deg) deg
+               (* zoom-x) (-> gsprite zoom-x)
+               (* zoom-y) (- (-> gsprite zoom-y))
+               (* flip) SDL_FLIP_HORIZONTAL))
+        (else
+         (set! (* angle-deg) deg
+               (* zoom-x) (-> gsprite zoom-x)
+               (* zoom-y) (-> gsprite zoom-y)
+               (* flip) SDL_FLIP_NONE)))))
+
   (define-cfn render-sprite (gsprite::GrvSprite*)
     ::void
     (when (or (SCM_FALSEP (-> gsprite image))
@@ -683,26 +1073,31 @@
       (return))
     (let* ((gimage::GrvImage* (GRV_IMAGE_PTR (-> gsprite image))))
       (refresh-textures gimage)
-      (let* ((win (-> gsprite window))
-             (gwin::GrvWindow* (GRV_WINDOW_PTR win))
-             (texture::SDL_Texture* (get-texture win gimage))
-             (spr-center-x::int)
-             (spr-center-y::int)
-             (spr-w::double (* (ref (-> gsprite srcrect) w) (-> gsprite zoom_x)))
-             (spr-h::double (* (ref (-> gsprite srcrect) h) (-> gsprite zoom_y)))
-             (dstrect::SDL_Rect))
-        (window-coordinate gwin (-> gsprite center_x) (-> gsprite center_y) (& spr-center-x) (& spr-center-y))
-        (set! (ref dstrect x) (cast int (round (- spr-center-x (/ spr-w 2.0))))
-              (ref dstrect y) (cast int (round (- spr-center-y (/ spr-h 2.0))))
-              (ref dstrect w) (cast int (round spr-w))
-              (ref dstrect h) (cast int (round spr-h)))
-        (SDL_RenderCopyEx (-> gwin renderer)
-                          texture
-                          (& (-> gsprite srcrect))
-                          (& dstrect)
-                          (-> gsprite angle)
-                          NULL
-                          (-> gsprite flip)))))
+      (let* ((angle-deg::double)
+             (zoom-x::double)
+             (zoom-y::double)
+             (flip::SDL_RendererFlip))
+        (compute-sprite-actual-params gsprite (& angle-deg) (& zoom-x) (& zoom-y) (& flip))
+        (let* ((win (-> gsprite window))
+               (gwin::GrvWindow* (GRV_WINDOW_PTR win))
+               (texture::SDL_Texture* (get-texture win gimage))
+               (spr-center-x::int)
+               (spr-center-y::int)
+               (spr-w::double (* (-> gsprite srcrect w) zoom-x (-> gwin zoom)))
+               (spr-h::double (* (-> gsprite srcrect h) zoom-y (-> gwin zoom)))
+               (dstrect::SDL_Rect))
+          (window-coordinate gwin (-> gsprite center_x) (-> gsprite center_y) (& spr-center-x) (& spr-center-y))
+          (set! (ref dstrect x) (- spr-center-x (cast int (round (/ spr-w 2.0))))
+                (ref dstrect y) (- spr-center-y (cast int (round (/ spr-h 2.0))))
+                (ref dstrect w) (cast int (round spr-w))
+                (ref dstrect h) (cast int (round spr-h)))
+          (SDL_RenderCopyEx (-> gwin renderer)
+                            texture
+                            (-> gsprite srcrect)
+                            (& dstrect)
+                            angle-deg
+                            NULL
+                            flip)))))
 
   (define-cfn remove-window-sprite (sprite)
     ::void
@@ -742,102 +1137,109 @@
   ) ;; end of inline-stub
 
 (define-cproc make-sprite (window
-                           image
-                           center-x::<double>
-                           center-y::<double>
-                           z::<double>
-                           rect
-                           angle::<double>
-                           zoom_x::<double>
-                           zoom_y::<double>
-                           visible::<boolean>)
+                           :key
+                           (image #f)
+                           center
+                           (z::<double> 0.0)
+                           (angle::<double> 0.0)
+                           zoom
+                           (visible::<boolean> #t))
   (unless (GRV_WINDOW_P window)
     (Scm_Error "window must be <graviton-window>, but got %S" window))
   (unless (or (SCM_FALSEP image)
               (GRV_IMAGE_P image))
     (Scm_Error "image must be <graviton-image> or #f, but got %S" image))
-  (unless (and (SCM_LISTP rect)
-               (== (Scm_Length rect) 4)
-               (SCM_INTP (Scm_ListRef rect 0 SCM_UNBOUND))
-               (SCM_INTP (Scm_ListRef rect 1 SCM_UNBOUND))
-               (SCM_INTP (Scm_ListRef rect 2 SCM_UNBOUND))
-               (SCM_INTP (Scm_ListRef rect 3 SCM_UNBOUND)))
-    (Scm_Error "rect must be (x y w h), but got %S" rect))
-  (let* ((sprite::GrvSprite* (SCM_NEW (.type GrvSprite)))
-         (flip::SDL_RendererFlip))
+  (unless (or (SCM_UNBOUNDP center)
+              (and (SCM_LISTP center)
+                   (SCM_REALP (Scm_ListRef center 0 SCM_UNBOUND))
+                   (SCM_REALP (Scm_ListRef center 1 SCM_UNBOUND))))
+    (Scm_Error "center must be (<real> <real>), but got %S" center))
+  (unless (or (SCM_UNBOUNDP zoom)
+              (SCM_REALP zoom)
+              (and (SCM_LISTP zoom)
+                   (SCM_REALP (Scm_ListRef zoom 0 SCM_UNBOUND))
+                   (SCM_REALP (Scm_ListRef zoom 1 SCM_UNBOUND))))
+    (Scm_Error "zoom must be <real> or (<real> <real>), but got %S" zoom))
+
+  (let* ((gsprite::GrvSprite* (SCM_NEW (.type GrvSprite)))
+         (center-x::double 0.0)
+         (center-y::double 0.0)
+         (zoom-x::double 1.0)
+         (zoom-y::double 1.0)
+         (srcrect::SDL_Rect* NULL))
+    (when (SCM_LISTP center)
+      (set! center-x (Scm_GetDouble (Scm_ListRef center 0 SCM_UNBOUND))
+            center-y (Scm_GetDouble (Scm_ListRef center 1 SCM_UNBOUND))))
     (cond
-      ((and (< zoom_x 0) (< zoom_y 0))
-       (set! zoom_x (- zoom_x)
-             zoom_y (- zoom_y)
-             angle (+ angle 180)
-             flip SDL_FLIP_NONE))
-      ((< zoom_x 0)
-       (set! zoom_x (- zoom_x)
-             flip SDL_FLIP_VERTICAL))
-      ((< zoom_y 0)
-       (set! zoom_y (- zoom_y)
-             flip SDL_FLIP_HORIZONTAL))
-      (else
-       (set! flip SDL_FLIP_NONE)))
-    (set! (-> sprite window) window
-          (-> sprite image) image
-          (-> sprite center_x) center-x
-          (-> sprite center_y) center-y
-          (-> sprite z) z
-          (ref (-> sprite srcrect) x) (SCM_INT_VALUE (Scm_ListRef rect 0 (SCM_MAKE_INT 0)))
-          (ref (-> sprite srcrect) y) (SCM_INT_VALUE (Scm_ListRef rect 1 (SCM_MAKE_INT 0)))
-          (ref (-> sprite srcrect) w) (SCM_INT_VALUE (Scm_ListRef rect 2 (SCM_MAKE_INT 0)))
-          (ref (-> sprite srcrect) h) (SCM_INT_VALUE (Scm_ListRef rect 3 (SCM_MAKE_INT 0)))
-          (-> sprite angle) angle
-          (-> sprite zoom_x) zoom_x
-          (-> sprite zoom_y) zoom_y
-          (-> sprite flip) flip
-          (-> sprite visible) visible)
+      ((SCM_REALP zoom)
+       (set! zoom-x (Scm_GetDouble zoom)
+             zoom-y (Scm_GetDouble zoom)))
+      ((SCM_LISTP zoom)
+       (set! zoom-x (Scm_GetDouble (Scm_ListRef zoom 0 SCM_UNBOUND))
+             zoom-y (Scm_GetDouble (Scm_ListRef zoom 1 SCM_UNBOUND)))))
+
+    (when (GRV_IMAGE_P image)
+      (set! srcrect (SCM_NEW SDL_Rect)
+            (-> srcrect x) 0
+            (-> srcrect y) 0
+            (-> srcrect w) (-> (GRV_IMAGE_PTR image) surface w)
+            (-> srcrect h) (-> (GRV_IMAGE_PTR image) surface h)))
+    (set! (-> gsprite window) window
+          (-> gsprite image) image
+          (-> gsprite center-x) center-x
+          (-> gsprite center-y) center-y
+          (-> gsprite z) z
+          (-> gsprite srcrect) srcrect
+          (-> gsprite angle) angle
+          (-> gsprite zoom-x) zoom-x
+          (-> gsprite zoom-y) zoom-y
+          (-> gsprite visible) visible)
     (unless (SCM_FALSEP image)
       (retain-texture window (GRV_IMAGE_PTR image)))
-    (let* ((sprite-obj (MAKE_GRV_SPRITE sprite)))
-      (Scm_RegisterFinalizer sprite-obj finalize-sprite NULL)
-      (insert-window-sprite sprite-obj)
-      (return sprite-obj))))
+    (let* ((sprite (MAKE_GRV_SPRITE gsprite)))
+      (Scm_RegisterFinalizer sprite finalize-sprite NULL)
+      (insert-window-sprite sprite)
+      (return sprite))))
 
-(define-cproc %set-sprite-image! (sprite::<graviton-sprite> image rect)
+(define-cproc set-sprite-image! (gsprite::<graviton-sprite> image)
   ::<void>
   (unless (or (SCM_FALSEP image)
               (GRV_IMAGE_P image))
     (Scm_Error "image must be <graviton-image> or #f, but got %S" image))
-  (unless (and (SCM_LISTP rect)
-               (== (Scm_Length rect) 4)
-               (SCM_INTP (Scm_ListRef rect 0 SCM_UNBOUND))
-               (SCM_INTP (Scm_ListRef rect 1 SCM_UNBOUND))
-               (SCM_INTP (Scm_ListRef rect 2 SCM_UNBOUND))
-               (SCM_INTP (Scm_ListRef rect 3 SCM_UNBOUND)))
-    (Scm_Error "rect must be (x y w h), but got %S" rect))
-  (unless (SCM_FALSEP (-> sprite image))
-    (release-texture (-> sprite window) (GRV_IMAGE_PTR (-> sprite image))))
-  (unless (SCM_FALSEP image)
-    (retain-texture (-> sprite window) (GRV_IMAGE_PTR image)))
-  (set! (-> sprite image) image
-        (ref (-> sprite srcrect) x) (SCM_INT_VALUE (Scm_ListRef rect 0 (SCM_MAKE_INT 0)))
-        (ref (-> sprite srcrect) y) (SCM_INT_VALUE (Scm_ListRef rect 1 (SCM_MAKE_INT 0)))
-        (ref (-> sprite srcrect) w) (SCM_INT_VALUE (Scm_ListRef rect 2 (SCM_MAKE_INT 0)))
-        (ref (-> sprite srcrect) h) (SCM_INT_VALUE (Scm_ListRef rect 3 (SCM_MAKE_INT 0)))))
 
-(define-cproc sprite-image (sprite::<graviton-sprite>)
-  ::(<top> <top>)
-  (return (-> sprite image)
-          (SCM_LIST4 (SCM_MAKE_INT (ref (-> sprite srcrect) x))
-                     (SCM_MAKE_INT (ref (-> sprite srcrect) y))
-                     (SCM_MAKE_INT (ref (-> sprite srcrect) w))
-                     (SCM_MAKE_INT (ref (-> sprite srcrect) h)))))
+  (let* ((srcrect::SDL_Rect* NULL))
+    (cond
+      ((GRV_IMAGE_P image)
+       (let* ((gimage::GrvImage* (GRV_IMAGE_PTR image)))
+         (retain-texture (-> gsprite window) gimage)
+         (set! srcrect (SCM_NEW SDL_Rect)
+               (-> srcrect x) 0
+               (-> srcrect y) 0
+               (-> srcrect w) (-> gimage surface w)
+               (-> srcrect h) (-> gimage surface h))))
+      (else
+       (when (GRV_IMAGE_P (-> gsprite image))
+         (release-texture (-> gsprite window) (GRV_IMAGE_PTR (-> gsprite image))))))
 
-(define-cproc set-sprite-center-position! (sprite::<graviton-sprite> x::<double> y::<double>)
+    (set! (-> gsprite image) image
+          (-> gsprite srcrect) srcrect)))
+
+(define-cproc sprite-image (gsprite::<graviton-sprite>)
+  ::<top>
+  (return (-> gsprite image)))
+
+(define-cproc set-sprite-center! (gsprite::<graviton-sprite> center)
   ::<void>
-  (set! (-> sprite center_x) x
-        (-> sprite center_y) y))
+  (unless (and (SCM_LISTP center)
+               (SCM_REALP (Scm_ListRef center 0 SCM_UNBOUND))
+               (SCM_REALP (Scm_ListRef center 1 SCM_UNBOUND)))
+    (Scm_Error "center must be (<real> <real>), but got %S" center))
+  (set! (-> gsprite center-x) (Scm_GetDouble (Scm_ListRef center 0 SCM_UNBOUND))
+        (-> gsprite center-y) (Scm_GetDouble (Scm_ListRef center 1 SCM_UNBOUND))))
 
-(define-cproc sprite-center-position (sprite::<graviton-sprite>)
-  ::(<double> <double>)
-  (return (-> sprite center_x) (-> sprite center_y)))
+(define-cproc sprite-center (gsprite::<graviton-sprite>)
+  ::<list>
+  (return (SCM_LIST2 (Scm_MakeFlonum (-> gsprite center-x)) (Scm_MakeFlonum (-> gsprite center-y)))))
 
 (define-cproc set-sprite-z! (sprite z::<double>)
   ::<void>
@@ -847,19 +1249,19 @@
   (set! (-> (GRV_SPRITE_PTR sprite) z) z)
   (insert-window-sprite sprite))
 
-(define-cproc sprite-z (sprite::<graviton-sprite>)
+(define-cproc sprite-z (gsprite::<graviton-sprite>)
   ::<double>
-  (return (-> sprite z)))
+  (return (-> gsprite z)))
 
-(define-cproc set-sprite-angle! (sprite::<graviton-sprite> angle::<double>)
+(define-cproc set-sprite-angle! (gsprite::<graviton-sprite> angle::<double>)
   ::<void>
-  (set! (-> sprite angle) angle))
+  (set! (-> gsprite angle) angle))
 
-(define-cproc sprite-angle (sprite::<graviton-sprite>)
+(define-cproc sprite-angle (gsprite::<graviton-sprite>)
   ::<double>
-  (return (-> sprite angle)))
+  (return (-> gsprite angle)))
 
-(define-cproc set-sprite-zoom! (sprite::<graviton-sprite> zoom)
+(define-cproc set-sprite-zoom! (gsprite::<graviton-sprite> zoom)
   ::<void>
   (let* ((zoom-x::double)
          (zoom-y::double))
@@ -875,52 +1277,26 @@
              zoom-y (Scm_GetDouble (Scm_ListRef zoom 1 SCM_UNBOUND))))
       (else
        (Scm_Error "zoom must be <real> or (<real> <real>), but bot %S" zoom)))
+    (set! (-> gsprite zoom-x) zoom-x
+          (-> gsprite zoom-y) zoom-y)))
+
+(define-cproc sprite-zoom (gsprite::<graviton-sprite>)
+  (let* ((zoom-x::double (-> gsprite zoom-x))
+         (zoom-y::double (-> gsprite zoom-y)))
     (cond
-      ((and (< zoom-x 0) (< zoom-y 0))
-       (set! (-> sprite angle) (+ (-> sprite angle) 180)
-             (-> sprite zoom_x) (- zoom-x)
-             (-> sprite zoom_y) (- zoom-y)
-             (-> sprite flip) SDL_FLIP_NONE))
-      ((< zoom-x 0)
-       (set! (-> sprite zoom_x) (- zoom-x)
-             (-> sprite zoom_y) zoom_y
-             (-> sprite flip) SDL_FLIP_VERTICAL))
-      ((< zoom-y 0)
-       (set! (-> sprite zoom_x) zoom-x
-             (-> sprite zoom_y) (- zoom-y)
-             (-> sprite flip) SDL_FLIP_HORIZONTAL))
+      ((== zoom-x zoom-y)
+       (return (Scm_MakeFlonum zoom-x)))
       (else
-       (set! (-> sprite zoom_x) zoom-x
-             (-> sprite zoom_y) zoom-y
-             (-> sprite flip) SDL_FLIP_NONE)))))
+       (return (SCM_LIST2 (Scm_MakeFlonum zoom-x) (Scm_MakeFlonum zoom-y)))))))
 
-(define-cproc sprite-zoom (sprite::<graviton-sprite>)
-  ::(<double> <double>)
-  (case (-> sprite flip)
-    ((SDL_FLIP_VERTICAL)
-     (return (- (-> sprite zoom_x)) (-> sprite zoom_y)))
-    ((SDL_FLIP_HORIZONTAL)
-     (return (-> sprite zoom_x) (- (-> sprite zoom_y))))
-    (else
-     (return (-> sprite zoom_x) (-> sprite zoom_y)))))
-
-(define-cproc set-sprite-visible! (sprite::<graviton-sprite> visible::<boolean>)
+(define-cproc set-sprite-visible! (gsprite::<graviton-sprite> visible::<boolean>)
   ::<void>
-  (set! (-> sprite visible) visible))
+  (set! (-> gsprite visible) visible))
 
-(define-cproc sprite-visible? (sprite::<graviton-sprite>)
+(define-cproc sprite-visible? (gsprite::<graviton-sprite>)
   ::<boolean>
-  (return (-> sprite visible)))
+  (return (-> gsprite visible)))
 
-(define (set-sprite-image! sprite image :optional (rect (receive (w h) (image-size image)
-                                                          (list 0 0 w h))))
-  (%set-sprite-image! sprite image rect))
-
-(define (put-image window image center-x center-y :key rect (z 0) (angle 0) (zoom-x 1.0) (zoom-y 1.0) (visible #t))
-  (let1 rect (if (undefined? rect)
-                 (list 0 0 (image-width image) (image-height image))
-                 rect)
-    (make-sprite window image center-x center-y z rect angle zoom-x zoom-y visible)))
 
 
 ;;;
@@ -928,26 +1304,16 @@
 ;;;
 
 (inline-stub
-  (define-cfn register-grv-window (gwin::GrvWindow*)
-    ::ScmObj
-    (let* ((obj (MAKE_GRV_WINDOW gwin)))
-      (set! grv-windows (Scm_Cons obj grv-windows))
-      (return obj)))
-
-  (define-cfn unregister-grv-window (gwin::GrvWindow*)
+  (define-cfn remove-destroyed-windows ()
     ::void
-    (let* ((prev SCM_NIL))
-      (pair-for-each (lambda (pair)
-                       (let* ((curwin::GrvWindow* (GRV_WINDOW_PTR (SCM_CAR pair))))
-                         (when (== gwin curwin)
-                           (cond
-                             ((SCM_NULLP prev)
-                              (set! grv-windows (SCM_CDR pair))
-                              (break))
-                             (else
-                              (SCM_SET_CDR prev (SCM_CDR pair))
-                              (break))))))
-                     grv-windows)))
+    (let* ((prev SCM_NIL)
+           (wins SCM_NIL))
+      (for-each (lambda (win)
+                  (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
+                    (when (-> gwin window)
+                      (set! wins (Scm_Cons win wins)))))
+                grv-windows)
+      (set! grv-windows wins)))
 
   (define-cfn destroy-window (gwin::GrvWindow*)
     ::void
@@ -956,13 +1322,10 @@
               (-> gwin sprites))
     (set! (-> gwin sprites) SCM_NIL)
 
-    (unregister-grv-window gwin)
     (SDL_DestroyRenderer (-> gwin renderer))
     (SDL_DestroyWindow (-> gwin window))
     (set! (-> gwin window) NULL
-          (-> gwin renderer) NULL
-          (-> gwin proc) SCM_FALSE
-          (-> gwin events) SCM_NIL))
+          (-> gwin renderer) NULL))
 
   (define-cfn window-pixel-width (gwin::GrvWindow*)
     ::double
@@ -989,23 +1352,29 @@
                             (-> gwin sprites))
                   (SDL_RenderPresent renderer)))
               grv-windows))
+
+  (define-cfn set-window-resolution! (gwin::GrvWindow* actual-width::int actual-height::int virtual-width::int virtual-height::int)
+    ::void
+    (let* ((zoom-w::double)
+           (zoom-h::double))
+      (set! zoom-w (/ (cast double actual-width) (cast double virtual-width))
+            zoom-h (/ (cast double actual-height) (cast double virtual-height))
+            (-> gwin virtual-width) virtual-width
+            (-> gwin virtual-height) virtual-height
+            (-> gwin zoom) (?: (< zoom-w zoom-h) zoom-w zoom-h))
+      (let* ((rect::SDL_Rect))
+        (set! (ref rect w) (cast int (round (* virtual-width (-> gwin zoom))))
+              (ref rect h) (cast int (round (* virtual-height (-> gwin zoom))))
+              (ref rect x) (/ (- actual-width (ref rect w)) 2)
+              (ref rect y) (/ (- actual-height (ref rect h)) 2))
+        (when (< (SDL_RenderSetClipRect (-> gwin renderer) (& rect)) 0)
+          (Scm_Error "SDL_RenderSetClipRect failed: %s" (SDL_GetError))))))
   ) ;; end of inline-stub
 
-(define-cproc make-window (title::<const-cstring> size proc :key (resizable?::<boolean> #f) (icon #f) (shown?::<boolean> #t) (maximized?::<boolean> #f) (minimized?::<boolean> #f))
-  (let* ((width::int 0)
-         (height::int 0)
-         (flags::Uint32 0))
-    (cond
-      ((and (SCM_LISTP size)
-            (== (Scm_Length size) 2)
-            (SCM_INTP (Scm_ListRef size 0 SCM_UNBOUND))
-            (SCM_INTP (Scm_ListRef size 1 SCM_UNBOUND)))
-       (set! width (SCM_INT_VALUE (Scm_ListRef size 0 (SCM_MAKE_INT -1)))
-             height (SCM_INT_VALUE (Scm_ListRef size 1 (SCM_MAKE_INT -1)))))
-      ((SCM_EQ size 'fullscreen)
-       (set! flags SDL_WINDOW_FULLSCREEN_DESKTOP))
-      (else
-       (Scm_Error "size must be a list of two integer elements or 'fullscreen, but got %S" size)))
+(define-cproc make-window (title::<const-cstring> width::<int> height::<int> :key (resizable?::<boolean> #f) (icon #f) (shown?::<boolean> #t) (maximized?::<boolean> #f) (minimized?::<boolean> #f) (fullscreen?::<boolean> #f))
+  (let* ((flags::Uint32 0))
+    (when fullscreen?
+      (set! flags (logior flags SDL_WINDOW_FULLSCREEN_DESKTOP)))
     (when resizable?
       (set! flags (logior flags SDL_WINDOW_RESIZABLE)))
     (when maximized?
@@ -1023,10 +1392,9 @@
     (let* ((gwin::GrvWindow* (SCM_NEW (.type GrvWindow))))
       (set! (-> gwin window) NULL
             (-> gwin renderer) NULL
-            (-> gwin proc) proc
-            (-> gwin events) SCM_NIL
             (-> gwin sprites) SCM_NIL
-            (-> gwin icon) icon)
+            (-> gwin icon) icon
+            (-> gwin handler-table) (Scm_MakeHashTableSimple SCM_HASH_EQ 16))
 
       (set! (-> gwin window) (SDL_CreateWindow title
                                                SDL_WINDOWPOS_UNDEFINED
@@ -1040,41 +1408,37 @@
       (when (GRV_IMAGE_P icon)
         (SDL_SetWindowIcon (-> gwin window) (-> (GRV_IMAGE_PTR icon) surface)))
 
-      (let* ((w::int)
-             (h::int))
-        (SDL_GetWindowSize (-> gwin window) (& w) (& h))
-        (init-transform-param (& (-> gwin param)) w h))
-
-      (set! (-> gwin renderer) (SDL_CreateRenderer (-> gwin window) -1 SDL_RENDERER_PRESENTVSYNC))
+      (set! (-> gwin renderer) (SDL_CreateRenderer (-> gwin window) -1 0))
       (unless (-> gwin renderer)
         (Scm_Error "SDL_CreateRenderer failed: %s" (SDL_GetError)))
 
-      (return (register-grv-window gwin)))))
+      (let* ((actual-width::int)
+             (actual-height::int))
+        (SDL_GetWindowSize (-> gwin window) (& actual-width) (& actual-height))
+        (compute-transform-param (& (-> gwin param)) actual-width actual-height 0 0 (- width 1) (- height 1) true)
+        (set-window-resolution! gwin actual-width actual-height width height))
+
+      (Scm_HashTableSet (SCM_HASH_TABLE (-> gwin handler-table))
+                        'window-close
+                        (Scm_EvalRec 'destroy-window
+                                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
+                        0)
+      (Scm_HashTableSet (SCM_HASH_TABLE (-> gwin handler-table))
+                        'window-resized
+                        (Scm_EvalRec 'reflect-resized-window-parameter
+                                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
+                        0)
+
+      (let* ((win (MAKE_GRV_WINDOW gwin)))
+        (set! grv-windows (Scm_Cons win grv-windows))
+        (return win)))))
 
 (define-cproc set-window-border! (gwin::<graviton-window> top::<double> right::<double> bottom::<double> left::<double>)
   ::<void>
   (let* ((width::int)
          (height::int))
     (SDL_GetWindowSize (-> gwin window) (& width) (& height))
-    (compute-transform-param (& (-> gwin param)) width height left top right bottom)))
-
-(define-cproc set-window-proc! (gwin::<graviton-window> proc)
-  (set! (-> gwin proc) proc))
-
-(define-cproc %next-event (gwin::<graviton-window>)
-  (cond
-    ((SCM_NULLP (-> gwin events))
-     (return SCM_FALSE))
-    ((SCM_FALSEP (-> gwin events))
-     (return SCM_EOF))
-    (else
-     (let* ((event (SCM_CAR (-> gwin events))))
-       (set! (-> gwin events) (SCM_CDR (-> gwin events)))
-       (return event)))))
-
-(define-cproc close-event-stream (gwin::<graviton-window>)
-  ::<void>
-  (set! (-> gwin events) SCM_FALSE))
+    (compute-transform-param (& (-> gwin param)) width height left top right bottom true)))
 
 (define-cproc clear-window-sprites! (gwin::<graviton-window>)
   ::<void>
@@ -1084,13 +1448,16 @@
             (-> gwin sprites))
   (set! (-> gwin sprites) SCM_NIL))
 
+(define-cproc destroy-window (gwin::<graviton-window>)
+  ::<void>
+  (destroy-window gwin))
+
 (define-cproc destroy-all-windows ()
   ::<void>
   (for-each (lambda (obj)
               (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
                 (destroy-window gwin)))
-            grv-windows)
-  (set! grv-windows SCM_NIL))
+            grv-windows))
 
 (define-cproc send-close-window-event (gwin::<graviton-window>)
   ::<void>
@@ -1103,39 +1470,57 @@
     (SDL_PushEvent (& event))))
 
 (define-cproc window-size (gwin::<graviton-window>)
-  ::<list>
+  ::(<int> <int>)
   (let* ((w::int)
          (h::int))
     (SDL_GetWindowSize (-> gwin window) (& w) (& h))
-    (return (SCM_LIST2 (SCM_MAKE_INT w) (SCM_MAKE_INT h)))))
+    (return w h)))
 
 (define (window-width window)
-  (list-ref (window-size window) 0))
+  (values-ref (window-size window) 0))
 
 (define (window-height window)
-  (list-ref (window-size window) 1))
+  (values-ref (window-size window) 1))
 
-(define-cproc set-window-size! (gwin::<graviton-window> size)
+(define-cproc set-window-size! (gwin::<graviton-window> width::<int> height::<int>)
   ::<void>
-  (cond
-    ((SCM_EQ size 'fullscreen)
-     (when (< (SDL_SetWindowFullscreen (-> gwin window) SDL_WINDOW_FULLSCREEN_DESKTOP) 0)
-       (Scm_Error "SDL_SetWindowFullscreen failed: %s" (SDL_GetError))))
-    ((and (SCM_LISTP size)
-          (SCM_INTP (Scm_ListRef size 0 SCM_UNBOUND))
-          (SCM_INTP (Scm_ListRef size 1 SCM_UNBOUND)))
-     (when (< (SDL_SetWindowFullscreen (-> gwin window) 0) 0)
-       (Scm_Error "SDL_SetWindowFullscreen failed: %s" (SDL_GetError)))
-     (SDL_SetWindowSize (-> gwin window)
-                        (SCM_INT_VALUE (Scm_ListRef size 0 SCM_UNBOUND))
-                        (SCM_INT_VALUE (Scm_ListRef size 1 SCM_UNBOUND))))
-    (else
-     (Scm_Error "(<integer> <integer>) or 'fullscreen required, but got %S" size))))
+  (SDL_SetWindowSize (-> gwin window) width height)
+  (compute-transform-param (& (-> gwin param))
+                           width
+                           height
+                           (ref (-> gwin param) left)
+                           (ref (-> gwin param) top)
+                           (ref (-> gwin param) right)
+                           (ref (-> gwin param) bottom)
+                           true)
+  (set-window-resolution! gwin width height (-> gwin virtual-width) (-> gwin virtual-height)))
+
+(define-cproc window-resolution (gwin::<graviton-window>)
+  ::(<int> <int>)
+  (return (-> gwin virtual-width) (-> gwin virtual-height)))
+
+(define (window-resolution-width window)
+  (values-ref (window-resolution window) 0))
+
+(define (window-resolution-height window)
+  (values-ref (window-resolution window) 1))
+
+(define-cproc set-window-resolution! (gwin::<graviton-window> virtual-width::<int> virtual-height::<int>)
+  ::<void>
+  (let* ((actual-width::int)
+         (actual-height::int))
+    (SDL_GetWindowSize (-> gwin window) (& actual-width) (& actual-height))
+    (set-window-resolution! gwin actual-width actual-height virtual-width virtual-height)))
 
 (define-cproc window-fullscreen? (gwin::<graviton-window>)
   ::<boolean>
   (let* ((flags::Uint32 (SDL_GetWindowFlags (-> gwin window))))
     (return (logand flags (logior SDL_WINDOW_FULLSCREEN_DESKTOP SDL_WINDOW_FULLSCREEN)))))
+
+(define-cproc set-window-fullscreen! (gwin::<graviton-window> flag::<boolean>)
+  ::<void>
+  (when (< (SDL_SetWindowFullscreen (-> gwin window) (?: flag SDL_WINDOW_FULLSCREEN_DESKTOP 0)) 0)
+    (Scm_Error "SDL_SetWindowFullscreen failed: %s" (SDL_GetError))))
 
 (define-cproc window-maximized? (gwin::<graviton-window>)
   ::<boolean>
@@ -1236,6 +1621,31 @@
     (else
      (Scm_Error "<graviton-image> required, but got %S" icon))))
 
+(define-cproc reflect-resized-window-parameter (gwin::<graviton-window> actual-width::<int> actual-height::<int>)
+  ::<void>
+  (printf "actual-width: %d, actual-height: %d\n" actual-width actual-height)
+  (printf "virtual-width: %d, virtual-height: %d\n" (-> gwin virtual-width) (-> gwin virtual-height))
+  (printf "left: %f, top: %f, right: %f, bottom: %f\n"
+          (ref (-> gwin param) left)
+          (ref (-> gwin param) top)
+          (ref (-> gwin param) right)
+          (ref (-> gwin param) bottom))
+  (compute-transform-param (& (-> gwin param))
+                           actual-width
+                           actual-height
+                           (ref (-> gwin param) left)
+                           (ref (-> gwin param) top)
+                           (ref (-> gwin param) right)
+                           (ref (-> gwin param) bottom)
+                           true)
+  (set-window-resolution! gwin actual-width actual-height (-> gwin virtual-width) (-> gwin virtual-height)))
+
+(define-cproc window-handler-table (gwin::<graviton-window>)
+  (return (-> gwin handler-table)))
+
+(define (set-window-handler! window event proc)
+  (hash-table-set! (window-handler-table window) event proc))
+
 (define-cproc all-windows ()
   (return grv-windows))
 
@@ -1251,362 +1661,304 @@
   (is-a? obj <graviton-window>))
 
 ;;;
+;;; REPL
+;;;
+
+(inline-stub
+  (define-cfn is-repl-running? ()
+    ::bool
+    (if (and (not (SCM_FALSEP repl-thread))
+             (== (-> (SCM_VM repl-thread) state) SCM_VM_RUNNABLE))
+        (return true)
+        (return false)))
+  ) ;; end of inline-stub
+
+(define-cproc repl-thread ()
+  (return repl-thread))
+
+(define-cproc repl-channel ()
+  (return repl-channel))
+
+(define-cproc set-repl! (thread channel)
+  ::<void>
+  (set! repl-thread thread)
+  (set! repl-channel channel))
+
+(define-cproc is-repl-running? ()
+  ::<boolean>
+  (return (is-repl-running?)))
+
+(define (is-interactive?)
+  (let ((gosh? (and (not (null? (command-line)))
+                    (equal? (values-ref (decompose-path (car (command-line))) 1) "gosh"))))
+    (and gosh? (find-module 'gauche.interactive))))
+
+(define run-graviton-repl? (make-parameter (is-interactive?)))
+
+(define (%evaluator sexpr _)
+  (let ((%set-history-exception! (eval '%set-history-exception! (find-module 'gauche.interactive)))
+        (%set-history-expr! (eval '%set-history-expr! (find-module 'gauche.interactive))))
+    (guard (e (else (%set-history-exception! e)
+                    (raise e)))
+      (receive r (force-future (async*
+                                 (eval sexpr ((with-module gauche.internal vm-current-module)))))
+        (%set-history-expr! r)
+        (apply values r)))))
+
+(define %prompter
+  (let1 user-module (find-module 'user)
+    (lambda ()
+      (let1 m (force-future (async*
+                              ((with-module gauche.internal vm-current-module))))
+        (if (eq? m user-module)
+            (display "graviton> ")
+            (format #t "graviton[~a]> " (module-name m)))
+        (flush)))))
+
+(define (make-printer)
+  (eval '%printer (find-module 'gauche.interactive)))
+
+(define (make-reader channel)
+  (lambda ()
+    (let1 signal (dequeue! channel #f)
+      (match signal
+        ('exit
+          (eof-object))
+        (_
+         (match (read)
+           (('unquote command)
+            (eval `(handle-toplevel-command ',command ',(read-line))
+                  (find-module 'gauche.interactive)))
+           (expr
+            (unless (eof-object? expr)
+              (consume-trailing-whitespaces))
+            expr)))))))
+
+(define (run-grv-repl in out err)
+  (let* ((channel (make-mtqueue))
+         (repl-thread (make-thread
+                        (lambda ()
+                          (with-ports in out err
+                            (lambda ()
+                              (guard (e (else (report-error e)))
+                                (read-eval-print-loop (make-reader channel)
+                                                      %evaluator
+                                                      (make-printer)
+                                                      %prompter))))))))
+    (thread-start! repl-thread)
+    (set-repl! repl-thread channel)))
+
+(define (exit-repl)
+  (when (is-repl-running?)
+    (enqueue! (repl-channel) 'exit))
+  (undefined))
+
+(define (kill-repl)
+  (when (is-repl-running?)
+    (unwind-protect
+        (guard (e (else (report-error e)))
+          (thread-terminate! (repl-thread)))
+      (set-repl! #f #f)))
+  (undefined))
+
+
+;;;
 ;;; Event
 ;;;
 
 (inline-stub
-  (define-cfn enqueue-proc! (proc-packet::ProcPacket*)
+  (define-cfn %call-window-handler (win event args)
     ::void
-    (let* ((buf::ProcPacket** (ref proc-queue buf))
-           (len::int (ref proc-queue size)))
-      (set! (aref buf (ref proc-queue tail)) proc-packet)
-      (set! (ref proc-queue tail) (% (+ (ref proc-queue tail) 1) len))
-      (when (== (ref proc-queue start) (ref proc-queue tail))
-        (let* ((i::int (ref proc-queue start))
-               (j::int 0)
-               (new-buf::ProcPacket** (SCM_NEW_ARRAY (.type ProcPacket*) (* len 2))))
-          (while (< j len)
-            (set! (aref new-buf j) (aref buf i)
-                  i (% (+ i 1) len)
-                  j (+ j 1)))
-          (set! (ref proc-queue buf) new-buf
-                (ref proc-queue size) (* len 2)
-                (ref proc-queue start) 0
-                (ref proc-queue tail) len)))))
+    (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
+      (let* ((handler (Scm_HashTableRef (SCM_HASH_TABLE (-> gwin handler-table)) event SCM_FALSE)))
+        (when (SCM_PROCEDUREP handler)
+          (Scm_ApplyRec handler (Scm_Cons win args))
+          (return)))))
 
-  (define-cfn dequeue-proc! ()
-    ::ProcPacket*
-    (cond
-      ((== (ref proc-queue start) (ref proc-queue tail))
-       (return NULL))
+  (define-cfn call-window-handler (window-id::Uint32 event args)
+    ::void
+    (for-each (lambda (win)
+                (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
+                  (when (== (SDL_GetWindowID (-> gwin window)) window-id)
+                    (%call-window-handler win event args)
+                    (return))))
+              grv-windows))
+
+  (define-cfn call-global-handler (event args)
+    ::void
+    (let* ((handler (Scm_HashTableRef (SCM_HASH_TABLE global-handler-table) event SCM_FALSE)))
+      (when (SCM_PROCEDUREP handler)
+        (Scm_ApplyRec handler args))))
+
+  (define-cfn process-event (sdl-event::SDL_Event*)
+    ::ScmObj
+    (case (-> sdl-event type)
+      ((SDL_WINDOWEVENT)
+       (case (ref (-> sdl-event window) event)
+         ((SDL_WINDOWEVENT_MOVED SDL_WINDOWEVENT_RESIZED SDL_WINDOWEVENT_SIZE_CHANGED)
+          (call-window-handler (ref (-> sdl-event window) windowID)
+                               (window-event->symbol (ref (-> sdl-event window) event))
+                               (SCM_LIST2 (SCM_MAKE_INT (ref (-> sdl-event window) data1))
+                                          (SCM_MAKE_INT (ref (-> sdl-event window) data2)))))
+         (else
+          (call-window-handler (ref (-> sdl-event window) windowID)
+                               (window-event->symbol (ref (-> sdl-event window) event))
+                               SCM_NIL))))
+      ((SDL_KEYDOWN SDL_KEYUP)
+       (call-window-handler (ref (-> sdl-event key) windowID)
+                            (?: (== (-> sdl-event type) SDL_KEYDOWN) 'key-down 'key-up)
+                            (SCM_LIST4 (scancode->symbol (ref (-> sdl-event key) keysym scancode))
+                                       (keycode->symbol (ref (-> sdl-event key) keysym sym))
+                                       (kmod->symbols (ref (-> sdl-event key) keysym mod))
+                                       (SCM_MAKE_BOOL (ref (-> sdl-event key) repeat)))))
+      ((SDL_TEXTEDITING)
+       (call-window-handler (ref (-> sdl-event edit) windowID)
+                            'text-editing
+                            (SCM_LIST3 (SCM_MAKE_STR_COPYING (ref (-> sdl-event edit) text))
+                                       (SCM_MAKE_INT (ref (-> sdl-event edit) start))
+                                       (SCM_MAKE_INT (ref (-> sdl-event edit) length)))))
+      ((SDL_TEXTINPUT)
+       (call-window-handler (ref (-> sdl-event text) windowID)
+                            'text-input
+                            (SCM_LIST1 (SCM_MAKE_STR_COPYING (ref (-> sdl-event text) text)))))
+      ((SDL_MOUSEMOTION)
+       (call-window-handler (ref (-> sdl-event motion) windowID)
+                            'mouse-motion
+                            (Scm_List (SCM_MAKE_INT (ref (-> sdl-event motion) which))
+                                      (mouse-button-state->symbols (ref (-> sdl-event motion) state))
+                                      (SCM_MAKE_INT (ref (-> sdl-event motion) x))
+                                      (SCM_MAKE_INT (ref (-> sdl-event motion) y))
+                                      (SCM_MAKE_INT (ref (-> sdl-event motion) xrel))
+                                      (SCM_MAKE_INT (ref (-> sdl-event motion) yrel))
+                                      NULL)))
+      ((SDL_MOUSEBUTTONDOWN SDL_MOUSEBUTTONUP)
+       (call-window-handler (ref (-> sdl-event button) windowID)
+                            (?: (== (-> sdl-event type) SDL_MOUSEBUTTONDOWN) 'mouse-button-down 'mouse-button-up)
+                            (SCM_LIST5 (SCM_MAKE_INT (ref (-> sdl-event button) which))
+                                       (mouse-button->symbol (ref (-> sdl-event button) button))
+                                       (SCM_MAKE_INT (ref (-> sdl-event button) clicks))
+                                       (SCM_MAKE_INT (ref (-> sdl-event button) x))
+                                       (SCM_MAKE_INT (ref (-> sdl-event button) y)))))
+      ((SDL_MOUSEWHEEL)
+       (call-window-handler (ref (-> sdl-event wheel) windowID)
+                            'mouse-wheel
+                            (SCM_LIST4 (SCM_MAKE_INT (ref (-> sdl-event wheel) which))
+                                       (SCM_MAKE_INT (ref (-> sdl-event wheel) x))
+                                       (SCM_MAKE_INT (ref (-> sdl-event wheel) y))
+                                       (?: (== (ref (-> sdl-event wheel) direction) SDL_MOUSEWHEEL_NORMAL) 'normal 'flipped))))
+      ((SDL_JOYAXISMOTION)
+       (call-global-handler 'joystick-axis-motion
+                            (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event jaxis) which))
+                                       (SCM_MAKE_INT (ref (-> sdl-event jaxis) axis))
+                                       (SCM_MAKE_INT (ref (-> sdl-event jaxis) value)))))
+      ((SDL_JOYBALLMOTION)
+       (call-global-handler 'joystick-ball-motion
+                            (SCM_LIST4 (SCM_MAKE_INT (ref (-> sdl-event jball) which))
+                                       (SCM_MAKE_INT (ref (-> sdl-event jball) ball))
+                                       (SCM_MAKE_INT (ref (-> sdl-event jball) xrel))
+                                       (SCM_MAKE_INT (ref (-> sdl-event jball) yrel)))))
+      ((SDL_JOYHATMOTION)
+       (call-global-handler 'joystick-hat-motion
+                            (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event jhat) which))
+                                       (SCM_MAKE_INT (ref (-> sdl-event jhat) hat))
+                                       (hat-position->symbol (ref (-> sdl-event jhat) value)))))
+      ((SDL_JOYBUTTONDOWN SDL_JOYBUTTONUP)
+       (call-global-handler (?: (== (ref (-> sdl-event jbutton) type) SDL_JOYBUTTONDOWN)
+                                'joystick-button-down
+                                'joystick-button-up)
+                            (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event jbutton) which))
+                                       (SCM_MAKE_INT (ref (-> sdl-event jbutton) button))
+                                       (state->symbol (ref (-> sdl-event jbutton) state)))))
+      ((SDL_JOYDEVICEADDED SDL_JOYDEVICEREMOVED)
+       (call-global-handler (?: (== (-> sdl-event type) SDL_JOYDEVICEADDED)
+                                'joystick-device-added
+                                'joystick-device-removed)
+                            (SCM_LIST1 (SCM_MAKE_INT (ref (-> sdl-event jdevice) which)))))
+      ((SDL_CONTROLLERAXISMOTION)
+       (call-global-handler 'controller-axis-motion
+                            (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event caxis) which))
+                                       (axis->symbol (ref (-> sdl-event caxis) axis))
+                                       (SCM_MAKE_INT (ref (-> sdl-event caxis) value)))))
+      ((SDL_CONTROLLERBUTTONDOWN SDL_CONTROLLERBUTTONUP)
+       (call-global-handler (?: (== (-> sdl-event type) SDL_CONTROLLERBUTTONDOWN)
+                                'controller-button-down
+                                'controller-button-up)
+                            (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event cbutton) which))
+                                       (button->symbol (ref (-> sdl-event cbutton) button))
+                                       (state->symbol (ref (-> sdl-event cbutton) state)))))
+      ((SDL_CONTROLLERDEVICEADDED SDL_CONTROLLERDEVICEREMOVED SDL_CONTROLLERDEVICEREMAPPED)
+       (call-global-handler (?: (== (-> sdl-event type) SDL_CONTROLLERDEVICEADDED)
+                                'controller-device-added
+                                (?: (== (-> sdl-event type) SDL_CONTROLLERDEVICEREMOVED)
+                                    'controller-device-removed
+                                    'controller-device-remapped))
+                            (SCM_LIST1 (SCM_MAKE_INT (ref (-> sdl-event cdevice) which)))))
+      ((SDL_AUDIODEVICEADDED SDL_AUDIODEVICEREMOVED)
+       (call-global-handler (?: (== (-> sdl-event type) SDL_AUDIODEVICEADDED)
+                                'audio-device-added
+                                'audio-device-removed)
+                            (SCM_LIST2 (SCM_MAKE_INT (ref (-> sdl-event adevice) which))
+                                       (SCM_MAKE_BOOL (ref (-> sdl-event adevice) iscapture)))))
+      ((SDL_QUIT)
+       (call-global-handler 'quit SCM_NIL))
+      ((SDL_FINGERMOTION SDL_FINGERDOWN SDL_FINGERUP)
+       (call-global-handler (?: (== (-> sdl-event type) SDL_FINGERMOTION)
+                                'finger-motion
+                                (?: (== (-> sdl-event type) SDL_FINGERDOWN)
+                                    'finger-down
+                                    'finger-up))
+                            (Scm_List (Scm_MakeInteger (ref (-> sdl-event tfinger) touchId))
+                                      (Scm_MakeInteger (ref (-> sdl-event tfinger) fingerId))
+                                      (Scm_MakeFlonum (ref (-> sdl-event tfinger) x))
+                                      (Scm_MakeFlonum (ref (-> sdl-event tfinger) y))
+                                      (Scm_MakeFlonum (ref (-> sdl-event tfinger) dx))
+                                      (Scm_MakeFlonum (ref (-> sdl-event tfinger) dy))
+                                      (Scm_MakeFlonum (ref (-> sdl-event tfinger) pressure))
+                                      NULL)))
+      ((SDL_MULTIGESTURE)
+       (call-global-handler 'multi-gesture
+                            (Scm_List (Scm_MakeInteger (ref (-> sdl-event mgesture) touchId))
+                                      (Scm_MakeFlonum (ref (-> sdl-event mgesture) dTheta))
+                                      (Scm_MakeFlonum (ref (-> sdl-event mgesture) dDist))
+                                      (Scm_MakeFlonum (ref (-> sdl-event mgesture) x))
+                                      (Scm_MakeFlonum (ref (-> sdl-event mgesture) y))
+                                      (SCM_MAKE_INT (ref (-> sdl-event mgesture) numFingers))
+                                      NULL)))
+      ((SDL_DOLLARGESTURE SDL_DOLLARRECORD)
+       (call-global-handler (?: (== (-> sdl-event type) SDL_DOLLARGESTURE)
+                                'dollar-gesture
+                                'dollar-record)
+                            (Scm_List (Scm_MakeInteger (ref (-> sdl-event dgesture) touchId))
+                                      (Scm_MakeInteger (ref (-> sdl-event dgesture) gestureId))
+                                      (SCM_MAKE_INT (ref (-> sdl-event dgesture) numFingers))
+                                      (Scm_MakeFlonum (ref (-> sdl-event dgesture) error))
+                                      (Scm_MakeFlonum (ref (-> sdl-event dgesture) x))
+                                      (Scm_MakeFlonum (ref (-> sdl-event dgesture) y))
+                                      NULL)))
+      ((SDL_DROPFILE SDL_DROPTEXT)
+       (call-window-handler (ref (-> sdl-event drop) windowID)
+                            (?: (== (-> sdl-event type) SDL_DROPFILE) 'drop-file 'drop-text)
+                            (SCM_LIST1 (SCM_MAKE_STR_COPYING (ref (-> sdl-event drop) file))))
+       (SDL_free (ref (-> sdl-event drop) file)))
+      ((SDL_DROPBEGIN SDL_DROPCOMPLETE)
+       (call-window-handler (ref (-> sdl-event drop) windowID)
+                            (?: (== (-> sdl-event type) SDL_DROPBEGIN) 'drop-begin 'drop-complete)
+                            SCM_NIL))
       (else
-       (let* ((buf::ProcPacket** (ref proc-queue buf))
-              (len::int (ref proc-queue size))
-              (proc-packet::ProcPacket* (aref buf (ref proc-queue start))))
-         (set! (aref buf (ref proc-queue start)) NULL
-               (ref proc-queue start) (% (+ (ref proc-queue start) 1) len))
-         (return proc-packet)))))
-
-  (define-cfn run-queued-procs (available-ticks::Uint32)
-    ::void
-    (let* ((start-ticks::Uint32 (SDL_GetTicks)))
-      (loop
-       (let* ((proc-packet::ProcPacket* (dequeue-proc!)))
-         (cond
-           ((== proc-packet NULL)
-            (return))
-           (else
-            (let* ((proc (-> proc-packet proc))
-                   (eval-packet::ScmEvalPacket* (-> proc-packet eval-packet)))
-              (cond
-                (eval-packet
-                 (SDL_LockMutex (-> proc-packet lock))
-                 (Scm_Apply proc SCM_NIL eval-packet)
-                 (SDL_CondSignal (-> proc-packet cond))
-                 (SDL_UnlockMutex (-> proc-packet lock)))
-                (else
-                 (Scm_ApplyRec0 proc)))))))
-       (when (< available-ticks (- (SDL_GetTicks) start-ticks))
-         (return)))))
-
-  (define-cfn process-all-events! ()
-    ::ScmObj
-    (let* ((events SCM_NIL)
-           (sdl-event::SDL_Event))
-      (while (SDL_PollEvent (& sdl-event))
-        (case (ref sdl-event type)
-          ((SDL_WINDOWEVENT)
-           (case (ref sdl-event window event)
-             ((SDL_WINDOWEVENT_MOVED SDL_WINDOWEVENT_RESIZED SDL_WINDOWEVENT_SIZE_CHANGED)
-              (set! events (Scm_Cons (SCM_LIST5 (SCM_MAKE_INT (ref sdl-event window windowID))
-                                                (window-event->symbol (ref sdl-event window event))
-                                                (Scm_MakeIntegerU (ref sdl-event window timestamp))
-                                                (SCM_MAKE_INT (ref sdl-event window data1))
-                                                (SCM_MAKE_INT (ref sdl-event window data2)))
-                                     events))
-              ;; Compute transform param when the window is resized.
-              (when (== (ref sdl-event window event) SDL_WINDOWEVENT_RESIZED)
-                (let* ((target-gwin::GrvWindow* NULL))
-                  (for-each (lambda (win)
-                              (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
-                                (when (== (SDL_GetWindowID (-> gwin window)) (ref sdl-event window windowID))
-                                  (set! target-gwin gwin)
-                                  (break))))
-                            grv-windows)
-                  (when target-gwin
-                    (compute-transform-param (& (-> target-gwin param))
-                                             (cast int (ref sdl-event window data1)) ; width
-                                             (cast int (ref sdl-event window data2)) ; height
-                                             (ref (-> target-gwin param) left)
-                                             (ref (-> target-gwin param) top)
-                                             (ref (-> target-gwin param) right)
-                                             (ref (-> target-gwin param) bottom))))))
-             (else
-              (set! events (Scm_Cons (SCM_LIST3 (SCM_MAKE_INT (ref sdl-event window windowID))
-                                                (window-event->symbol (ref sdl-event window event))
-                                                (Scm_MakeIntegerU (ref sdl-event window timestamp)))
-                                     events)))))
-          ((SDL_KEYDOWN SDL_KEYUP)
-           (set! events (Scm_Cons (Scm_List (SCM_MAKE_INT (ref sdl-event key windowID))
-                                            (?: (== (ref sdl-event type) SDL_KEYDOWN) 'key-down 'key-up)
-                                            (Scm_MakeIntegerU (ref sdl-event key timestamp))
-                                            (scancode->symbol (ref sdl-event key keysym scancode))
-                                            (keycode->symbol (ref sdl-event key keysym sym))
-                                            (kmod->symbols (ref sdl-event key keysym mod))
-                                            (SCM_MAKE_BOOL (ref sdl-event key repeat))
-                                            NULL)
-                                  events)))
-          ((SDL_TEXTEDITING)
-           (set! events (Scm_Cons (Scm_List (SCM_MAKE_INT (ref sdl-event edit windowID))
-                                            'text-editing
-                                            (Scm_MakeIntegerU (ref sdl-event edit timestamp))
-                                            (SCM_MAKE_STR_COPYING (ref sdl-event edit text))
-                                            (SCM_MAKE_INT (ref sdl-event edit start))
-                                            (SCM_MAKE_INT (ref sdl-event edit length))
-                                            NULL)
-                                  events)))
-          ((SDL_TEXTINPUT)
-           (set! events (Scm_Cons (SCM_LIST4 (SCM_MAKE_INT (ref sdl-event text windowID))
-                                             'text-input
-                                             (Scm_MakeIntegerU (ref sdl-event text timestamp))
-                                             (SCM_MAKE_STR_COPYING (ref sdl-event text text)))
-                                  events)))
-          ((SDL_MOUSEMOTION)
-           (set! events (Scm_Cons (Scm_List (SCM_MAKE_INT (ref sdl-event motion windowID))
-                                            'mouse-motion
-                                            (Scm_MakeIntegerU (ref sdl-event motion timestamp))
-                                            (SCM_MAKE_INT (ref sdl-event motion which))
-                                            (mouse-button-state->symbols (ref sdl-event motion state))
-                                            (SCM_MAKE_INT (ref sdl-event motion x))
-                                            (SCM_MAKE_INT (ref sdl-event motion y))
-                                            (SCM_MAKE_INT (ref sdl-event motion xrel))
-                                            (SCM_MAKE_INT (ref sdl-event motion yrel))
-                                            NULL)
-                                  events)))
-          ((SDL_MOUSEBUTTONDOWN SDL_MOUSEBUTTONUP)
-           (set! events (Scm_Cons (Scm_List (SCM_MAKE_INT (ref sdl-event button windowID))
-                                            (?: (== (ref sdl-event type) SDL_MOUSEBUTTONDOWN) 'mouse-button-down 'mouse-button-up)
-                                            (Scm_MakeIntegerU (ref sdl-event button timestamp))
-                                            (SCM_MAKE_INT (ref sdl-event button which))
-                                            (mouse-button->symbol (ref sdl-event button button))
-                                            (SCM_MAKE_INT (ref sdl-event button clicks))
-                                            (SCM_MAKE_INT (ref sdl-event button x))
-                                            (SCM_MAKE_INT (ref sdl-event button y))
-                                            NULL)
-                                  events)))
-          ((SDL_MOUSEWHEEL)
-           (set! events (Scm_Cons (Scm_List (SCM_MAKE_INT (ref sdl-event wheel windowID))
-                                            'mouse-wheel
-                                            (Scm_MakeIntegerU (ref sdl-event wheel timestamp))
-                                            (SCM_MAKE_INT (ref sdl-event wheel which))
-                                            (SCM_MAKE_INT (ref sdl-event wheel x))
-                                            (SCM_MAKE_INT (ref sdl-event wheel y))
-                                            (?: (== (ref sdl-event wheel direction) SDL_MOUSEWHEEL_NORMAL) 'normal 'flipped)
-                                            NULL)
-                                  events)))
-          ((SDL_JOYAXISMOTION)
-           (set! events (Scm_Cons (Scm_List SCM_FALSE
-                                            'joystick-axis-motion
-                                            (Scm_MakeIntegerU (ref sdl-event jaxis timestamp))
-                                            (SCM_MAKE_INT (ref sdl-event jaxis which))
-                                            (SCM_MAKE_INT (ref sdl-event jaxis axis))
-                                            (SCM_MAKE_INT (ref sdl-event jaxis value))
-                                            NULL)
-                                  events)))
-          ((SDL_JOYBALLMOTION)
-           (set! events (Scm_Cons (Scm_List SCM_FALSE
-                                            'joystick-ball-motion
-                                            (Scm_MakeIntegerU (ref sdl-event jball timestamp))
-                                            (SCM_MAKE_INT (ref sdl-event jball which))
-                                            (SCM_MAKE_INT (ref sdl-event jball ball))
-                                            (SCM_MAKE_INT (ref sdl-event jball xrel))
-                                            (SCM_MAKE_INT (ref sdl-event jball yrel))
-                                            NULL)
-                                  events)))
-          ((SDL_JOYHATMOTION)
-           (set! events (Scm_Cons (Scm_List SCM_FALSE
-                                            'joystick-hat-motion
-                                            (Scm_MakeIntegerU (ref sdl-event jhat timestamp))
-                                            (SCM_MAKE_INT (ref sdl-event jhat which))
-                                            (SCM_MAKE_INT (ref sdl-event jhat hat))
-                                            (hat-position->symbol (ref sdl-event jhat value))
-                                            NULL)
-                                  events)))
-          ((SDL_JOYBUTTONDOWN SDL_JOYBUTTONUP)
-           (set! events (Scm_Cons (Scm_List SCM_FALSE
-                                            (?: (== (ref sdl-event jbutton type) SDL_JOYBUTTONDOWN)
-                                                'joystick-button-down
-                                                'joystick-button-up)
-                                            (Scm_MakeIntegerU (ref sdl-event jbutton timestamp))
-                                            (SCM_MAKE_INT (ref sdl-event jbutton which))
-                                            (SCM_MAKE_INT (ref sdl-event jbutton button))
-                                            (state->symbol (ref sdl-event jbutton state))
-                                            NULL)
-                                  events)))
-          ((SDL_JOYDEVICEADDED SDL_JOYDEVICEREMOVED)
-           (set! events (Scm_Cons (SCM_LIST4 SCM_FALSE
-                                             (?: (== (ref sdl-event type) SDL_JOYDEVICEADDED)
-                                                 'joystick-device-added
-                                                 'joystick-device-removed)
-                                             (Scm_MakeIntegerU (ref sdl-event jdevice timestamp))
-                                             (SCM_MAKE_INT (ref sdl-event jdevice which)))
-                                  events)))
-          ((SDL_CONTROLLERAXISMOTION)
-           (set! events (Scm_Cons (Scm_List SCM_FALSE
-                                            'controller-axis-motion
-                                            (Scm_MakeIntegerU (ref sdl-event caxis timestamp))
-                                            (SCM_MAKE_INT (ref sdl-event caxis which))
-                                            (axis->symbol (ref sdl-event caxis axis))
-                                            (SCM_MAKE_INT (ref sdl-event caxis value))
-                                            NULL)
-                                  events)))
-          ((SDL_CONTROLLERBUTTONDOWN SDL_CONTROLLERBUTTONUP)
-           (set! events (Scm_Cons (Scm_List SCM_FALSE
-                                            (?: (== (ref sdl-event type) SDL_CONTROLLERBUTTONDOWN)
-                                                'controller-button-down
-                                                'controller-button-up)
-                                            (Scm_MakeIntegerU (ref sdl-event cbutton timestamp))
-                                            (SCM_MAKE_INT (ref sdl-event cbutton which))
-                                            (button->symbol (ref sdl-event cbutton button))
-                                            (state->symbol (ref sdl-event cbutton state))
-                                            NULL)
-                                  events)))
-          ((SDL_CONTROLLERDEVICEADDED SDL_CONTROLLERDEVICEREMOVED SDL_CONTROLLERDEVICEREMAPPED)
-           (set! events (Scm_Cons (SCM_LIST4 SCM_FALSE
-                                             (?: (== (ref sdl-event type) SDL_CONTROLLERDEVICEADDED)
-                                                 'controller-device-added
-                                                 (?: (== (ref sdl-event type) SDL_CONTROLLERDEVICEREMOVED)
-                                                     'controller-device-removed
-                                                     'controller-device-remapped))
-                                             (Scm_MakeIntegerU (ref sdl-event cdevice timestamp))
-                                             (SCM_MAKE_INT (ref sdl-event cdevice which)))
-                                  events)))
-          ((SDL_AUDIODEVICEADDED SDL_AUDIODEVICEREMOVED)
-           (set! events (Scm_Cons (SCM_LIST5 SCM_FALSE
-                                             (?: (== (ref sdl-event type) SDL_AUDIODEVICEADDED)
-                                                 'audio-device-added
-                                                 'audio-device-removed)
-                                             (Scm_MakeIntegerU (ref sdl-event adevice timestamp))
-                                             (SCM_MAKE_INT (ref sdl-event adevice which))
-                                             (SCM_MAKE_BOOL (ref sdl-event adevice iscapture)))
-                                  events)))
-          ((SDL_QUIT)
-           (set! events (Scm_Cons (SCM_LIST3 SCM_FALSE
-                                             'quit
-                                             (Scm_MakeIntegerU (ref sdl-event quit timestamp)))
-                                  events)))
-          ((SDL_FINGERMOTION SDL_FINGERDOWN SDL_FINGERUP)
-           (set! events (Scm_Cons (Scm_List SCM_FALSE
-                                            (?: (== (ref sdl-event type) SDL_FINGERMOTION)
-                                                'finger-motion
-                                                (?: (== (ref sdl-event type) SDL_FINGERDOWN)
-                                                    'finger-down
-                                                    'finger-up))
-                                            (Scm_MakeIntegerU (ref sdl-event tfinger timestamp))
-                                            (Scm_MakeInteger (ref sdl-event tfinger touchId))
-                                            (Scm_MakeInteger (ref sdl-event tfinger fingerId))
-                                            (Scm_MakeFlonum (ref sdl-event tfinger x))
-                                            (Scm_MakeFlonum (ref sdl-event tfinger y))
-                                            (Scm_MakeFlonum (ref sdl-event tfinger dx))
-                                            (Scm_MakeFlonum (ref sdl-event tfinger dy))
-                                            (Scm_MakeFlonum (ref sdl-event tfinger pressure))
-                                            NULL)
-                                  events)))
-          ((SDL_MULTIGESTURE)
-           (set! events (Scm_Cons (Scm_List SCM_FALSE
-                                            'multi-gesture
-                                            (Scm_MakeIntegerU (ref sdl-event mgesture timestamp))
-                                            (Scm_MakeInteger (ref sdl-event mgesture touchId))
-                                            (Scm_MakeFlonum (ref sdl-event mgesture dTheta))
-                                            (Scm_MakeFlonum (ref sdl-event mgesture dDist))
-                                            (Scm_MakeFlonum (ref sdl-event mgesture x))
-                                            (Scm_MakeFlonum (ref sdl-event mgesture y))
-                                            (SCM_MAKE_INT (ref sdl-event mgesture numFingers))
-                                            NULL)
-                                  events)))
-          ((SDL_DOLLARGESTURE SDL_DOLLARRECORD)
-           (set! events (Scm_Cons (Scm_List SCM_FALSE
-                                            (?: (== (ref sdl-event type) SDL_DOLLARGESTURE)
-                                                'dollar-gesture
-                                                'dollar-record)
-                                            (Scm_MakeIntegerU (ref sdl-event dgesture timestamp))
-                                            (Scm_MakeInteger (ref sdl-event dgesture touchId))
-                                            (Scm_MakeInteger (ref sdl-event dgesture gestureId))
-                                            (SCM_MAKE_INT (ref sdl-event dgesture numFingers))
-                                            (Scm_MakeFlonum (ref sdl-event dgesture error))
-                                            (Scm_MakeFlonum (ref sdl-event dgesture x))
-                                            (Scm_MakeFlonum (ref sdl-event dgesture y))
-                                            NULL)
-                                  events)))
-          ((SDL_DROPFILE SDL_DROPTEXT)
-           (set! events (Scm_Cons (SCM_LIST4 (SCM_MAKE_INT (ref sdl-event drop windowID))
-                                             (?: (== (ref sdl-event type) SDL_DROPFILE) 'drop-file 'drop-text)
-                                             (Scm_MakeIntegerU (ref sdl-event drop timestamp))
-                                             (SCM_MAKE_STR_COPYING (ref sdl-event drop file)))
-                                  events))
-           (SDL_free (ref sdl-event drop file)))
-          ((SDL_DROPBEGIN SDL_DROPCOMPLETE)
-           (set! events (Scm_Cons (SCM_LIST3 (SCM_MAKE_INT (ref sdl-event drop windowID))
-                                             (?: (== (ref sdl-event type) SDL_DROPBEGIN) 'drop-begin 'drop-complete)
-                                             (Scm_MakeIntegerU (ref sdl-event drop timestamp)))
-                                  events))
-           (SDL_free (ref sdl-event drop file)))
-          (else
-           (cond
-             ((== (ref sdl-event type) graviton-event)
-              (case (ref sdl-event user code)
-                ((GRV_CALL_EVENT_CODE)
-                 (enqueue-proc! (cast ProcPacket* (ref sdl-event user data1))))))))
-          ) ;; end of case
-        )   ;; end of while
-      (return events)))
-
-  ;; events must be reverse chronological order.
-  (define-cfn collect-window-events (gwin::GrvWindow* all-events)
-    ::ScmObj
-    (let* ((win-events (SCM_LIST1 (SCM_LIST1 'frame-end)))
-           (winid (SCM_MAKE_INT (SDL_GetWindowID (-> gwin window)))))
-      (for-each (lambda (event)
-                  (when (or (SCM_FALSEP (SCM_CAR event))
-                            (SCM_EQ (SCM_CAR event) winid))
-                    (set! win-events (Scm_Cons (SCM_CDR event) win-events))))
-                all-events)
-      (return (Scm_Cons (SCM_LIST1 'frame-start) win-events))))
-
-  (define-cfn window-close-event-exists? (win-events)
-    ::bool
-    (for-each (lambda (event)
-                (when (SCM_EQ (SCM_CAR event) 'window-close)
-                  (return true)))
-              win-events)
-    (return false))
-
-  (define-cfn run-window-handlers ()
-    ::void
-    (let* ((all-events (process-all-events!))
-           (will-close-windows SCM_NIL))
-      (for-each (lambda (win)
-                  (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win))
-                         (proc (-> gwin proc)))
-                    (unless (SCM_FALSEP (-> gwin events))
-                      (set! (-> gwin events) (collect-window-events gwin all-events)))
-                    (when (SCM_PROCEDUREP proc)
-                      (set! (-> gwin proc) SCM_FALSE)
-                      (let* ((arity::int (SCM_PROCEDURE_REQUIRED proc)))
-                        (cond
-                          ((== arity 0)
-                           (Scm_ApplyRec0 proc))
-                          ((== arity 1)
-                           (Scm_ApplyRec1 proc win))
-                          (else
-                           (Scm_Error "The arity of window handler must be 0 or 1, but got %d" arity)))))
-                    (when (SCM_FALSEP (-> gwin proc))
-                      (set! will-close-windows (Scm_Cons win will-close-windows)))))
-                grv-windows)
-      (for-each (lambda (obj)
-                  (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
-                    (destroy-window gwin)))
-                will-close-windows)))
+       (cond
+         ((== (-> sdl-event type) graviton-event-type)
+          (case (ref (-> sdl-event user) code)
+            ((GRAVITON_EXCEPTION_CODE)
+             (let* ((exception (ref (-> sdl-event user) data1)))
+               (Scm_Raise exception 0)))
+            ((GRAVITON_UNCAUGHT_EXCEPTION_CODE)
+             (Scm_Write (SCM_OBJ (ref (-> sdl-event user) data1)) (SCM_OBJ SCM_CURERR) SCM_WRITE_DISPLAY)
+             (Scm_Printf SCM_CURERR "\n")
+             (Scm_Error "async failed, but the exception wasn't caught."))
+            ) ;; end of case (for graviton-event-type)
+          ))  ;; end of cond
+       ))     ;; end of case
+    )         ;; end of define-cfn
 
   (define-cfn set-event-loop-status (running?::bool)
     ::void
@@ -1623,6 +1975,14 @@
       (return running?)))
   )  ;; end of inline-stub
 
+(define-cproc notify-exception (exception)
+  ::<void>
+  (let* ((event::SDL_Event))
+    (set! (ref event type) graviton-event-type
+          (ref event user code) GRAVITON_EXCEPTION_CODE
+          (ref event user data1) exception)
+    (SDL_PushEvent (& event))))
+
 (define-cproc event-loop-running? ()
   ::<boolean>
   (return (event-loop-running?)))
@@ -1637,106 +1997,191 @@
     (set! frame-per-second fps
           event-loop-ticks t)))
 
-(define-cproc %start-global-event-loop ()
-  ::<void>
-  (when (event-loop-running?)
-    (return))
+(define-cproc actual-frame-per-second ()
+  ::<double>
+  (return actual-frame-per-second))
 
+(define-cproc load-average ()
+  ::<double>
+  (return load-average))
+
+(define-cproc frame-duration (:optional (limit #f))
+  ::<double>
+  (let* ((max-limit::double))
+    (cond
+      ((SCM_FALSEP limit)
+       (set! max-limit DBL_MAX))
+      ((SCM_REALP limit)
+       (set! max-limit (Scm_GetDouble limit)))
+      (else
+       (Scm_Error "<real> required, but got %S" limit)))
+    (return (?: (< frame-duration max-limit) frame-duration max-limit))))
+
+(define-cproc %start-global-event-loop (thunk)
+  ::<void>
   (set-event-loop-status true)
-  (let* ((packet::ScmEvalPacket))
-    (Scm_EvalCString "(run-repl-if-needed)"
-                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))
-                     (& packet))
-    (unless (SCM_FALSEP (ref packet exception))
-      (Scm_Raise (ref packet exception) 0)))
   (SDL_StartTextInput)
-  (let* ((run-window-handlers-elapse::Uint32 0)
-         (run-queued-procs-elapse::Uint32 0)
-         (update-window-contents-elapse::Uint32 0))
-    (while (not (SCM_NULLP grv-windows))
-      (let* ((t::Uint32 (SDL_GetTicks)))
-        (run-window-handlers)
-        (set! run-window-handlers-elapse (- (SDL_GetTicks) t)))
 
-      (let* ((t::Uint32 (SDL_GetTicks))
-             (available-ticks::Uint32 (?: (< event-loop-ticks (+ run-window-handlers-elapse update-window-contents-elapse))
-                                          0
-                                          (- (+ run-window-handlers-elapse update-window-contents-elapse) event-loop-ticks))))
-        (run-queued-procs available-ticks)
-        (set! run-queued-procs-elapse (- (SDL_GetTicks) t)))
+  (Scm_ApplyRec0 thunk)
+  (set! actual-frame-per-second 0.0
+        load-average 0.0)
+  (let* ((frame::int 0)
+         (backlog::int 0)
+         (backlog-acc::int 0)
+         (start-ticks::int (SDL_GetTicks))
+         (last-frame-ticks::int))
+    (while (logior (not (SCM_NULLP grv-windows)) (is-repl-running?) (< 0 backlog))
+      (let* ((frame-ticks::int (+ start-ticks (* (+ frame 1) event-loop-ticks))))
+        (set! last-frame-ticks (SDL_GetTicks))
 
-      (let* ((t::Uint32 (SDL_GetTicks)))
+        (remove-destroyed-windows)
+
+        (for-each (lambda (win)
+                    (%call-window-handler win 'update SCM_NIL))
+                  grv-windows)
         (update-window-contents)
-        (set! update-window-contents-elapse (- (SDL_GetTicks) t)))
 
-      (let* ((total-elapse::Uint32 (+ run-window-handlers-elapse run-queued-procs-elapse update-window-contents-elapse)))
-        (SDL_LogDebug SDL_LOG_CATEGORY_APPLICATION "run-window-handlers:    %d ms" run-window-handlers-elapse)
-        (SDL_LogDebug SDL_LOG_CATEGORY_APPLICATION "run-queued-procs:       %d ms" run-queued-procs-elapse)
-        (SDL_LogDebug SDL_LOG_CATEGORY_APPLICATION "update-window-contents: %d ms" update-window-contents-elapse)
-        (SDL_LogDebug SDL_LOG_CATEGORY_APPLICATION "total:                  %d ms" total-elapse)
-        (SDL_LogDebug SDL_LOG_CATEGORY_APPLICATION "event-loop-ticks:       %d ms" event-loop-ticks)
-        (when (< total-elapse event-loop-ticks)
-          (SDL_Delay (- event-loop-ticks total-elapse))))))
+        (let* ((event::SDL_Event))
+          (while (SDL_PollEvent (& event))
+            (process-event (& event))))
 
-  (set-event-loop-status false)
+        (when (< (SDL_GetTicks) frame-ticks)
+          (set! backlog (SCM_INT_VALUE (Scm_EvalRec (SCM_LIST2 'process-thunk-on-main-thread
+                                                               (SCM_MAKE_INT (- frame-ticks (SDL_GetTicks))))
+                                                    (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))))
+                backlog-acc (+ backlog-acc backlog)))
 
-  (let* ((packet::ScmEvalPacket))
-    (Scm_EvalCString "(wait-all-repl-terminate)"
-                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))
-                     (& packet))
-    (unless (SCM_FALSEP (ref packet exception))
-      (Scm_Raise (ref packet exception) 0))))
+        ;; (when (< (SDL_GetTicks) frame-ticks)
+        ;;   (SDL_Delay (- frame-ticks (SDL_GetTicks))))
 
-(define-cproc call-on-main-thread (proc :key (wait?::<boolean> #t))
-  ::<void>
-  (let* ((packet::ScmEvalPacket* (SCM_NEW (.type ScmEvalPacket))))
-    (cond
-      ((== main-thread-id (SDL_ThreadID))
-       (Scm_Apply proc SCM_NIL packet))
-      ((not wait?)
-       (let* ((proc-packet::ProcPacket* (SCM_NEW (.type ProcPacket)))
-              (event::SDL_Event))
-         (set! (-> proc-packet proc) proc
-               (-> proc-packet lock) NULL
-               (-> proc-packet cond) NULL
-               (-> proc-packet eval-packet) NULL)
-         (set! (ref event type) graviton-event
-               (ref event user code) GRV_CALL_EVENT_CODE
-               (ref event user data1) proc-packet
-               (ref event user data2) NULL)
-         (SDL_PushEvent (& event))
-         (return)))
-      (else
-       (let* ((proc-packet::ProcPacket* (SCM_NEW (.type ProcPacket)))
-              (event::SDL_Event))
-         (set! (-> proc-packet proc) proc
-               (-> proc-packet lock) (SDL_CreateMutex)
-               (-> proc-packet cond) (SDL_CreateCond)
-               (-> proc-packet eval-packet) packet)
-         (set! (ref event type) graviton-event
-               (ref event user code) GRV_CALL_EVENT_CODE
-               (ref event user data1) proc-packet
-               (ref event user data2) NULL)
-         (SDL_LockMutex (-> proc-packet lock))
-         (SDL_PushEvent (& event))
-         (SDL_CondWait (-> proc-packet cond) (-> proc-packet lock))
-         (SDL_UnlockMutex (-> proc-packet lock))
-         (SDL_DestroyCond (-> proc-packet cond))
-         (SDL_DestroyMutex (-> proc-packet lock)))))
-    (cond
-      ((SCM_FALSEP (-> packet exception))
-       (let* ((i::int)
-              (args SCM_NIL))
-         (for ((set! i (- (-> packet numResults) 1)) (<= 0 i) (pre-- i))
-           (set! args (Scm_Cons (aref (-> packet results) i) args)))
-         (SCM_RETURN (Scm_Values args))))
-      (else
-       (Scm_Raise (-> packet exception) 0)))))
+        (pre++ frame)
+        (when (== frame frame-per-second)
+          (let* ((elapse-in-sec::double (/ (- (SDL_GetTicks) start-ticks) 1000.0)))
+            (set! actual-frame-per-second (/ frame-per-second elapse-in-sec)
+                  load-average (/ backlog-acc elapse-in-sec)))
+          (SDL_LogDebug SDL_LOG_CATEGORY_APPLICATION "fps: %f, load-average: %f" actual-frame-per-second load-average)
+          (set! frame 0
+                backlog-acc 0
+                start-ticks (SDL_GetTicks)))
+        (set! frame-duration (/ (- (SDL_GetTicks) last-frame-ticks) 1000.0)))))
 
-(define (start-global-event-loop)
-  (guard (e (else (destroy-all-windows)
-                  (raise e)))
-    (%start-global-event-loop)))
+  (set-event-loop-status false))
+
+(define-cproc global-handler-table ()
+  (return global-handler-table))
+
+(define (set-global-handler! event proc)
+  (hash-table-set! (global-handler-table) event proc))
+
+(define-macro (define-on-window-event-macros :rest events)
+  `(begin
+     ,@(map (lambda (event)
+              (let1  on-event (string->symbol (format "on-~a" event))
+                `(define-syntax ,on-event
+                   (syntax-rules ()
+                     ((_ window (arg ...) body ...)
+                      (set-window-handler! window ',event
+                        (lambda (window arg ...)
+                          body ...)))))))
+            events)))
+
+(define-macro (define-on-global-event-macros :rest events)
+  `(begin
+     ,@(map (lambda (event)
+              (let1  on-event (string->symbol (format "on-~a" event))
+                `(define-syntax ,on-event
+                   (syntax-rules ()
+                     ((_ (arg ...) body ...)
+                      (set-global-handler! ',event
+                        (lambda (arg ...)
+                          body ...)))))))
+            events)))
+
+(define-on-window-event-macros
+  window-shown
+  window-hidden
+  window-exposed
+  window-moved
+  window-resized
+  window-size-changed
+  window-minimized
+  window-maximized
+  window-restored
+  window-enter
+  window-leave
+  window-focus-gained
+  window-focus-lost
+  window-close
+  window-take-focus
+  window-hit-test
+  key-down
+  key-up
+  text-editing
+  text-input
+  mouse-motion
+  mouse-button-down
+  mouse-button-up
+  mouse-wheel
+  drop-file
+  drop-text
+  drop-begin
+  drop-complete
+  update
+  ) ;; end of define-on-window-event-macros
+
+(define-on-global-event-macros
+  joystick-axis-motion
+  joystick-ball-motion
+  joystick-hat-motion
+  joystick-button-down
+  joystick-button-up
+  joystick-device-added
+  joystick-device-removed
+  controller-axis-motion
+  controller-button-down
+  controller-button-up
+  controller-device-added
+  controller-device-removed
+  controller-device-remapped
+  audio-device-added
+  audio-device-removed
+  quit
+  finger-motion
+  finger-down
+  finger-up
+  multi-gesture
+  dollar-gesture
+  dollar-record
+  ) ;; end of define-on-global-event-macros
+
+(define (start-global-event-loop thunk)
+  (cond
+    ((event-loop-running?)
+     (thunk))
+    (else
+     (guard (e (else (destroy-all-windows)
+                     (kill-repl)
+                     (kill-scheduler)
+                     (raise e)))
+       (%start-global-event-loop (lambda ()
+                                   (run-scheduler)
+                                   (when (is-interactive?)
+                                     (run-grv-repl (current-input-port)
+                                                   (current-output-port)
+                                                   (current-error-port)))
+                                   (thunk)))
+       (shutdown-scheduler)))))
+
+(define-syntax grv-begin
+  (syntax-rules ()
+    ((_)
+     (start-global-event-loop (lambda () #f)))
+    ((_ expr ...)
+     (start-global-event-loop (lambda () expr ...)))))
+
+(define (grv-exit)
+  (destroy-all-windows)
+  (exit-repl))
 
 
 ;;;
@@ -2347,196 +2792,39 @@ typedef enum {
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
 
 
-(define (next-event window)
-  (let1 event (%next-event window)
-    (cond
-      (event
-       event)
-      (else
-       (shift cont
-         (set-window-proc! window
-                           (lambda ()
-                             (cont (next-event window)))))))))
-
-(define (event-for-each window proc)
-  (let loop ()
-    (let1 event (next-event window)
-      (cond
-        ((eof-object? event)
-         #f)
-        (else
-         (proc event)
-         (loop))))))
-
-(define (display-new-window title size proc :rest rest)
-  (define (default-handler win)
-    (event-for-each win
-      (match-lambda
-        (('window-close _)
-         (close-event-stream win))
-        (_
-         #f))))
-  (apply make-window title size (or proc default-handler) rest)
-  (start-global-event-loop))
-
 (define (display-image image :key (fullscreen? #f) (resizable? #f))
-  (let ((img-w (image-width image))
-        (img-h (image-height image))
-        (title (match (command-line)
-                 ((program-name args ...)
-                  (values-ref (decompose-path program-name) 1))
-                 (_
-                  "Untitled"))))
-    (display-new-window title (if fullscreen?
-                                  'fullscreen
-                                  (list img-w img-h))
-      (lambda (win)
-        (let* ((win-w (window-width win))
-               (win-h (window-height win))
-               (zoom (min (/. win-w img-w) (/. win-h img-h)))
-               (sprite (put-image win image (center-x win) (center-y win) :zoom-x zoom :zoom-y zoom))
-               (close? #f))
-          (event-for-each win
-            (match-lambda
-              (('window-resized _ w h)
-               (set-sprite-zoom! sprite (min (/. w img-w) (/. h img-h))))
-              (('window-close _)
-               (close-event-stream win))
-              (('key-down _ 'escape _ _ _)
-               (close-event-stream win))
-              (event
-               #f)))))
-      :resizable? resizable?)))
-
-
-;;;
-;;; REPL
-;;;
-
-(define *repl-threads* '())
-
-(define (is-interactive?)
-  (let ((gosh? (and (not (null? (command-line)))
-                    (equal? (values-ref (decompose-path (car (command-line))) 1) "gosh"))))
-    (and gosh? (find-module 'gauche.interactive))))
-
-(define (graviton-read-eval-print-loop in)
-  (let1 repl-thread (make-thread
-                      (lambda ()
-                        (let ((selector (make <selector>))
-                              (expr #f)
-                              (ready? #f))
-                          (define (read-sexpr)
-                            (set! ready? #f)
-                            (while (not ready?)
-                              (let1 count (selector-select selector 500000)
-                                (when (and (= count 0) (not (event-loop-running?)))
-                                  (set! expr (eof-object))
-                                  (set! ready? #t))))
-                            expr)
-                          (selector-add! selector
-                                         in
-                                         (lambda (port flag)
-                                           (set! expr (read in))
-                                           (set! ready? #t))
-                                         '(r))
-                          (selector-add! selector
-                                         in
-                                         (lambda (port flag)
-                                           (set! expr (eof-object))
-                                           (set! ready? #t))
-                                         '(x))
-                          ((with-module gauche.internal vm-set-current-module) (find-module 'user))
-                          ((global-variable-ref (find-module 'gauche.interactive) 'read-eval-print-loop) read-sexpr))))
-    (push! *repl-threads* repl-thread)
-    (thread-start! repl-thread)))
-
-(define (wait-all-repl-terminate)
-  (unwind-protect
-      (for-each (^t (thread-join! t)) *repl-threads*)
-    (set! *repl-threads* '())))
-
-(define (run-repl-if-needed)
-  (when (is-interactive?)
-    (graviton-read-eval-print-loop (current-input-port))))
-
-;;;
-;;; Thread-safe
-;;;
-
-(define-syntax redefine-thread-safe-sync-function!
-  (syntax-rules ()
-    ((_)
-     (begin))
-    ((_ func rest ...)
-     (begin
-       (let ((%func func))
-         (set! func (lambda args
-                      (call-on-main-thread (cut apply %func args) :wait? #t))))
-       (redefine-thread-safe-sync-function! rest ...)))))
-
-(define-syntax redefine-thread-safe-async-function!
-  (syntax-rules ()
-    ((_)
-     (begin))
-    ((_ func rest ...)
-     (begin
-       (let ((%func func))
-         (set! func (lambda args
-                      (call-on-main-thread (cut apply %func args) :wait? #f))))
-       (redefine-thread-safe-async-function! rest ...)))))
-
-(redefine-thread-safe-sync-function!
-  make-window
-  window-size
-  window-maximized?
-  window-minimized?
-  window-position
-  window-title
-  window-resizable?
-  window-shown?
-  window-hidden?
-  window-icon
-  all-windows
-  last-window
-
-  message-box
-  )
-
-(redefine-thread-safe-async-function!
-  close-event-stream
-  clear-window-sprites!
-  send-close-window-event
-  set-window-size!
-  maximize-window
-  minimize-window
-  set-window-position!
-  set-window-title!
-  set-window-resizable!
-  show-window
-  hide-window
-  raise-window
-  restore-window
-  set-window-icon!
-  display-new-window
-
-  draw-point
-  draw-rect
-  draw-line
-  draw-polygon
-  draw-circle
-
-  )
+  (grv-begin
+    (let1 win (make-window (match (command-line)
+                             ((program-name args ...)
+                              (values-ref (decompose-path program-name) 1))
+                             (_
+                              "Untitled"))
+                           (image-width image)
+                           (image-height image)
+                           :resizable? resizable?
+                           :fullscreen? fullscreen?)
+      (let1 sprite (make-sprite win :image image :center (center-point win))
+        (on-key-down win (scancode sym mod repeat?)
+          (when (eq? scancode 'escape)
+            (destroy-window win)))))))
 
 
 ;;;
 ;;; setter
 ;;;
 
-(set! (setter window-size) set-window-size!)
+(set! (setter window-fullscreen?) set-window-fullscreen!)
 (set! (setter window-position) set-window-position!)
 (set! (setter window-title) set-window-title!)
 (set! (setter window-resizable?) set-window-resizable!)
 (set! (setter window-icon) set-window-icon!)
 (set! (setter window-maximized?) set-window-maximized!)
 (set! (setter window-minimized?) set-window-minimized!)
+
+(set! (setter sprite-image) set-sprite-image!)
+(set! (setter sprite-center) set-sprite-center!)
+(set! (setter sprite-z) set-sprite-z!)
+(set! (setter sprite-angle) set-sprite-angle!)
+(set! (setter sprite-zoom) set-sprite-zoom!)
+(set! (setter sprite-visible?) set-sprite-visible!)
+
