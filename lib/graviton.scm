@@ -1340,6 +1340,24 @@
                   (SDL_SetRenderDrawBlendMode renderer SDL_BLENDMODE_BLEND)
                   (SDL_SetRenderDrawColor renderer 0 0 0 255)
                   (SDL_RenderClear renderer)
+                  (let* ((actual-width::int)
+                         (actual-height::int)
+                         (virtual-width::int (-> gwin virtual-width))
+                         (virtual-height::int (-> gwin virtual-height)))
+                    (SDL_GetWindowSize (-> gwin window) (& actual-width) (& actual-height))
+                    (cond
+                      ((and (== actual-width virtual-width) (== actual-height virtual-height))
+                       (when (< (SDL_RenderSetClipRect renderer NULL) 0)
+                         (Scm_Error "SDL_RenderSetClipRect failed: %s" (SDL_GetError))))
+                      (else
+                       (let* ((rect::SDL_Rect))
+                         (set! (ref rect w) (cast int (round (* virtual-width (-> gwin zoom))))
+                               (ref rect h) (cast int (round (* virtual-height (-> gwin zoom))))
+                               (ref rect x) (/ (- actual-width (ref rect w)) 2)
+                               (ref rect y) (/ (- actual-height (ref rect h)) 2))
+                         (when (< (SDL_RenderSetClipRect renderer (& rect)) 0)
+                           (Scm_Error "SDL_RenderSetClipRect failed: %s" (SDL_GetError)))))))
+
                   (for-each (lambda (sprite)
                               (render-sprite (GRV_SPRITE_PTR sprite)))
                             (-> gwin sprites))
@@ -1360,8 +1378,7 @@
               (ref rect h) (cast int (round (* virtual-height (-> gwin zoom))))
               (ref rect x) (/ (- actual-width (ref rect w)) 2)
               (ref rect y) (/ (- actual-height (ref rect h)) 2))
-        (when (< (SDL_RenderSetClipRect (-> gwin renderer) (& rect)) 0)
-          (Scm_Error "SDL_RenderSetClipRect failed: %s" (SDL_GetError))))))
+        )))
   ) ;; end of inline-stub
 
 (define-cproc make-window (title::<const-cstring> width::<int> height::<int> :key (resizable?::<boolean> #f) (icon #f) (shown?::<boolean> #t) (maximized?::<boolean> #f) (minimized?::<boolean> #f) (fullscreen?::<boolean> #f))
