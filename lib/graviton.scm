@@ -2122,9 +2122,6 @@
                                                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))))
                 backlog-acc (+ backlog-acc backlog)))
 
-        ;; (when (< (SDL_GetTicks) frame-ticks)
-        ;;   (SDL_Delay (- frame-ticks (SDL_GetTicks))))
-
         (pre++ frame)
         (when (== frame frame-per-second)
           (let* ((elapse-in-sec::double (/ (- (SDL_GetTicks) start-ticks) 1000.0)))
@@ -2917,4 +2914,3 @@ typedef enum {
 (set! (setter sprite-angle) set-sprite-angle!)
 (set! (setter sprite-zoom) set-sprite-zoom!)
 (set! (setter sprite-visible?) set-sprite-visible!)
-
