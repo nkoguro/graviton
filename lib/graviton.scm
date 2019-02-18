@@ -45,6 +45,7 @@
 
   (export <graviton-window>
           <graviton-image>
+          <graviton-tile-image>
           <graviton-sprite>
           <graviton-future>
 
@@ -171,6 +172,7 @@
           load-image
           image-rgba-pixels
           set-image-rgba-pixels!
+          divide-image
 
           make-sprite
           set-sprite-image!
@@ -262,6 +264,10 @@
                              param::TransformParam
                              texture_alist)))
 
+   (define-ctype GrvTileImage::(.struct
+                                (image
+                                 rect::SDL_Rect)))
+
    (define-ctype GrvSprite::(.struct
                              (window
                               image
@@ -324,6 +330,9 @@
 
   (define-cptr <graviton-image> :private
     "GrvImage*" "GravitonImageClass" "GRV_IMAGE_P" "MAKE_GRV_IMAGE" "GRV_IMAGE_PTR")
+
+  (define-cptr <graviton-tile-image> :private
+    "GrvTileImage*" "GravitonTileImageClass" "GRV_TILE_IMAGE_P" "MAKE_GRV_TILE_IMAGE" "GRV_TILE_IMAGE_PTR")
 
   (define-cptr <graviton-texture> :private
     "GrvTexture*" "GravitonTextureClass" "GRV_TEXTURE_P" "MAKE_GRV_TEXTURE" "GRV_TEXTURE_PTR")
@@ -969,9 +978,17 @@
   ::<void>
   (compute-transform-param (& (-> gimage param)) (-> gimage surface w) (-> gimage surface h) left top right bottom false))
 
-(define-cproc image-size (image::<graviton-image>)
+(define-cproc image-size (image)
   ::<list>
-  (return (SCM_LIST2 (SCM_MAKE_INT (-> image surface w)) (SCM_MAKE_INT (-> image surface h)))))
+  (cond
+    ((GRV_IMAGE_P image)
+     (let* ((gimage::GrvImage* (GRV_IMAGE_PTR image)))
+       (return (SCM_LIST2 (SCM_MAKE_INT (-> gimage surface w)) (SCM_MAKE_INT (-> gimage surface h))))))
+    ((GRV_TILE_IMAGE_P image)
+     (let* ((gtile::GrvTileImage* (GRV_TILE_IMAGE_PTR image)))
+       (return (SCM_LIST2 (SCM_MAKE_INT (ref (-> gtile rect) w)) (SCM_MAKE_INT (ref (-> gtile rect) h))))))
+    (else
+     (Scm_Error "<graviton-image> or <graviton-tile-image> required, but got %S" image))))
 
 (define (image-width image)
   (list-ref (image-size image) 0))
@@ -1015,6 +1032,41 @@
 
 (define (image? obj)
   (is-a? obj <graviton-image>))
+
+
+;;;
+;;; TileImage
+;;;
+
+(define-cproc make-tile-image (image x::<int> y::<int> w::<int> h::<int>)
+  ::<graviton-tile-image>
+  (let* ((gtile::GrvTileImage* (SCM_NEW (.type GrvTileImage))))
+    (unless (GRV_IMAGE_P image)
+      (Scm_Error "<graviton-image> required, but got %S" image))
+    (set! (-> gtile image) image
+          (ref (-> gtile rect) x) x
+          (ref (-> gtile rect) y) y
+          (ref (-> gtile rect) w) w
+          (ref (-> gtile rect) h) h)
+    (return gtile)))
+
+(define (divide-image image width height)
+  (let* ((img-w (image-width image))
+         (img-h (image-height image))
+         (nx (ceiling->exact (/ img-w width)))
+         (ny (ceiling->exact (/ img-h height)))
+         (len (* nx ny))
+         (vec (make-vector len)))
+    (dotimes (y ny)
+      (dotimes (x nx)
+        (vector-set! vec
+                     (+ (* y nx) x)
+                     (make-tile-image image
+                                      (* x width)
+                                      (* y height)
+                                      (min width (- img-w (* x width)))
+                                      (min height (- img-h (* y height)))))))
+    vec))
 
 
 ;;;
@@ -1140,8 +1192,9 @@
   (unless (GRV_WINDOW_P window)
     (Scm_Error "window must be <graviton-window>, but got %S" window))
   (unless (or (SCM_FALSEP image)
-              (GRV_IMAGE_P image))
-    (Scm_Error "image must be <graviton-image> or #f, but got %S" image))
+              (GRV_IMAGE_P image)
+              (GRV_TILE_IMAGE_P image))
+    (Scm_Error "image must be <graviton-image>, <graviton-tile-image> or #f, but got %S" image))
   (unless (or (SCM_UNBOUNDP center)
               (and (SCM_LISTP center)
                    (SCM_REALP (Scm_ListRef center 0 SCM_UNBOUND))
@@ -1155,6 +1208,7 @@
     (Scm_Error "zoom must be <real> or (<real> <real>), but got %S" zoom))
 
   (let* ((gsprite::GrvSprite* (SCM_NEW (.type GrvSprite)))
+         (sprite-image SCM_FALSE)
          (center-x::double 0.0)
          (center-y::double 0.0)
          (zoom-x::double 1.0)
@@ -1171,14 +1225,23 @@
        (set! zoom-x (Scm_GetDouble (Scm_ListRef zoom 0 SCM_UNBOUND))
              zoom-y (Scm_GetDouble (Scm_ListRef zoom 1 SCM_UNBOUND)))))
 
-    (when (GRV_IMAGE_P image)
-      (set! srcrect (SCM_NEW SDL_Rect)
-            (-> srcrect x) 0
-            (-> srcrect y) 0
-            (-> srcrect w) (-> (GRV_IMAGE_PTR image) surface w)
-            (-> srcrect h) (-> (GRV_IMAGE_PTR image) surface h)))
+    (cond
+      ((GRV_IMAGE_P image)
+       (set! sprite-image image
+             srcrect (SCM_NEW SDL_Rect)
+             (-> srcrect x) 0
+             (-> srcrect y) 0
+             (-> srcrect w) (-> (GRV_IMAGE_PTR image) surface w)
+             (-> srcrect h) (-> (GRV_IMAGE_PTR image) surface h)))
+      ((GRV_TILE_IMAGE_P image)
+       (set! sprite-image (-> (GRV_TILE_IMAGE_PTR image) image)
+             srcrect (& (-> (GRV_TILE_IMAGE_PTR image) rect)))))
+
+    (unless (SCM_FALSEP sprite-image)
+      (retain-texture window (GRV_IMAGE_PTR sprite-image)))
+
     (set! (-> gsprite window) window
-          (-> gsprite image) image
+          (-> gsprite image) sprite-image
           (-> gsprite center-x) center-x
           (-> gsprite center-y) center-y
           (-> gsprite z) z
@@ -1187,8 +1250,6 @@
           (-> gsprite zoom-x) zoom-x
           (-> gsprite zoom-y) zoom-y
           (-> gsprite visible) visible)
-    (unless (SCM_FALSEP image)
-      (retain-texture window (GRV_IMAGE_PTR image)))
     (let* ((sprite (MAKE_GRV_SPRITE gsprite)))
       (Scm_RegisterFinalizer sprite finalize-sprite NULL)
       (insert-window-sprite sprite)
@@ -1197,24 +1258,31 @@
 (define-cproc set-sprite-image! (gsprite::<graviton-sprite> image)
   ::<void>
   (unless (or (SCM_FALSEP image)
-              (GRV_IMAGE_P image))
-    (Scm_Error "image must be <graviton-image> or #f, but got %S" image))
+              (GRV_IMAGE_P image)
+              (GRV_TILE_IMAGE_P image))
+    (Scm_Error "image must be <graviton-image>, <graviton-tile-image> or #f, but got %S" image))
 
-  (let* ((srcrect::SDL_Rect* NULL))
+  (let* ((sprite-image SCM_FALSE)
+         (srcrect::SDL_Rect* NULL))
     (cond
       ((GRV_IMAGE_P image)
        (let* ((gimage::GrvImage* (GRV_IMAGE_PTR image)))
-         (retain-texture (-> gsprite window) gimage)
-         (set! srcrect (SCM_NEW SDL_Rect)
+         (set! sprite-image image
+               srcrect (SCM_NEW SDL_Rect)
                (-> srcrect x) 0
                (-> srcrect y) 0
                (-> srcrect w) (-> gimage surface w)
                (-> srcrect h) (-> gimage surface h))))
-      (else
-       (when (GRV_IMAGE_P (-> gsprite image))
-         (release-texture (-> gsprite window) (GRV_IMAGE_PTR (-> gsprite image))))))
+      ((GRV_TILE_IMAGE_P image)
+       (set! sprite-image (-> (GRV_TILE_IMAGE_PTR image) image)
+             srcrect (& (-> (GRV_TILE_IMAGE_PTR image) rect)))))
 
-    (set! (-> gsprite image) image
+    (unless (SCM_FALSEP sprite-image)
+      (retain-texture (-> gsprite window) (GRV_IMAGE_PTR sprite-image)))
+    (unless (SCM_FALSEP (-> gsprite image))
+      (release-texture (-> gsprite window) (GRV_IMAGE_PTR (-> gsprite image))))
+
+    (set! (-> gsprite image) sprite-image
           (-> gsprite srcrect) srcrect)))
 
 (define-cproc sprite-image (gsprite::<graviton-sprite>)
