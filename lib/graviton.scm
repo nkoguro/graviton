@@ -2865,19 +2865,38 @@ typedef enum {
 
 (define (display-image image :key (fullscreen? #f) (resizable? #f))
   (grv-begin
-    (let1 win (make-window (match (command-line)
-                             ((program-name args ...)
-                              (values-ref (decompose-path program-name) 1))
-                             (_
-                              "Untitled"))
-                           (image-width image)
-                           (image-height image)
-                           :resizable? resizable?
-                           :fullscreen? fullscreen?)
-      (let1 sprite (make-sprite win :image image :center (center-point win))
-        (on-key-down win (scancode sym mod repeat?)
-          (when (eq? scancode 'escape)
-            (destroy-window win)))))))
+    (let* ((title (match (command-line)
+                    ((program-name args ...)
+                     (values-ref (decompose-path program-name) 1))
+                    (_
+                     "Untitled")))
+           (win (make-window (match (command-line)
+                               ((program-name args ...)
+                                (values-ref (decompose-path program-name) 1))
+                               (_
+                                "Untitled"))
+                             (image-width image)
+                             (image-height image)
+                             :resizable? resizable?
+                             :fullscreen? fullscreen?))
+           (sprite (make-sprite win :image image :center (center-point win))))
+      (on-key-down win (scancode sym mod repeat?)
+        (case scancode
+          ((escape)
+           (destroy-window win))
+          ((f)
+           (set-window-fullscreen! win (not (window-fullscreen? win))))))
+      (on-text-input win (text)
+        (cond
+          ((equal? text "+")
+           (let ((w (* (window-width win) 2))
+                 (h (* (window-height win) 2)))
+             (set-window-size! win w h)))
+          ((equal? text "-")
+           (let ((w (/ (window-width win) 2))
+                 (h (/ (window-height win) 2)))
+             (when (and (<= (image-width image) w) (<= (image-height image) h))
+               (set-window-size! win w h)))))))))
 
 
 ;;;
