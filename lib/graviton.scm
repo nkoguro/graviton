@@ -40,6 +40,8 @@
   (use gauche.record)
   (use gauche.selector)
   (use gauche.threads)
+  (use gauche.uvector)
+  (use graviton.png)
   (use math.const)
   (use util.match)
 
@@ -170,6 +172,7 @@
           display-image
           make-image
           load-image
+          save-image
           image-rgba-pixels
           set-image-rgba-pixels!
           divide-image
@@ -973,6 +976,16 @@
             (ref (-> image update_rect) w) 0
             (ref (-> image update_rect) h) 0)
       (return image))))
+
+(define (save-image image filename :key (format 'png))
+  (unless (eq? format 'png)
+    (errorf "Unsupported format: ~s" format))
+  (call-with-output-file filename
+    (lambda (out)
+      (let ((width (image-width image))
+            (height (image-height image))
+            (image-buffer (uvector-alias <u8vector> (image-rgba-pixels image))))
+        (write-png-image width height image-buffer out)))))
 
 (define-cproc set-image-border! (gimage::<graviton-image> top::<double> right::<double> bottom::<double> left::<double>)
   ::<void>
