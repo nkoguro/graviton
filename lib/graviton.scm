@@ -737,15 +737,15 @@
     ::void
     (when (GRV_IMAGE_P z)
       (let* ((gimage::GrvImage* (GRV_IMAGE_PTR z)))
-        (unless (SCM_NULLP (-> gimage texture_alist))
+        (unless (SCM_NULLP (-> gimage texture-alist))
           (fprintf stderr "[BUG] texture_alist in <graviton-image> must be nil in finalizer. forgot to call release-texture?\n"))
         (SDL_FreeSurface (-> gimage surface))
         (set! (-> gimage surface) NULL
-              (-> gimage texture_alist) SCM_NIL))))
+              (-> gimage texture-alist) SCM_NIL))))
 
   (define-cfn update-rect (gimage::GrvImage* x::int y::int w::int h::int)
     ::void
-    (when (SCM_NULLP (-> gimage texture_alist))
+    (when (SCM_NULLP (-> gimage texture-alist))
       (return))
 
     (let* ((rect::SDL_Rect* (& (-> gimage update_rect))))
@@ -829,7 +829,7 @@
                   (when (SCM_EQ (SCM_CAR pair) win)
                     (set! texture (SCM_CDR pair))
                     (break)))
-                (-> gimage texture_alist))
+                (-> gimage texture-alist))
       (cond
         ((SCM_FALSEP texture)
          (let* ((renderer::SDL_Renderer* (-> (GRV_WINDOW_PTR win) renderer))
@@ -841,7 +841,7 @@
            (set! (-> gtexture texture) stexture
                  (-> gtexture ref_count) 1
                  texture (MAKE_GRV_TEXTURE gtexture)
-                 (-> gimage texture_alist) (Scm_Cons (Scm_Cons win texture) (-> gimage texture_alist) ))))
+                 (-> gimage texture-alist) (Scm_Cons (Scm_Cons win texture) (-> gimage texture-alist) ))))
         (else
          (let* ((gtexture::GrvTexture* (GRV_TEXTURE_PTR texture)))
            (pre++ (-> gtexture ref_count)))))))
@@ -856,7 +856,7 @@
                   (when (SCM_EQ (SCM_CAR pair) win)
                     (set! texture (SCM_CDR pair))
                     (break)))
-                (-> gimage texture_alist))
+                (-> gimage texture-alist))
       (unless (SCM_FALSEP texture)
         (let* ((gtexture::GrvTexture* (GRV_TEXTURE_PTR texture)))
           (pre-- (-> gtexture ref_count))
@@ -864,21 +864,14 @@
             (unless (== (-> gtexture texture) NULL)
               (SDL_DestroyTexture (-> gtexture texture))
               (set! (-> gtexture texture) NULL))
-            (let* ((prev SCM_NIL))
-              (pair-for-each (lambda (rest)
-                               (let* ((pair (SCM_CAR rest)))
-                                 (when (SCM_EQ (SCM_CAR pair) win)
-                                   (cond
-                                     ((SCM_NULLP prev)
-                                      (set! (-> gimage texture_alist) (SCM_CDR rest))
-                                      (break))
-                                     (else
-                                      (SCM_SET_CDR prev (SCM_CDR rest))
-                                      (break))))
-                                 (set! prev pair)))
-                             (-> gimage texture_alist)))))))
+            (let* ((new-alist SCM_NIL))
+              (for-each (lambda (pair)
+                          (unless (SCM_EQ (SCM_CAR pair) win)
+                            (set! new-alist (Scm_Cons pair new-alist))))
+                        (-> gimage texture-alist))
+              (set! (-> gimage texture-alist) new-alist))))))
 
-    (when (SCM_NULLP (-> gimage texture_alist))
+    (when (SCM_NULLP (-> gimage texture-alist))
       (set! (ref (-> gimage update_rect) x) 0
             (ref (-> gimage update_rect) y) 0
             (ref (-> gimage update_rect) w) 0
@@ -904,7 +897,7 @@
                        (set! (-> gtexture texture) (create-streaming-texture-from-surface renderer (-> gimage surface)))))
                     (else
                      (update-texture (-> gtexture texture) (-> gimage surface) (& (-> gimage update_rect)))))))
-              (-> gimage texture_alist))
+              (-> gimage texture-alist))
     (set! (ref (-> gimage update_rect) x) 0
           (ref (-> gimage update_rect) y) 0
           (ref (-> gimage update_rect) w) 0
@@ -917,9 +910,9 @@
                   (when (SCM_EQ (SCM_CAR pair) win)
                     (set! texture (SCM_CDR pair))
                     (break)))
-                (-> gimage texture_alist))
-      (when (SCM_FALSEP texture)
-        (Scm_Error "<graviton-texture> not found for %S, forgot retain-texture?" win))
+                (-> gimage texture-alist))
+      (unless (GRV_TEXTURE_P texture)
+        (Scm_Error "<graviton-texture> not found for %S (got %S), forgot retain-texture?" win texture))
 
       (return (-> (GRV_TEXTURE_PTR texture) texture))))
 
@@ -944,7 +937,7 @@
       (Scm_Error "SDL_CreateRGBSurfaceWithFormat failed: %s" (SDL_GetError)))
     (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
     (set! (-> gimage surface) surface
-          (-> gimage texture_alist) SCM_NIL
+          (-> gimage texture-alist) SCM_NIL
           (ref (-> gimage update_rect) x) 0
           (ref (-> gimage update_rect) y) 0
           (ref (-> gimage update_rect) w) 0
@@ -965,7 +958,7 @@
       (SDL_FreeSurface img-surface)
       (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
       (set! (-> image surface) surface
-            (-> image texture_alist) SCM_NIL
+            (-> image texture-alist) SCM_NIL
             (ref (-> image update_rect) x) 0
             (ref (-> image update_rect) y) 0
             (ref (-> image update_rect) w) 0
