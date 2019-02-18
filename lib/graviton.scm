@@ -111,8 +111,8 @@
           actual-frame-per-second
           load-average
           frame-duration
-          start-global-event-loop
           set-global-handler!
+          grv-main
           grv-begin
           grv-exit
 
@@ -2101,7 +2101,7 @@
        (Scm_Error "<real> required, but got %S" limit)))
     (return (?: (< frame-duration max-limit) frame-duration max-limit))))
 
-(define-cproc %start-global-event-loop (thunk)
+(define-cproc start-global-event-loop (thunk)
   ::<void>
   (set-event-loop-status true)
   (SDL_StartTextInput)
@@ -2235,7 +2235,7 @@
   dollar-record
   ) ;; end of define-on-global-event-macros
 
-(define (start-global-event-loop thunk)
+(define (grv-main thunk :key (repl? (is-interactive?)))
   (cond
     ((event-loop-running?)
      (thunk))
@@ -2244,21 +2244,21 @@
                      (kill-repl)
                      (kill-scheduler)
                      (raise e)))
-       (%start-global-event-loop (lambda ()
-                                   (run-scheduler)
-                                   (when (is-interactive?)
-                                     (run-grv-repl (current-input-port)
-                                                   (current-output-port)
-                                                   (current-error-port)))
-                                   (thunk)))
+       (start-global-event-loop (lambda ()
+                                  (run-scheduler)
+                                  (when repl?
+                                    (run-grv-repl (current-input-port)
+                                                  (current-output-port)
+                                                  (current-error-port)))
+                                  (thunk)))
        (shutdown-scheduler)))))
 
 (define-syntax grv-begin
   (syntax-rules ()
     ((_)
-     (start-global-event-loop (lambda () #f)))
+     (grv-main (lambda () #f)))
     ((_ expr ...)
-     (start-global-event-loop (lambda () expr ...)))))
+     (grv-main (lambda () expr ...)))))
 
 (define (grv-exit)
   (destroy-all-windows)
