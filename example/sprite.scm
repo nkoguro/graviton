@@ -8,25 +8,33 @@
   (vx)
   (vy))
 
-(define (make-ball win z)
+(define (ball-image)
   (let1 img (make-image 64 64)
     (draw-circle img
                  (center-point img)
                  32
-                 (rgba (+ (random-integer #xff) 1)
-                       (+ (random-integer #xff) 1)
-                       (+ (random-integer #xff) 1)
-                       (+ (random-integer #xff) 1))
+                 (color 'white)
                  :fill? #t)
-    (%make-ball (make-sprite win :image img :z z :center (list (random-integer (floor->exact (border-right win)))
-                                                               (random-integer (floor->exact (border-bottom win)))))
-                (- (* (random-real) 400) 200)
-                (- (* (random-real) 400) 200))))
+    img))
+
+(define (make-ball win img z)
+  (%make-ball (make-sprite win
+                           :image img
+                           :z z
+                           :center (list (random-integer (floor->exact (border-right win)))
+                                         (random-integer (floor->exact (border-bottom win))))
+                           :color (rgba (+ (random-integer #xff) 1)
+                                        (+ (random-integer #xff) 1)
+                                        (+ (random-integer #xff) 1)
+                                        (+ (random-integer #xff) 1)))
+              (- (* (random-real) 400) 200)
+              (- (* (random-real) 400) 200)))
 
 (define (main args)
   (grv-begin
     (let* ((win (make-window (car args) 1024 768))
-           (balls (map (^z (make-ball win z)) (iota 1000))))
+           (img (ball-image))
+           (balls (map (^z (make-ball win img z)) (iota 1000))))
       (on-update win ()
         (for-each (lambda (ball)
                     (let ((x (+ (point-x (sprite-center (ball-sprite ball))) (* (ball-vx ball) (frame-duration))))

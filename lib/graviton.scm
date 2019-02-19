@@ -191,6 +191,8 @@
           sprite-zoom
           set-sprite-visible!
           sprite-visible?
+          set-sprite-color!
+          sprite-color
 
           image-size
           image-width
@@ -282,7 +284,8 @@
                               angle::double
                               zoom-x::double
                               zoom-y::double
-                              visible::bool)))
+                              visible::bool
+                              color::Uint32)))
 
    (define-ctype GrvWindow::(.struct
                              (window::SDL_Window*
@@ -1245,19 +1248,31 @@
                (spr-center-y::int)
                (spr-w::double (* (-> gsprite srcrect w) zoom-x (-> gwin zoom)))
                (spr-h::double (* (-> gsprite srcrect h) zoom-y (-> gwin zoom)))
-               (dstrect::SDL_Rect))
+               (dstrect::SDL_Rect)
+               (r::Uint8)
+               (g::Uint8)
+               (b::Uint8)
+               (a::Uint8))
+          (decompose-rgba (-> gsprite color) (& r) (& g) (& b) (& a))
           (window-coordinate gwin (-> gsprite center_x) (-> gsprite center_y) (& spr-center-x) (& spr-center-y))
           (set! (ref dstrect x) (- spr-center-x (cast int (round (/ spr-w 2.0))))
                 (ref dstrect y) (- spr-center-y (cast int (round (/ spr-h 2.0))))
                 (ref dstrect w) (cast int (round spr-w))
                 (ref dstrect h) (cast int (round spr-h)))
-          (SDL_RenderCopyEx (-> gwin renderer)
-                            texture
-                            (-> gsprite srcrect)
-                            (& dstrect)
-                            angle-deg
-                            NULL
-                            flip)))))
+          (when (< (SDL_SetTextureAlphaMod texture a) 0)
+            (Scm_Error "SDL_SetTextureAlphaMod failed: %s" (SDL_GetError)))
+          (when (< (SDL_SetTextureColorMod texture r g b) 0)
+            (Scm_Error "SDL_SetTextureColorMod failed: %s" (SDL_GetError)))
+          (when (< (SDL_SetTextureBlendMode texture SDL_BLENDMODE_BLEND) 0)
+            (Scm_Error "SDL_SetTextureBlendMode failed: %s" (SDL_GetError)))
+          (when (< (SDL_RenderCopyEx (-> gwin renderer)
+                                     texture
+                                     (-> gsprite srcrect)
+                                     (& dstrect)
+                                     angle-deg
+                                     NULL
+                                     flip) 0)
+            (Scm_Error "SDL_RenderCopyEx failed: %s" (SDL_GetError)))))))
 
   (define-cfn remove-window-sprite (sprite)
     ::void
@@ -1303,7 +1318,8 @@
                            (z::<double> 0.0)
                            (angle::<double> 0.0)
                            zoom
-                           (visible::<boolean> #t))
+                           (visible::<boolean> #t)
+                           (color::<uint32> #xffffffff))
   (unless (GRV_WINDOW_P window)
     (Scm_Error "window must be <graviton-window>, but got %S" window))
   (unless (or (SCM_FALSEP image)
@@ -1364,7 +1380,8 @@
           (-> gsprite angle) angle
           (-> gsprite zoom-x) zoom-x
           (-> gsprite zoom-y) zoom-y
-          (-> gsprite visible) visible)
+          (-> gsprite visible) visible
+          (-> gsprite color) color)
     (let* ((sprite (MAKE_GRV_SPRITE gsprite)))
       (Scm_RegisterFinalizer sprite finalize-sprite NULL)
       (insert-window-sprite sprite)
@@ -1473,6 +1490,13 @@
   ::<boolean>
   (return (-> gsprite visible)))
 
+(define-cproc set-sprite-color! (gsprite::<graviton-sprite> color::<uint32>)
+  ::<void>
+  (set! (-> gsprite color) color))
+
+(define-cproc sprite-color (gsprite::<graviton-sprite>)
+  ::<uint32>
+  (return (-> gsprite color)))
 
 
 ;;;
@@ -3029,3 +3053,4 @@ typedef enum {
 (set! (setter sprite-angle) set-sprite-angle!)
 (set! (setter sprite-zoom) set-sprite-zoom!)
 (set! (setter sprite-visible?) set-sprite-visible!)
+(set! (setter sprite-color) set-sprite-color!)
