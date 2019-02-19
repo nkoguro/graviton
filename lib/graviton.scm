@@ -175,6 +175,7 @@
           save-image
           image-rgba-pixels
           set-image-rgba-pixels!
+          bitblt
           divide-image
 
           make-sprite
@@ -939,6 +940,44 @@
   (define-cfn image-coordinate (gimage::GrvImage* x::double y::double ox::int* oy::int*)
     ::void
     (convert-coordinate (& (-> gimage param)) x y ox oy))
+
+  (define-cfn decompose-rgba (color::Uint32 r::Uint8* g::Uint8* b::Uint8* a::Uint8*)
+    ::void
+    (cond
+      ((== SDL_BYTEORDER SDL_LIL_ENDIAN)
+       (set! (* r) (logand color #xff)
+             (* g) (logand (>> color 8) #xff)
+             (* b) (logand (>> color 16) #xff)
+             (* a) (logand (>> color 24) #xff)))
+      (else
+       (set! (* r) (logand (>> color 24) #xff)
+             (* g) (logand (>> color 16) #xff)
+             (* b) (logand (>> color 8) #xff)
+             (* a) (logand color #xff)))))
+
+  (define-cfn bitblt (src-gimage::GrvImage* src-rect::SDL_Rect* dst-gimage::GrvImage* dst-rect::SDL_Rect* color::Uint32)
+    ::void
+    (let* ((r::Uint8)
+           (g::Uint8)
+           (b::Uint8)
+           (a::Uint8))
+      (decompose-rgba color (& r) (& g) (& b) (& a))
+      (when (< (SDL_SetSurfaceAlphaMod (-> src-gimage surface) a) 0)
+        (Scm_Error "SDL_SetSurfaceAlphaMod failed: %s" (SDL_GetError)))
+      (when (< (SDL_SetSurfaceColorMod (-> src-gimage surface) r g b) 0)
+        (Scm_Error "SDL_SetSurfaceColorMod failed: %s" (SDL_GetError)))
+      (when (< (SDL_SetSurfaceBlendMode (-> src-gimage surface) SDL_BLENDMODE_BLEND) 0)
+        (Scm_Error "SDL_SetSurfaceBlendMode failed: %s" (SDL_GetError)))
+      (cond
+        ((and (== (-> src-rect w) (-> dst-rect w))
+              (== (-> src-rect h) (-> dst-rect h)))
+         (when (< (SDL_BlitSurface (-> src-gimage surface) src-rect (-> dst-gimage surface) dst-rect) 0)
+           (Scm_Error "SDL_BlitSurface failed: %s" (SDL_GetError))))
+        (else
+         (when (< (SDL_BlitScaled (-> src-gimage surface) src-rect (-> dst-gimage surface) dst-rect) 0)
+           (Scm_Error "SDL_BlitScaled failed: %s" (SDL_GetError)))))
+      (update-rect dst-gimage (-> dst-rect x) (-> dst-rect y) (-> dst-rect w) (-> dst-rect h))))
+
   ) ;; end of inline-stub
 
 (define-cproc make-image (w::<int> h::<int>)
@@ -1045,6 +1084,69 @@
 
 (define (image? obj)
   (is-a? obj <graviton-image>))
+
+(define-cproc bitblt (src-image dst-gimage::<graviton-image> dst-position::<list>
+                                :key (src-position #f) (src-size #f) (dst-size #f) (color::<uint32> #xffffffff))
+  ::<void>
+  (let* ((src-gimage::GrvImage*)
+         (src-rect::SDL_Rect*)
+         (dst-rect::SDL_Rect))
+    (cond
+      ((GRV_TILE_IMAGE_P src-image)
+       (unless (SCM_FALSEP src-position)
+         (Scm_Error "src-position can't be specified when src-image is <graviton-tile-image>"))
+       (unless (SCM_FALSEP src-size)
+         (Scm_Error "src-size can't be specified when src-image is <graviton-tile-image>"))
+       (set! src-gimage (GRV_IMAGE_PTR (-> (GRV_TILE_IMAGE_PTR src-image) image))
+             src-rect (& (-> (GRV_TILE_IMAGE_PTR src-image) rect))))
+      ((GRV_IMAGE_P src-image)
+       (set! src-gimage (GRV_IMAGE_PTR src-image)
+             src-rect (SCM_NEW SDL_Rect))
+       (cond
+         ((and (SCM_FALSEP src-position) (SCM_FALSEP src-size))
+          (set! (-> src-rect x) 0
+                (-> src-rect y) 0
+                (-> src-rect w) (-> src-gimage surface w)
+                (-> src-rect h) (-> src-gimage surface h)))
+         ((and (SCM_LISTP src-position)
+               (SCM_REALP (Scm_ListRef src-position 0 SCM_UNBOUND))
+               (SCM_REALP (Scm_ListRef src-position 1 SCM_UNBOUND))
+               (SCM_LISTP src-size)
+               (SCM_INTP (Scm_ListRef src-size 0 SCM_UNBOUND))
+               (SCM_INTP (Scm_ListRef src-size 1 SCM_UNBOUND)))
+          (image-coordinate src-gimage
+                            (Scm_GetDouble (Scm_ListRef src-position 0 SCM_UNBOUND))
+                            (Scm_GetDouble (Scm_ListRef src-position 1 SCM_UNBOUND))
+                            (& (-> src-rect x))
+                            (& (-> src-rect y)))
+          (set! (-> src-rect w) (SCM_INT_VALUE (Scm_ListRef src-size 0 SCM_UNBOUND))
+                (-> src-rect h) (SCM_INT_VALUE (Scm_ListRef src-size 1 SCM_UNBOUND))))
+         (else
+          (Scm_Error "(<real> <real>) for src-position and (<integer> <integer>) for src-size required, but got %S and %S"
+                     src-position
+                     src-size))))
+      (else
+       (Scm_Error "<graviton-tile-image> or <graviton-image> required, but got %S" src-image)))
+    (unless (and (SCM_REALP (Scm_ListRef dst-position 0 SCM_UNBOUND))
+                 (SCM_REALP (Scm_ListRef dst-position 1 SCM_UNBOUND)))
+      (Scm_Error "(<real> <real>) required, but got %S" dst-position))
+    (image-coordinate dst-gimage
+                      (Scm_GetDouble (Scm_ListRef dst-position 0 SCM_UNBOUND))
+                      (Scm_GetDouble (Scm_ListRef dst-position 1 SCM_UNBOUND))
+                      (& (ref dst-rect x))
+                      (& (ref dst-rect y)))
+    (cond
+      ((SCM_FALSEP dst-size)
+       (set! (ref dst-rect w) (-> src-rect w)
+             (ref dst-rect h) (-> src-rect h)))
+      ((and (SCM_LISTP src-size)
+            (SCM_INTP (Scm_ListRef src-size 0 SCM_UNBOUND))
+            (SCM_INTP (Scm_ListRef src-size 1 SCM_UNBOUND)))
+       (set! (ref dst-rect w) (SCM_INT_VALUE (Scm_ListRef dst-size 0 SCM_UNBOUND))
+             (ref dst-rect h) (SCM_INT_VALUE (Scm_ListRef dst-size 1 SCM_UNBOUND))))
+      (else
+       (Scm_Error "(<integer> <integer>) required, but got %S" dst-size)))
+    (bitblt src-gimage src-rect dst-gimage (& dst-rect) color)))
 
 
 ;;;
