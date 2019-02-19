@@ -3019,7 +3019,7 @@ typedef enum {
                              :resizable? resizable?
                              :fullscreen? fullscreen?))
            (sprite (make-sprite win :image image :center (center-point win))))
-      (on-key-down win (scancode sym mod repeat?)
+      (on-key-up win (scancode sym mod repeat?)
         (case scancode
           ((escape)
            (destroy-window win))
