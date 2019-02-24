@@ -49,6 +49,7 @@
           <graviton-image>
           <graviton-tile-image>
           <graviton-sprite>
+          <graviton-tile-map>
           <graviton-future>
 
           <point>
@@ -194,6 +195,18 @@
           set-sprite-color!
           sprite-color
 
+          make-tile-map
+          tile-map-tile-index
+          tile-map-foreground-color
+          tile-map-background-color
+          set-tile-map-tile!
+          tile-map-offset
+          set-tile-map-offset!
+          tile-map-sprite
+          tile-map-tile-images
+          tile-map-columns
+          tile-map-rows
+
           image-size
           image-width
           image-height
@@ -296,7 +309,8 @@
                               virtual-width::int
                               virtual-height::int
                               zoom::double
-                              handler-table)))
+                              handler-table
+                              clip::SDL_Rect*)))
 
    (define-ctype ScratchArea::(.struct
                                (x::int
@@ -304,6 +318,24 @@
                                 w::int
                                 h::int
                                 data::char*)))
+
+   (define-ctype GrvAttribute::(.struct
+                                (foreground-color::Uint32
+                                 background-color::Uint32)))
+
+   (define-ctype GrvTileMap::(.struct
+                              (tiles::Uint32*
+                               attrs::GrvAttribute**
+                               buf-tiles::Uint32*
+                               buf-attrs::GrvAttribute**
+                               columns::int
+                               rows::int
+                               offset::int
+                               image
+                               tile-images
+                               tile-width::int
+                               tile-height::int
+                               sprite)))
 
    (define-ctype EventLoopStatus::(.struct
                                    (lock::SDL_SpinLock
@@ -331,6 +363,7 @@
   (define-cvar repl-thread :static)
   (define-cvar repl-channel :static)
   (define-cvar graviton-event-type::Uint32 :static)
+  (define-cvar graviton-module :static)
 
   (define-cptr <graviton-window> :private
     "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
@@ -346,6 +379,9 @@
 
   (define-cptr <graviton-sprite> :private
     "GrvSprite*" "GravitonSpriteClass" "GRV_SPRITE_P" "MAKE_GRV_SPRITE" "GRV_SPRITE_PTR")
+
+  (define-cptr <graviton-tile-map> :private
+    "GrvTileMap*" "GravitonTileMapClass" "GRV_TILE_MAP_P" "MAKE_GRV_TILE_MAP" "GRV_TILE_MAP_PTR")
 
   (define-cptr <graviton-future> :private
     "GrvFuture*" "GravitonFutureClass" "GRV_FUTURE_P" "MAKE_GRV_FUTURE" "GRV_FUTURE_PTR")
@@ -379,7 +415,8 @@
     (set! main-thread-id (SDL_ThreadID)
           global-handler-table (Scm_MakeHashTableSimple SCM_HASH_EQ 16)
           repl-thread SCM_FALSE
-          repl-channel SCM_FALSE)
+          repl-channel SCM_FALSE
+          graviton-module (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
     (set! (ref event-loop-status lock) 0
           (ref event-loop-status running?) false)
     ;; (SDL_LogSetPriority SDL_LOG_CATEGORY_APPLICATION SDL_LOG_PRIORITY_DEBUG)
@@ -1312,6 +1349,38 @@
                              (SCM_SET_CDR pair (Scm_Cons sprite SCM_NIL))
                              (break))))
                         (-> gwin sprites))))))
+
+  (define-cfn make-sprite (window
+                           sprite-image
+                           center-x::double
+                           center-y::double
+                           z::double
+                           srcrect::SDL_Rect*
+                           angle::double
+                           zoom-x::double
+                           zoom-y::double
+                           visible?::bool
+                           color::Uint32)
+    ::ScmObj
+    (let* ((gsprite::GrvSprite* (SCM_NEW GrvSprite)))
+      (unless (SCM_FALSEP sprite-image)
+        (retain-texture window (GRV_IMAGE_PTR sprite-image)))
+
+      (set! (-> gsprite window) window
+            (-> gsprite image) sprite-image
+            (-> gsprite center-x) center-x
+            (-> gsprite center-y) center-y
+            (-> gsprite z) z
+            (-> gsprite srcrect) srcrect
+            (-> gsprite angle) angle
+            (-> gsprite zoom-x) zoom-x
+            (-> gsprite zoom-y) zoom-y
+            (-> gsprite visible) visible?
+            (-> gsprite color) color)
+      (let* ((sprite (MAKE_GRV_SPRITE gsprite)))
+        (Scm_RegisterFinalizer sprite finalize-sprite NULL)
+        (insert-window-sprite sprite)
+        (return sprite))))
   ) ;; end of inline-stub
 
 (define-cproc make-sprite (window
@@ -1321,7 +1390,7 @@
                            (z::<double> 0.0)
                            (angle::<double> 0.0)
                            zoom
-                           (visible::<boolean> #t)
+                           (visible?::<boolean> #t)
                            (color::<uint32> #xffffffff))
   (unless (GRV_WINDOW_P window)
     (Scm_Error "window must be <graviton-window>, but got %S" window))
@@ -1371,24 +1440,7 @@
        (set! sprite-image (-> (GRV_TILE_IMAGE_PTR image) image)
              srcrect (& (-> (GRV_TILE_IMAGE_PTR image) rect)))))
 
-    (unless (SCM_FALSEP sprite-image)
-      (retain-texture window (GRV_IMAGE_PTR sprite-image)))
-
-    (set! (-> gsprite window) window
-          (-> gsprite image) sprite-image
-          (-> gsprite center-x) center-x
-          (-> gsprite center-y) center-y
-          (-> gsprite z) z
-          (-> gsprite srcrect) srcrect
-          (-> gsprite angle) angle
-          (-> gsprite zoom-x) zoom-x
-          (-> gsprite zoom-y) zoom-y
-          (-> gsprite visible) visible
-          (-> gsprite color) color)
-    (let* ((sprite (MAKE_GRV_SPRITE gsprite)))
-      (Scm_RegisterFinalizer sprite finalize-sprite NULL)
-      (insert-window-sprite sprite)
-      (return sprite))))
+    (return (make-sprite window sprite-image center-x center-y z srcrect angle zoom-x zoom-y visible? color))))
 
 (define-cproc set-sprite-image! (gsprite::<graviton-sprite> image)
   ::<void>
@@ -1503,6 +1555,206 @@
 
 
 ;;;
+;;; TileMap
+;;;
+
+(inline-stub
+  (define-cfn tile-map-offset-index (gtilemap::GrvTileMap* x::int y::int)
+    ::int
+    (unless (and (<= 0 x) (< x (-> gtilemap columns)))
+      (Scm_Error "x is out of range: %d" x))
+    (unless (and (<= 0 y) (< y (-> gtilemap rows)))
+      (Scm_Error "y is out of range: %d" y))
+    (return (% (+ (-> gtilemap offset) (* y (-> gtilemap columns)) x)
+               (* (-> gtilemap columns) (-> gtilemap rows)))))
+
+  (define-cfn tile-map-pos-index (gtilemap::GrvTileMap* x::int y::int)
+    ::int
+    (unless (and (<= 0 x) (< x (-> gtilemap columns)))
+      (Scm_Error "x is out of range: %d" x))
+    (unless (and (<= 0 y) (< y (-> gtilemap rows)))
+      (Scm_Error "y is out of range: %d" y))
+    (return (% (+ (* y (-> gtilemap columns)) x)
+               (* (-> gtilemap columns) (-> gtilemap rows)))))
+
+  (define-cfn equal-attr? (attr1::GrvAttribute* attr2::GrvAttribute*)
+    ::bool
+    (cond
+      ((and (== attr1 NULL)
+            (== attr2 NULL))
+       (return true))
+      ((== attr1 NULL)
+       (return (and (== (-> attr2 foreground-color) #xffffffff)
+                    (== (-> attr2 background-color) 0))))
+      ((== attr2 NULL)
+       (return (and (== (-> attr1 foreground-color) #xffffffff)
+                    (== (-> attr1 background-color) 0))))
+      (else
+       (return (and (== (-> attr1 foreground-color) (-> attr2 foreground-color))
+                    (== (-> attr1 background-color) (-> attr2 background-color)))))))
+
+  (define-cfn update-tile-map (gtilemap::GrvTileMap* x::int y::int)
+    ::void
+    (let* ((pos-index::int (tile-map-pos-index gtilemap x y))
+           (offset-index::int (tile-map-offset-index gtilemap x y))
+           (tile-index::Uint32 (aref (-> gtilemap tiles) offset-index))
+           (attr::GrvAttribute* (aref (-> gtilemap attrs) offset-index))
+           (buf-tile-index::Uint32 (aref (-> gtilemap buf-tiles) pos-index))
+           (buf-attr::GrvAttribute* (aref (-> gtilemap buf-attrs) pos-index)))
+      (unless (and (== tile-index buf-tile-index)
+                   (equal-attr? attr buf-attr))
+        (let* ((dstrect::SDL_Rect)
+               (fg-color::Uint32 #xffffffff)
+               (gimage::GrvImage* (GRV_IMAGE_PTR (-> gtilemap image))))
+          (set! (aref (-> gtilemap buf-tiles) pos-index) tile-index
+                (aref (-> gtilemap buf-attrs) pos-index) attr
+                (ref dstrect x) (* (-> gtilemap tile-width) x)
+                (ref dstrect y) (* (-> gtilemap tile-height) y)
+                (ref dstrect w) (-> gtilemap tile-width)
+                (ref dstrect h) (-> gtilemap tile-height))
+          (cond
+            (attr
+             (when (< (SDL_FillRect (-> gimage surface) (& dstrect) (-> attr background-color)) 0)
+               (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))
+             (set! fg-color (-> attr foreground-color)))
+            (else
+             (when (< (SDL_FillRect (-> gimage surface) (& dstrect) 0) 0)
+               (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))))
+          (let* ((tile (Scm_VectorRef (SCM_VECTOR (-> gtilemap tile-images)) tile-index SCM_UNBOUND))
+                 (gtile::GrvTileImage*))
+            (unless (GRV_TILE_IMAGE_P tile)
+              (Scm_Error "<graviton-tile-image> required, but got %S" tile))
+            (set! gtile (GRV_TILE_IMAGE_PTR tile))
+            (bitblt (GRV_IMAGE_PTR (-> gtile image))
+                    (& (-> gtile rect))
+                    gimage
+                    (& dstrect)
+                    fg-color))))))
+  ) ;; end of inline-stub
+
+(define-cproc make-tile-map (window tile-images::<vector> columns::<int> rows::<int> center :key (z::<double> 0) (fill::<uint32> 0))
+  ::<graviton-tile-map>
+  (let* ((gtilemap::GrvTileMap* (SCM_NEW GrvTileMap))
+         (size::int (* columns rows))
+         (tile-width::int)
+         (tile-height::int)
+         (sprite))
+    (when (== (SCM_VECTOR_SIZE tile-images) 0)
+      (Scm_Error "tile-images must have at least one element"))
+    (dotimes (i (SCM_VECTOR_SIZE tile-images))
+      (unless (GRV_TILE_IMAGE_P (Scm_VectorRef tile-images i SCM_UNBOUND))
+        (Scm_Error "<graviton-tile-image> required, but got %S" (Scm_VectorRef tile-images i SCM_UNBOUND))))
+    (let* ((tile-image (Scm_VectorRef tile-images 0 SCM_UNBOUND)))
+      (set! tile-width (ref (-> (GRV_TILE_IMAGE_PTR tile-image) rect) w)
+            tile-height (ref (-> (GRV_TILE_IMAGE_PTR tile-image) rect) h)))
+
+    (set! (-> gtilemap tiles) (SCM_NEW_ATOMIC_ARRAY (.type Uint32) size)
+          (-> gtilemap attrs) (SCM_NEW_ARRAY (.type GrvAttribute*) size)
+          (-> gtilemap buf-tiles) (SCM_NEW_ATOMIC_ARRAY (.type Uint32) size)
+          (-> gtilemap buf-attrs) (SCM_NEW_ARRAY (.type GrvAttribute*) size))
+    (dotimes (i size)
+      (set! (aref (-> gtilemap tiles) i) fill
+            (aref (-> gtilemap attrs) i) NULL
+            (aref (-> gtilemap buf-tiles) i) (lognot fill) ;; enforce initial update
+            (aref (-> gtilemap buf-attrs) i) NULL))
+
+    (set! (-> gtilemap columns) columns
+          (-> gtilemap rows) rows
+          (-> gtilemap offset) 0
+
+          (-> gtilemap image) (Scm_EvalRec (SCM_LIST3 'make-image
+                                                      (SCM_MAKE_INT (* tile-width columns))
+                                                      (SCM_MAKE_INT (* tile-height rows)))
+                                           graviton-module)
+          (-> gtilemap tile-images) (SCM_OBJ tile-images)
+          (-> gtilemap tile-width) tile-width
+          (-> gtilemap tile-height) tile-height
+
+          sprite (Scm_EvalRec (Scm_List 'make-sprite
+                                        window
+                                        ':image (-> gtilemap image)
+                                        ':center (SCM_LIST2 'quote center)
+                                        ':z (Scm_MakeFlonum z)
+                                        NULL)
+                              graviton-module))
+    (dotimes (y rows)
+      (dotimes (x columns)
+        (update-tile-map gtilemap x y)))
+
+    (return gtilemap)))
+
+(define-cproc tile-map-tile-index (gtilemap::<graviton-tile-map> x::<int> y::<int>)
+  ::<uint32>
+  (return (aref (-> gtilemap tiles) (tile-map-offset-index gtilemap x y))))
+
+(define-cproc tile-map-foreground-color (gtilemap::<graviton-tile-map> x::<int> y::<int>)
+  ::<uint32>
+  (let* ((attr::GrvAttribute* (aref (-> gtilemap attrs) (tile-map-offset-index gtilemap x y))))
+    (cond
+      (attr
+       (return (-> attr foreground-color)))
+      (else
+       (return #xffffffff)))))
+
+(define-cproc tile-map-background-color (gtilemap::<graviton-tile-map> x::<int> y::<int>)
+  ::<uint32>
+  (let* ((attr::GrvAttribute* (aref (-> gtilemap attrs) (tile-map-offset-index gtilemap x y))))
+    (cond
+      (attr
+       (return (-> attr foreground-color)))
+      (else
+       (return #xffffffff)))))
+
+(define-cproc set-tile-map-tile! (gtilemap::<graviton-tile-map>
+                                  x::<int>
+                                  y::<int>
+                                  tile-index::<uint32>
+                                  :key
+                                  (foreground-color::<uint32> #xffffffff)
+                                  (background-color::<uint32> 0))
+  ::<void>
+  (let* ((offset-index::int (tile-map-offset-index gtilemap x y)))
+    (set! (aref (-> gtilemap tiles) offset-index) tile-index)
+    (cond
+      ((and (== foreground-color #xffffffff) (== background-color 0))
+       (set! (aref (-> gtilemap attrs) offset-index) NULL))
+      (else
+       (let* ((attr::GrvAttribute* (SCM_NEW GrvAttribute)))
+         (set! (-> attr foreground-color) foreground-color
+               (-> attr background-color) background-color
+               (aref (-> gtilemap attrs) offset-index) attr)))))
+  (update-tile-map gtilemap x y))
+
+(define-cproc tile-map-offset (gtilemap::<graviton-tile-map>)
+  ::<int>
+  (return (-> gtilemap offset)))
+
+(define-cproc set-tile-map-offset! (gtilemap::<graviton-tile-map> offset::<int>)
+  ::<void>
+  (let* ((size::int (* (-> gtilemap columns) (-> gtilemap rows))))
+    (while (< offset 0)
+      (set! offset (+ offset size)))
+    (set! (-> gtilemap offset) offset))
+  (dotimes (y (-> gtilemap rows))
+    (dotimes (x (-> gtilemap columns))
+      (update-tile-map gtilemap x y))))
+
+(define-cproc tile-map-sprite (gtilemap::<graviton-tile-map>)
+  (return (-> gtilemap sprite)))
+
+(define-cproc tile-map-tile-images (gtilemap::<graviton-tile-map>)
+  (return (-> gtilemap tile-images)))
+
+(define-cproc tile-map-columns (gtilemap::<graviton-tile-map>)
+  ::<int>
+  (return (-> gtilemap columns)))
+
+(define-cproc tile-map-rows (gtilemap::<graviton-tile-map>)
+  ::<int>
+  (return (-> gtilemap rows)))
+
+
+;;;
 ;;; Window
 ;;;
 
@@ -1550,24 +1802,9 @@
                   (SDL_SetRenderDrawBlendMode renderer SDL_BLENDMODE_BLEND)
                   (SDL_SetRenderDrawColor renderer 0 0 0 255)
                   (SDL_RenderClear renderer)
-                  (let* ((actual-width::int)
-                         (actual-height::int)
-                         (virtual-width::int (-> gwin virtual-width))
-                         (virtual-height::int (-> gwin virtual-height)))
-                    (SDL_GetWindowSize (-> gwin window) (& actual-width) (& actual-height))
-                    (cond
-                      ((and (== actual-width virtual-width) (== actual-height virtual-height))
-                       (when (< (SDL_RenderSetClipRect renderer NULL) 0)
-                         (Scm_Error "SDL_RenderSetClipRect failed: %s" (SDL_GetError))))
-                      (else
-                       (let* ((rect::SDL_Rect))
-                         (set! (ref rect w) (cast int (round (* virtual-width (-> gwin zoom))))
-                               (ref rect h) (cast int (round (* virtual-height (-> gwin zoom))))
-                               (ref rect x) (/ (- actual-width (ref rect w)) 2)
-                               (ref rect y) (/ (- actual-height (ref rect h)) 2))
-                         (when (< (SDL_RenderSetClipRect renderer (& rect)) 0)
-                           (Scm_Error "SDL_RenderSetClipRect failed: %s" (SDL_GetError)))))))
-
+                  (when (and (-> gwin clip)
+                             (< (SDL_RenderSetClipRect (-> gwin renderer) (-> gwin clip)) 0))
+                    (Scm_Error "SDL_RenderSetClipRect failed: %s" (SDL_GetError)))
                   (for-each (lambda (sprite)
                               (render-sprite (GRV_SPRITE_PTR sprite)))
                             (-> gwin sprites))
@@ -1582,13 +1819,12 @@
             zoom-h (/ (cast double actual-height) (cast double virtual-height))
             (-> gwin virtual-width) virtual-width
             (-> gwin virtual-height) virtual-height
-            (-> gwin zoom) (?: (< zoom-w zoom-h) zoom-w zoom-h))
-      (let* ((rect::SDL_Rect))
-        (set! (ref rect w) (cast int (round (* virtual-width (-> gwin zoom))))
-              (ref rect h) (cast int (round (* virtual-height (-> gwin zoom))))
-              (ref rect x) (/ (- actual-width (ref rect w)) 2)
-              (ref rect y) (/ (- actual-height (ref rect h)) 2))
-        )))
+            (-> gwin zoom) (?: (< zoom-w zoom-h) zoom-w zoom-h)
+            (-> gwin clip) (SCM_NEW SDL_Rect)
+            (-> gwin clip w) (cast int (round (* virtual-width (-> gwin zoom))))
+            (-> gwin clip h) (cast int (round (* virtual-height (-> gwin zoom))))
+            (-> gwin clip x) (/ (- actual-width (-> gwin clip w)) 2)
+            (-> gwin clip y) (/ (- actual-height (-> gwin clip h)) 2))))
   ) ;; end of inline-stub
 
 (define-cproc make-window (title::<const-cstring> width::<int> height::<int> :key (resizable?::<boolean> #f) (icon #f) (shown?::<boolean> #t) (maximized?::<boolean> #f) (minimized?::<boolean> #f) (fullscreen?::<boolean> #f))
@@ -3057,3 +3293,5 @@ typedef enum {
 (set! (setter sprite-zoom) set-sprite-zoom!)
 (set! (setter sprite-visible?) set-sprite-visible!)
 (set! (setter sprite-color) set-sprite-color!)
+
+(set! (setter tile-map-offset) set-tile-map-offset!)
