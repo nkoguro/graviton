@@ -74,14 +74,14 @@
           destroy-window
           clear-window-sprites!
           send-close-window-event
-          window-size
-          window-width
-          window-height
-          set-window-size!
-          window-resolution
-          window-resolution-width
-          window-resolution-height
-          set-window-resolution!
+          window-physical-size
+          window-physical-width
+          window-physical-height
+          set-window-physical-size!
+          window-logical-size
+          window-logical-width
+          window-logical-height
+          set-window-logical-size!
           window-fullscreen?
           set-window-fullscreen!
           window-maximized?
@@ -309,10 +309,10 @@
                               renderer::SDL_Renderer*
                               sprites
                               icon
-                              param::TransformParam
-                              virtual-width::int
-                              virtual-height::int
-                              zoom::double
+                              logical-width::int
+                              logical-height::int
+                              offset-x::int
+                              offset-y::int
                               handler-table
                               clip::SDL_Rect*)))
 
@@ -774,15 +774,9 @@
             (-> param right) (?: clip? x1 ex)
             (-> param bottom) (?: clip? y1 ey))))
 
-  (define-cfn get-transform-param (window-or-image)
+  (define-cfn get-transform-param (gimage::GrvImage*)
     ::TransformParam*
-    (cond
-      ((GRV_WINDOW_P window-or-image)
-       (return (& (-> (GRV_WINDOW_PTR window-or-image) param))))
-      ((GRV_IMAGE_P window-or-image)
-       (return (& (-> (GRV_IMAGE_PTR window-or-image) param))))
-      (else
-       (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
+    (return (& (-> gimage param))))
   ) ;; end of inline-stub
 
 ;;;
@@ -1288,19 +1282,16 @@
         (let* ((win (-> gsprite window))
                (gwin::GrvWindow* (GRV_WINDOW_PTR win))
                (texture::SDL_Texture* (get-texture win gimage))
-               (spr-center-x::int)
-               (spr-center-y::int)
-               (spr-w::double (* (-> gsprite srcrect w) zoom-x (-> gwin zoom)))
-               (spr-h::double (* (-> gsprite srcrect h) zoom-y (-> gwin zoom)))
+               (spr-w::double (* (-> gsprite srcrect w) zoom-x))
+               (spr-h::double (* (-> gsprite srcrect h) zoom-y))
                (dstrect::SDL_Rect)
                (r::Uint8)
                (g::Uint8)
                (b::Uint8)
                (a::Uint8))
           (decompose-rgba (-> gsprite color) (& r) (& g) (& b) (& a))
-          (window-coordinate gwin (-> gsprite center_x) (-> gsprite center_y) (& spr-center-x) (& spr-center-y))
-          (set! (ref dstrect x) (- spr-center-x (cast int (round (/ spr-w 2.0))))
-                (ref dstrect y) (- spr-center-y (cast int (round (/ spr-h 2.0))))
+          (set! (ref dstrect x) (cast int (round (- (+ (-> gsprite center-x) (-> gwin offset-x)) (/ spr-w 2.0))))
+                (ref dstrect y) (cast int (round (- (+ (-> gsprite center-y) (-> gwin offset-y)) (/ spr-h 2.0))))
                 (ref dstrect w) (cast int (round spr-w))
                 (ref dstrect h) (cast int (round spr-h)))
           (when (< (SDL_SetTextureAlphaMod texture a) 0)
@@ -2087,18 +2078,6 @@
     (set! (-> gwin window) NULL
           (-> gwin renderer) NULL))
 
-  (define-cfn window-pixel-width (gwin::GrvWindow*)
-    ::double
-    (return (/ 1.0 (fabs (ref (-> gwin param) m00)))))
-
-  (define-cfn window-pixel-height (gwin::GrvWindow*)
-    ::double
-    (return (/ 1.0 (fabs (ref (-> gwin param) m11)))))
-
-  (define-cfn window-coordinate (gwin::GrvWindow* x::double y::double ox::int* oy::int*)
-    ::void :static
-    (convert-coordinate (& (-> gwin param)) x y ox oy))
-
   (define-cfn update-window-contents ()
     ::void
     (for-each (lambda (win)
@@ -2116,23 +2095,32 @@
                   (SDL_RenderPresent renderer)))
               grv-windows))
 
-  (define-cfn set-window-resolution! (gwin::GrvWindow* actual-width::int actual-height::int virtual-width::int virtual-height::int)
+  (define-cfn set-window-logical-size! (gwin::GrvWindow* physical-width::int physical-height::int logical-width::int logical-height::int)
     ::void
     (let* ((zoom-w::double)
-           (zoom-h::double))
-      (set! zoom-w (/ (cast double actual-width) (cast double virtual-width))
-            zoom-h (/ (cast double actual-height) (cast double virtual-height))
-            (-> gwin virtual-width) virtual-width
-            (-> gwin virtual-height) virtual-height
-            (-> gwin zoom) (?: (< zoom-w zoom-h) zoom-w zoom-h)
+           (zoom-h::double)
+           (zoom::double)
+           (renderer-logical-width::int)
+           (renderer-logical-height::int))
+      (set! zoom-w (/ (cast double physical-width) (cast double logical-width))
+            zoom-h (/ (cast double physical-height) (cast double logical-height))
+            zoom (?: (< zoom-w zoom-h) zoom-w zoom-h)
+            (-> gwin logical-width) logical-width
+            (-> gwin logical-height) logical-height
+            renderer-logical-width (cast int (round (/ physical-width zoom)))
+            renderer-logical-height (cast int (round (/ physical-height zoom)))
+            (-> gwin offset-x) (cast int (round (/ (- renderer-logical-width logical-width) 2.0)))
+            (-> gwin offset-y) (cast int (round (/ (- renderer-logical-height logical-height) 2.0)))
             (-> gwin clip) (SCM_NEW SDL_Rect)
-            (-> gwin clip w) (cast int (round (* virtual-width (-> gwin zoom))))
-            (-> gwin clip h) (cast int (round (* virtual-height (-> gwin zoom))))
-            (-> gwin clip x) (/ (- actual-width (-> gwin clip w)) 2)
-            (-> gwin clip y) (/ (- actual-height (-> gwin clip h)) 2))))
+            (-> gwin clip w) logical-width
+            (-> gwin clip h) logical-height
+            (-> gwin clip x) (-> gwin offset-x)
+            (-> gwin clip y) (-> gwin offset-y))
+      (when (< (SDL_RenderSetLogicalSize (-> gwin renderer) renderer-logical-width renderer-logical-height) 0)
+        (Scm_Error "SDL_RenderSetLogicalSize failed: %s" (SDL_GetError)))))
   ) ;; end of inline-stub
 
-(define-cproc make-window (title::<const-cstring> width::<int> height::<int> :key (resizable?::<boolean> #f) (icon #f) (shown?::<boolean> #t) (maximized?::<boolean> #f) (minimized?::<boolean> #f) (fullscreen?::<boolean> #f))
+(define-cproc make-window (title::<const-cstring> logical-width::<int> logical-height::<int> :key (resizable?::<boolean> #f) (icon #f) (shown?::<boolean> #t) (maximized?::<boolean> #f) (minimized?::<boolean> #f) (fullscreen?::<boolean> #f))
   (let* ((flags::Uint32 0))
     (when fullscreen?
       (set! flags (logior flags SDL_WINDOW_FULLSCREEN_DESKTOP)))
@@ -2160,8 +2148,8 @@
       (set! (-> gwin window) (SDL_CreateWindow title
                                                SDL_WINDOWPOS_UNDEFINED
                                                SDL_WINDOWPOS_UNDEFINED
-                                               width
-                                               height
+                                               logical-width
+                                               logical-height
                                                flags))
       (unless (-> gwin window)
         (Scm_Error "SDL_CreateWindow failed: %s" (SDL_GetError)))
@@ -2173,11 +2161,10 @@
       (unless (-> gwin renderer)
         (Scm_Error "SDL_CreateRenderer failed: %s" (SDL_GetError)))
 
-      (let* ((actual-width::int)
-             (actual-height::int))
-        (SDL_GetWindowSize (-> gwin window) (& actual-width) (& actual-height))
-        (compute-transform-param (& (-> gwin param)) actual-width actual-height 0 0 (- width 1) (- height 1) true)
-        (set-window-resolution! gwin actual-width actual-height width height))
+      (let* ((physical-width::int)
+             (physical-height::int))
+        (SDL_GetWindowSize (-> gwin window) (& physical-width) (& physical-height))
+        (set-window-logical-size! gwin physical-width physical-height logical-width logical-height))
 
       (Scm_HashTableSet (SCM_HASH_TABLE (-> gwin handler-table))
                         'window-close
@@ -2193,13 +2180,6 @@
       (let* ((win (MAKE_GRV_WINDOW gwin)))
         (set! grv-windows (Scm_Cons win grv-windows))
         (return win)))))
-
-(define-cproc set-window-border! (gwin::<graviton-window> top::<double> right::<double> bottom::<double> left::<double>)
-  ::<void>
-  (let* ((width::int)
-         (height::int))
-    (SDL_GetWindowSize (-> gwin window) (& width) (& height))
-    (compute-transform-param (& (-> gwin param)) width height left top right bottom true)))
 
 (define-cproc clear-window-sprites! (gwin::<graviton-window>)
   ::<void>
@@ -2230,48 +2210,40 @@
           (ref event window event) SDL_WINDOWEVENT_CLOSE)
     (SDL_PushEvent (& event))))
 
-(define-cproc window-size (gwin::<graviton-window>)
+(define-cproc window-physical-size (gwin::<graviton-window>)
   ::(<int> <int>)
   (let* ((w::int)
          (h::int))
     (SDL_GetWindowSize (-> gwin window) (& w) (& h))
     (return w h)))
 
-(define (window-width window)
-  (values-ref (window-size window) 0))
+(define (window-physical-width window)
+  (values-ref (window-physical-size window) 0))
 
-(define (window-height window)
-  (values-ref (window-size window) 1))
+(define (window-physical-height window)
+  (values-ref (window-physical-size window) 1))
 
-(define-cproc set-window-size! (gwin::<graviton-window> width::<int> height::<int>)
+(define-cproc set-window-physical-size! (gwin::<graviton-window> physical-width::<int> physical-height::<int>)
   ::<void>
-  (SDL_SetWindowSize (-> gwin window) width height)
-  (compute-transform-param (& (-> gwin param))
-                           width
-                           height
-                           (ref (-> gwin param) left)
-                           (ref (-> gwin param) top)
-                           (ref (-> gwin param) right)
-                           (ref (-> gwin param) bottom)
-                           true)
-  (set-window-resolution! gwin width height (-> gwin virtual-width) (-> gwin virtual-height)))
+  (SDL_SetWindowSize (-> gwin window) physical-width physical-height)
+  (set-window-logical-size! gwin physical-width physical-height (-> gwin logical-width) (-> gwin logical-height)))
 
-(define-cproc window-resolution (gwin::<graviton-window>)
+(define-cproc window-logical-size (gwin::<graviton-window>)
   ::(<int> <int>)
-  (return (-> gwin virtual-width) (-> gwin virtual-height)))
+  (return (-> gwin logical-width) (-> gwin logical-height)))
 
-(define (window-resolution-width window)
-  (values-ref (window-resolution window) 0))
+(define (window-logical-width window)
+  (values-ref (window-logical-size window) 0))
 
-(define (window-resolution-height window)
-  (values-ref (window-resolution window) 1))
+(define (window-logical-height window)
+  (values-ref (window-logical-size window) 1))
 
-(define-cproc set-window-resolution! (gwin::<graviton-window> virtual-width::<int> virtual-height::<int>)
+(define-cproc set-window-logical-size! (gwin::<graviton-window> logical-width::<int> logical-height::<int>)
   ::<void>
-  (let* ((actual-width::int)
-         (actual-height::int))
-    (SDL_GetWindowSize (-> gwin window) (& actual-width) (& actual-height))
-    (set-window-resolution! gwin actual-width actual-height virtual-width virtual-height)))
+  (let* ((physical-width::int)
+         (physical-height::int))
+    (SDL_GetWindowSize (-> gwin window) (& physical-width) (& physical-height))
+    (set-window-logical-size! gwin physical-width physical-height logical-width logical-height)))
 
 (define-cproc window-fullscreen? (gwin::<graviton-window>)
   ::<boolean>
@@ -2382,17 +2354,9 @@
     (else
      (Scm_Error "<graviton-image> required, but got %S" icon))))
 
-(define-cproc reflect-resized-window-parameter (gwin::<graviton-window> actual-width::<int> actual-height::<int>)
+(define-cproc reflect-resized-window-parameter (gwin::<graviton-window> physical-width::<int> physical-height::<int>)
   ::<void>
-  (compute-transform-param (& (-> gwin param))
-                           actual-width
-                           actual-height
-                           (ref (-> gwin param) left)
-                           (ref (-> gwin param) top)
-                           (ref (-> gwin param) right)
-                           (ref (-> gwin param) bottom)
-                           true)
-  (set-window-resolution! gwin actual-width actual-height (-> gwin virtual-width) (-> gwin virtual-height)))
+  (set-window-logical-size! gwin physical-width physical-height (-> gwin logical-width) (-> gwin logical-height)))
 
 (define-cproc window-handler-table (gwin::<graviton-window>)
   (return (-> gwin handler-table)))
@@ -2939,57 +2903,54 @@
 ;;; Image & Window coordinate utilities
 ;;;
 
-(define-cproc pixel-size (window-or-image)
+(define-cproc pixel-size (gimage::<graviton-image>)
   ::(<double> <double>)
-  (cond
-    ((GRV_IMAGE_P window-or-image)
-     (return (image-pixel-width (GRV_IMAGE_PTR window-or-image))
-             (image-pixel-height (GRV_IMAGE_PTR window-or-image))))
-    ((GRV_WINDOW_P window-or-image)
-     (return (window-pixel-width (GRV_WINDOW_PTR window-or-image))
-             (window-pixel-height (GRV_WINDOW_PTR window-or-image))))
-    (else
-     (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
+  (return (image-pixel-width gimage)
+          (image-pixel-height gimage)))
 
-(define (pixel-width window-or-image)
-  (values-ref (pixel-size window-or-image) 0))
+(define (pixel-width image)
+  (values-ref (pixel-size image) 0))
 
-(define (pixel-height window-or-image)
-  (values-ref (pixel-size window-or-image) 1))
+(define (pixel-height image)
+  (values-ref (pixel-size image) 1))
 
-(define-cproc border-left (window-or-image)
+(define-cproc border-left (gimage::<graviton-image>)
   ::<double>
-  (return (-> (get-transform-param window-or-image) left)))
+  (return (ref (-> gimage param) left)))
 
-(define-cproc border-top (window-or-image)
+(define-cproc border-top (gimage::<graviton-image>)
   ::<double>
-  (return (-> (get-transform-param window-or-image) top)))
+  (return (ref (-> gimage param) top)))
 
-(define-cproc border-right (window-or-image)
+(define-cproc border-right (gimage::<graviton-image>)
   ::<double>
-  (return (-> (get-transform-param window-or-image) right)))
+  (return (ref (-> gimage param) right)))
 
-(define-cproc border-bottom (window-or-image)
+(define-cproc border-bottom (gimage::<graviton-image>)
   ::<double>
-  (return (-> (get-transform-param window-or-image) bottom)))
+  (return (ref (-> gimage param) bottom)))
 
 (define-cproc center-point (window-or-image)
   ::<list>
-  (let* ((param::TransformParam* (get-transform-param window-or-image)))
-    (return (SCM_LIST2 (Scm_MakeFlonum (/ (+ (-> param left) (-> param right)) 2.0))
-                       (Scm_MakeFlonum (/ (+ (-> param top) (-> param bottom)) 2.0))))))
+  (cond
+    ((GRV_IMAGE_P window-or-image)
+     (let* ((param::TransformParam* (& (-> (GRV_IMAGE_PTR window-or-image) param))))
+       (return (SCM_LIST2 (Scm_MakeFlonum (/ (+ (-> param left) (-> param right)) 2.0))
+                          (Scm_MakeFlonum (/ (+ (-> param top) (-> param bottom)) 2.0))))))
+    ((GRV_WINDOW_P window-or-image)
+     (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR window-or-image)))
+       (return (SCM_LIST2 (Scm_MakeFlonum (/ (-> gwin logical-width) 2.0))
+                          (Scm_MakeFlonum (/ (-> gwin logical-height) 2.0))))))
+    (else
+     (Scm_Error "<graviton-window> or <graviton-image> required, but got %S" window-or-image))))
 
-(define-cproc center-x (window-or-image)
-  ::<double>
-  (let* ((param::TransformParam* (get-transform-param window-or-image)))
-    (return (/ (+ (-> param left) (-> param right)) 2.0))))
+(define (center-x window-or-image)
+  (list-ref (center-point window-or-image) 0))
 
-(define-cproc center-y (window-or-image)
-  ::<double>
-  (let* ((param::TransformParam* (get-transform-param window-or-image)))
-    (return (/ (+ (-> param top) (-> param bottom)) 2.0))))
+(define (center-y window-or-image)
+  (list-ref (center-point window-or-image) 1))
 
-(define (set-border! window-or-image v0 :optional (v1 #f) (v2 #f) (v3 #f))
+(define (set-border! image v0 :optional (v1 #f) (v2 #f) (v3 #f))
   (let ((top #f)
         (bottom #f)
         (left #f)
@@ -3015,25 +2976,19 @@
        (set! right v1)
        (set! bottom v2)
        (set! left v3)))
-    (cond
-      ((window? window-or-image)
-       (set-window-border! window-or-image top right bottom left))
-      ((image? window-or-image)
-       (set-image-border! window-or-image top right bottom left))
-      (else
-       (errorf "<graviton-window> or <graviton-image> required, but got %S" window-or-image)))))
+    (set-image-border! image top right bottom left)))
 
-(define (border-min-x window-or-image)
-  (min (border-left window-or-image) (border-right window-or-image)))
+(define (border-min-x image)
+  (min (border-left image) (border-right image)))
 
-(define (border-max-x window-or-image)
-  (max (border-left window-or-image) (border-right window-or-image)))
+(define (border-max-x image)
+  (max (border-left image) (border-right image)))
 
-(define (border-min-y window-or-image)
-  (min (border-top window-or-image) (border-bottom window-or-image)))
+(define (border-min-y image)
+  (min (border-top image) (border-bottom image)))
 
-(define (border-max-y window-or-image)
-  (max (border-top window-or-image) (border-bottom window-or-image)))
+(define (border-max-y image)
+  (max (border-top image) (border-bottom image)))
 
 
 ;;;
@@ -3569,14 +3524,14 @@ typedef enum {
       (on-text-input win (text)
         (cond
           ((equal? text "+")
-           (let ((w (* (window-width win) 2))
-                 (h (* (window-height win) 2)))
-             (set-window-size! win w h)))
+           (let ((w (* (window-physical-width win) 2))
+                 (h (* (window-physical-height win) 2)))
+             (set-window-physical-size! win w h)))
           ((equal? text "-")
-           (let ((w (/ (window-width win) 2))
-                 (h (/ (window-height win) 2)))
+           (let ((w (/ (window-physical-width win) 2))
+                 (h (/ (window-physical-height win) 2)))
              (when (and (<= (image-width image) w) (<= (image-height image) h))
-               (set-window-size! win w h)))))))))
+               (set-window-physical-size! win w h)))))))))
 
 
 ;;;

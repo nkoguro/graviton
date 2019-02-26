@@ -21,8 +21,8 @@
   (%make-ball (make-sprite win
                            :image img
                            :z z
-                           :center (list (random-integer (floor->exact (border-right win)))
-                                         (random-integer (floor->exact (border-bottom win))))
+                           :center (list (random-integer (window-logical-width win))
+                                         (random-integer (window-logical-height win)))
                            :color (rgba (+ (random-integer #xff) 1)
                                         (+ (random-integer #xff) 1)
                                         (+ (random-integer #xff) 1)
@@ -40,13 +40,13 @@
                     (let ((x (+ (point-x (sprite-center (ball-sprite ball))) (* (ball-vx ball) (frame-duration))))
                           (y (+ (point-y (sprite-center (ball-sprite ball))) (* (ball-vy ball) (frame-duration)))))
                       (cond
-                        ((and (<= 0 x (border-right win))
-                              (<= 0 y (border-bottom win)))
+                        ((and (<= 0 x (- (window-logical-width win) 1))
+                              (<= 0 y (- (window-logical-height win) 1)))
                          (set! (sprite-center (ball-sprite ball)) (list x y)))
                         (else
-                         (unless (<= 0 x (border-right win))
+                         (unless (<= 0 x (- (window-logical-width win) 1))
                            (ball-vx-set! ball (- (ball-vx ball))))
-                         (unless (<= 0 y (border-bottom win))
+                         (unless (<= 0 y (- (window-logical-height win) 1))
                            (ball-vy-set! ball (- (ball-vy ball))))))))
                   balls))
       (on-key-down win (scan key mod repeat?)
