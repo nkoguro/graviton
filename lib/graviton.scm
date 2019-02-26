@@ -197,6 +197,12 @@
           sprite-visible?
           set-sprite-color!
           sprite-color
+          set-sprite-clip!
+          sprite-clip
+          sprite-clip-x
+          sprite-clip-y
+          sprite-clip-width
+          sprite-clip-height
 
           make-tile-map
           tile-map-tile-index
@@ -302,7 +308,8 @@
                               zoom-x::double
                               zoom-y::double
                               visible::bool
-                              color::Uint32)))
+                              color::Uint32
+                              clip::SDL_Rect*)))
 
    (define-ctype GrvWindow::(.struct
                              (window::SDL_Window*
@@ -1300,6 +1307,14 @@
             (Scm_Error "SDL_SetTextureColorMod failed: %s" (SDL_GetError)))
           (when (< (SDL_SetTextureBlendMode texture SDL_BLENDMODE_BLEND) 0)
             (Scm_Error "SDL_SetTextureBlendMode failed: %s" (SDL_GetError)))
+          (let* ((clip::SDL_Rect* NULL))
+            (cond
+              ((-> gsprite clip)
+               (set! clip (-> gsprite clip)))
+              ((-> gwin clip)
+               (set! clip (-> gwin clip))))
+            (when (< (SDL_RenderSetClipRect (-> gwin renderer) clip) 0)
+              (Scm_Error "SDL_RenderSetClipRect failed: %s" (SDL_GetError))))
           (when (< (SDL_RenderCopyEx (-> gwin renderer)
                                      texture
                                      (-> gsprite srcrect)
@@ -1371,7 +1386,8 @@
             (-> gsprite zoom-x) zoom-x
             (-> gsprite zoom-y) zoom-y
             (-> gsprite visible) visible?
-            (-> gsprite color) color)
+            (-> gsprite color) color
+            (-> gsprite clip) NULL)
       (let* ((sprite (MAKE_GRV_SPRITE gsprite)))
         (Scm_RegisterFinalizer sprite finalize-sprite NULL)
         (insert-window-sprite sprite)
@@ -1547,6 +1563,57 @@
 (define-cproc sprite-color (gsprite::<graviton-sprite>)
   ::<uint32>
   (return (-> gsprite color)))
+
+(define-cproc set-sprite-clip! (gsprite::<graviton-sprite> x::<int> y::<int> w::<int> h::<int>)
+  ::<void>
+  (let* ((clip::SDL_Rect* (SCM_NEW SDL_Rect)))
+    (set! (-> clip x) x
+          (-> clip y) y
+          (-> clip w) w
+          (-> clip h) h
+          (-> gsprite clip) clip)))
+
+(define-cproc sprite-clip-x (gsprite::<graviton-sprite>)
+  ::<top>
+  (let* ((clip::SDL_Rect* (-> gsprite clip)))
+    (cond
+      (clip
+       (return (SCM_MAKE_INT (-> clip x))))
+      (else
+       (return SCM_FALSE)))))
+
+(define-cproc sprite-clip-y (gsprite::<graviton-sprite>)
+  ::<top>
+  (let* ((clip::SDL_Rect* (-> gsprite clip)))
+    (cond
+      (clip
+       (return (SCM_MAKE_INT (-> clip y))))
+      (else
+       (return SCM_FALSE)))))
+
+(define-cproc sprite-clip-width (gsprite::<graviton-sprite>)
+  ::<top>
+  (let* ((clip::SDL_Rect* (-> gsprite clip)))
+    (cond
+      (clip
+       (return (SCM_MAKE_INT (-> clip w))))
+      (else
+       (return SCM_FALSE)))))
+
+(define-cproc sprite-clip-height (gsprite::<graviton-sprite>)
+  ::<top>
+  (let* ((clip::SDL_Rect* (-> gsprite clip)))
+    (cond
+      (clip
+       (return (SCM_MAKE_INT (-> clip h))))
+      (else
+       (return SCM_FALSE)))))
+
+(define (sprite-clip sprite)
+  (values (sprite-clip-x sprite)
+          (sprite-clip-y sprite)
+          (sprite-clip-width sprite)
+          (sprite-clip-height sprite)))
 
 
 ;;;
@@ -2086,9 +2153,7 @@
                   (SDL_SetRenderDrawBlendMode renderer SDL_BLENDMODE_BLEND)
                   (SDL_SetRenderDrawColor renderer 0 0 0 255)
                   (SDL_RenderClear renderer)
-                  (when (and (-> gwin clip)
-                             (< (SDL_RenderSetClipRect (-> gwin renderer) (-> gwin clip)) 0))
-                    (Scm_Error "SDL_RenderSetClipRect failed: %s" (SDL_GetError)))
+                  
                   (for-each (lambda (sprite)
                               (render-sprite (GRV_SPRITE_PTR sprite)))
                             (-> gwin sprites))
