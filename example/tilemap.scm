@@ -10,7 +10,7 @@
     (let* ((win (make-window *program-name* 640 480 :fullscreen? #t))
            (img (load-image (build-path *script-dir* "font_8x16.png")))
            (tiles (divide-image img 8 16))
-           (tilemap (make-tile-map win tiles 80 30 '(320 240)))
+           (tilemap (make-tile-map win tiles 80 30 320 240))
            (out (tile-map->output-port tilemap)))
       (display "System colors:\n" out)
       (do-ec (: color 0 8)

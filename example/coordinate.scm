@@ -6,7 +6,7 @@
     (draw-line img `((,(border-left img) 0) (,(border-right img) 0)) (color 'aqua))
     (draw-line img `((0 ,(border-top img)) (0 ,(border-bottom img))) (color 'aqua))
     (draw-line img
-               (map (^x (make-point x (* 2 (sin x))))
+               (map (^x (list x (* 2 (sin x))))
                     (iota (+ (* (- (border-right img) (border-left img)) 10) 1) (border-left img) 0.1))
                (color 'white))
     (display-image img))

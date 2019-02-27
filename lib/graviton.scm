@@ -55,12 +55,6 @@
           <graviton-tile-map>
           <graviton-future>
 
-          <point>
-          make-point
-          point?
-          point-x
-          point-y
-
           async
           async*
           async-apply
@@ -185,8 +179,10 @@
           make-sprite
           set-sprite-image!
           sprite-image
-          set-sprite-center!
-          sprite-center
+          set-sprite-x!
+          sprite-x
+          set-sprite-y!
+          sprite-y
           set-sprite-z!
           sprite-z
           set-sprite-angle!
@@ -1397,7 +1393,8 @@
 (define-cproc make-sprite (window
                            :key
                            (image #f)
-                           center
+                           (x::<double> 0.0)
+                           (y::<double> 0.0)
                            (z::<double> 0.0)
                            (angle::<double> 0.0)
                            zoom
@@ -1409,11 +1406,6 @@
               (GRV_IMAGE_P image)
               (GRV_TILE_IMAGE_P image))
     (Scm_Error "image must be <graviton-image>, <graviton-tile-image> or #f, but got %S" image))
-  (unless (or (SCM_UNBOUNDP center)
-              (and (SCM_LISTP center)
-                   (SCM_REALP (Scm_ListRef center 0 SCM_UNBOUND))
-                   (SCM_REALP (Scm_ListRef center 1 SCM_UNBOUND))))
-    (Scm_Error "center must be (<real> <real>), but got %S" center))
   (unless (or (SCM_UNBOUNDP zoom)
               (SCM_REALP zoom)
               (and (SCM_LISTP zoom)
@@ -1423,14 +1415,9 @@
 
   (let* ((gsprite::GrvSprite* (SCM_NEW (.type GrvSprite)))
          (sprite-image SCM_FALSE)
-         (center-x::double 0.0)
-         (center-y::double 0.0)
          (zoom-x::double 1.0)
          (zoom-y::double 1.0)
          (srcrect::SDL_Rect* NULL))
-    (when (SCM_LISTP center)
-      (set! center-x (Scm_GetDouble (Scm_ListRef center 0 SCM_UNBOUND))
-            center-y (Scm_GetDouble (Scm_ListRef center 1 SCM_UNBOUND))))
     (cond
       ((SCM_REALP zoom)
        (set! zoom-x (Scm_GetDouble zoom)
@@ -1451,7 +1438,7 @@
        (set! sprite-image (-> (GRV_TILE_IMAGE_PTR image) image)
              srcrect (& (-> (GRV_TILE_IMAGE_PTR image) rect)))))
 
-    (return (make-sprite window sprite-image center-x center-y z srcrect angle zoom-x zoom-y visible? color))))
+    (return (make-sprite window sprite-image x y z srcrect angle zoom-x zoom-y visible? color))))
 
 (define-cproc set-sprite-image! (gsprite::<graviton-sprite> image)
   ::<void>
@@ -1487,18 +1474,21 @@
   ::<top>
   (return (-> gsprite image)))
 
-(define-cproc set-sprite-center! (gsprite::<graviton-sprite> center)
+(define-cproc set-sprite-x! (gsprite::<graviton-sprite> x::<double>)
   ::<void>
-  (unless (and (SCM_LISTP center)
-               (SCM_REALP (Scm_ListRef center 0 SCM_UNBOUND))
-               (SCM_REALP (Scm_ListRef center 1 SCM_UNBOUND)))
-    (Scm_Error "center must be (<real> <real>), but got %S" center))
-  (set! (-> gsprite center-x) (Scm_GetDouble (Scm_ListRef center 0 SCM_UNBOUND))
-        (-> gsprite center-y) (Scm_GetDouble (Scm_ListRef center 1 SCM_UNBOUND))))
+  (set! (-> gsprite center-x) x))
 
-(define-cproc sprite-center (gsprite::<graviton-sprite>)
-  ::<list>
-  (return (SCM_LIST2 (Scm_MakeFlonum (-> gsprite center-x)) (Scm_MakeFlonum (-> gsprite center-y)))))
+(define-cproc sprite-x (gsprite::<graviton-sprite>)
+  ::<double>
+  (return (-> gsprite center-x)))
+
+(define-cproc set-sprite-y! (gsprite::<graviton-sprite> y::<double>)
+  ::<void>
+  (set! (-> gsprite center-y) y))
+
+(define-cproc sprite-y (gsprite::<graviton-sprite>)
+  ::<double>
+  (return (-> gsprite center-y)))
 
 (define-cproc set-sprite-z! (sprite z::<double>)
   ::<void>
@@ -1694,7 +1684,7 @@
                     fg-color))))))
   ) ;; end of inline-stub
 
-(define-cproc make-tile-map (window tile-images::<vector> columns::<int> rows::<int> center :key (z::<double> 0) (fill::<uint32> 0))
+(define-cproc make-tile-map (window tile-images::<vector> columns::<int> rows::<int> x::<double> y::<double> :key (z::<double> 0) (fill::<uint32> 0))
   ::<graviton-tile-map>
   (let* ((gtilemap::GrvTileMap* (SCM_NEW GrvTileMap))
          (size::int (* columns rows))
@@ -1735,7 +1725,8 @@
           sprite (Scm_EvalRec (Scm_List 'make-sprite
                                         window
                                         ':image (-> gtilemap image)
-                                        ':center (SCM_LIST2 'quote center)
+                                        ':x (Scm_MakeFlonum x)
+                                        ':y (Scm_MakeFlonum y)
                                         ':z (Scm_MakeFlonum z)
                                         NULL)
                               graviton-module))
@@ -2153,7 +2144,7 @@
                   (SDL_SetRenderDrawBlendMode renderer SDL_BLENDMODE_BLEND)
                   (SDL_SetRenderDrawColor renderer 0 0 0 255)
                   (SDL_RenderClear renderer)
-                  
+
                   (for-each (lambda (sprite)
                               (render-sprite (GRV_SPRITE_PTR sprite)))
                             (-> gwin sprites))
@@ -3249,18 +3240,20 @@ typedef enum {
     (update-rect gimage (?: (< x0 x1) x0 x1) (?: (< y0 y1) y0 y1) (+ (abs (- x0 x1)) 1) (+ (abs (- y0 y1)) 1)))
   )  ;; end of inline-stub
 
-(define-cproc %draw-rect (gimage::<graviton-image> point0::<list> point1::<list> color::<int> fill?::<boolean>)
+(define-cproc %draw-rect (gimage::<graviton-image> x::<double> y::<double> w::<double> h::<double> color::<int> fill?::<boolean>)
   ::<void>
-  (let* ((x0::double (Scm_GetDouble (Scm_ListRef point0 0 SCM_UNBOUND)))
-         (y0::double (Scm_GetDouble (Scm_ListRef point0 1 SCM_UNBOUND)))
-         (x1::double (Scm_GetDouble (Scm_ListRef point1 0 SCM_UNBOUND)))
-         (y1::double (Scm_GetDouble (Scm_ListRef point1 1 SCM_UNBOUND)))
+  (let* ((x0::double x)
+         (y0::double y)
+         (x1::double (+ x w))
+         (y1::double (+ y h))
          (ix0::int)
          (iy0::int)
          (ix1::int)
          (iy1::int))
     (image-coordinate gimage x0 y0 (& ix0) (& iy0))
     (image-coordinate gimage x1 y1 (& ix1) (& iy1))
+    (set! ix1 (- ix1 1)
+          iy1 (- iy1 1))
     (cond
       (fill?
        (fill-rect gimage ix0 iy0 ix1 iy1 color))
@@ -3370,22 +3363,22 @@ typedef enum {
            (scratch-fill-border! area)
            (fill-inside gimage area color)))))))
 
-(define (draw-point image point color :key (thickness 0))
+(define (draw-point image x y color :key (thickness 0))
   (cond
     ((= thickness 0)
-     (draw-rect image point point color))
+     (draw-rect image x y (pixel-width image) (pixel-height image) color))
     (else
-     (draw-circle image point (/. thickness 2) color :fill? #t))))
+     (draw-circle image x y (/. thickness 2) color :fill? #t))))
 
-(define (draw-rect image point0 point1 color :key (fill? #f) (thickness 0))
+(define (draw-rect image x y w h color :key (fill? #f) (thickness 0))
   (cond
     ((= thickness 0)
-     (%draw-rect image point0 point1 color fill?))
+     (%draw-rect image x y w h color fill?))
     (else
-     (let ((x0 (point-x point0))
-           (y0 (point-y point0))
-           (x1 (point-x point1))
-           (y1 (point-y point1)))
+     (let ((x0 x)
+           (y0 y)
+           (x1 (+ x w))
+           (y1 (+ x h)))
        (draw-polygon image
                      (list (make-point x0 y0)
                            (make-point x0 y1)
@@ -3402,7 +3395,7 @@ typedef enum {
   ((null? points)
    #f)
   (else
-   (draw-point image (car points) color :thickness thickness)
+   (draw-point image (point-x (car points)) (point-y (car points)) color :thickness thickness)
    (let loop ((point0 (car points))
               (points (cdr points)))
      (cond
@@ -3429,7 +3422,7 @@ typedef enum {
                               (make-point x10 y10))
                         color
                         :fill? #t)
-          (draw-point image (make-point x1 y1) color :thickness thickness)
+          (draw-point image x1 y1 color :thickness thickness)
           (loop (car points) (cdr points))))
        ((< (abs (- (point-x point0) (point-x (car points)))) (pixel-width image))
         (let* ((x0 (point-x point0))
@@ -3452,7 +3445,7 @@ typedef enum {
                               (make-point x10 y10))
                         color
                         :fill? #t)
-          (draw-point image (make-point x1 y1) color :thickness thickness)
+          (draw-point image x1 y1 color :thickness thickness)
           (loop (car points) (cdr points))))
        (else
         (let* ((x0 (point-x point0))
@@ -3476,7 +3469,7 @@ typedef enum {
                               (make-point x10 y10))
                         color
                         :fill? #t)
-          (draw-point image (make-point x1 y1) color :thickness thickness)
+          (draw-point image x1 y1 color :thickness thickness)
           (loop (car points) (cdr points)))))))))
 
 (define (draw-polygon image points color :key (fill? #f) (thickness 0))
@@ -3491,7 +3484,8 @@ typedef enum {
        (%draw-polygon image points color #t)))))
 
 (define (draw-circle image
-                     center-point
+                     center-x
+                     center-y
                      radius
                      color
                      :key
@@ -3502,38 +3496,36 @@ typedef enum {
                      (fill? #f)
                      (draw-radius? (if angle #t #f))
                      (thickness 0))
-  (let ((center-x (point-x center-point))
-        (center-y (point-y center-point)))
-    (define rotate-point
-      (let ((m00 (cos rotate))
-            (m01 (- (sin rotate)))
-            (m10 (sin rotate))
-            (m11 (cos rotate)))
-        (lambda (x y)
-          (let ((x1 (- x center-x))
-                (y1 (- y center-y)))
-            (make-point (+ (* m00 x1) (* m01 y1) center-x)
-                        (+ (* m10 x1) (* m11 y1) center-y))))))
+  (define rotate-point
+    (let ((m00 (cos rotate))
+          (m01 (- (sin rotate)))
+          (m10 (sin rotate))
+          (m11 (cos rotate)))
+      (lambda (x y)
+        (let ((x1 (- x center-x))
+              (y1 (- y center-y)))
+          (make-point (+ (* m00 x1) (* m01 y1) center-x)
+                      (+ (* m10 x1) (* m11 y1) center-y))))))
 
-    (let ((dt (/ pi/2 (/ radius (receive (w h) (pixel-size image)
-                                  (min w h)))))
-          (et (+ start (or angle (* 2 pi)))))
-      (let loop ((t start)
-                 (points (if (or draw-radius?
-                                 (and angle fill?))
-                             (list center-point)
-                             '())))
-        (cond
-          ((<= et t)
-           (let ((x (+ center-x (* radius (cos et))))
-                 (y (+ center-y (* (* radius radius-ratio) (sin et)))))
-             (if (or draw-radius? fill?)
-                 (draw-polygon image (cons (rotate-point x y) points) color :fill? fill? :thickness thickness)
-                 (draw-line image (cons (rotate-point x y) points) color :thickness thickness))))
-          (else
-           (let ((x (+ center-x (* radius (cos t))))
-                 (y (+ center-y (* (* radius radius-ratio) (sin t)))))
-             (loop (+ t dt) (cons (rotate-point x y) points)))))))))
+  (let ((dt (/ pi/2 (/ radius (receive (w h) (pixel-size image)
+                                (min w h)))))
+        (et (+ start (or angle (* 2 pi)))))
+    (let loop ((t start)
+               (points (if (or draw-radius?
+                               (and angle fill?))
+                           (list center-point)
+                           '())))
+      (cond
+        ((<= et t)
+         (let ((x (+ center-x (* radius (cos et))))
+               (y (+ center-y (* (* radius radius-ratio) (sin et)))))
+           (if (or draw-radius? fill?)
+               (draw-polygon image (cons (rotate-point x y) points) color :fill? fill? :thickness thickness)
+               (draw-line image (cons (rotate-point x y) points) color :thickness thickness))))
+        (else
+         (let ((x (+ center-x (* radius (cos t))))
+               (y (+ center-y (* (* radius radius-ratio) (sin t)))))
+           (loop (+ t dt) (cons (rotate-point x y) points))))))))
 
 
 ;;;
@@ -3579,7 +3571,7 @@ typedef enum {
                              (image-height image)
                              :resizable? resizable?
                              :fullscreen? fullscreen?))
-           (sprite (make-sprite win :image image :center (center-point win))))
+           (sprite (make-sprite win :image image :x (center-x win) :y (center-y win))))
       (on-key-up win (scancode sym mod repeat?)
         (case scancode
           ((escape)
@@ -3612,7 +3604,8 @@ typedef enum {
 (set! (setter window-minimized?) set-window-minimized!)
 
 (set! (setter sprite-image) set-sprite-image!)
-(set! (setter sprite-center) set-sprite-center!)
+(set! (setter sprite-x) set-sprite-x!)
+(set! (setter sprite-y) set-sprite-y!)
 (set! (setter sprite-z) set-sprite-z!)
 (set! (setter sprite-angle) set-sprite-angle!)
 (set! (setter sprite-zoom) set-sprite-zoom!)

@@ -20,9 +20,9 @@
 (define (make-ball win img z)
   (%make-ball (make-sprite win
                            :image img
+                           :x (random-integer (window-logical-width win))
+                           :y (random-integer (window-logical-height win))
                            :z z
-                           :center (list (random-integer (window-logical-width win))
-                                         (random-integer (window-logical-height win)))
                            :color (rgba (+ (random-integer #xff) 1)
                                         (+ (random-integer #xff) 1)
                                         (+ (random-integer #xff) 1)
@@ -37,12 +37,13 @@
            (balls (map (^z (make-ball win img z)) (iota 1000))))
       (on-update win ()
         (for-each (lambda (ball)
-                    (let ((x (+ (point-x (sprite-center (ball-sprite ball))) (* (ball-vx ball) (frame-duration))))
-                          (y (+ (point-y (sprite-center (ball-sprite ball))) (* (ball-vy ball) (frame-duration)))))
+                    (let ((x (+ (sprite-x (ball-sprite ball)) (* (ball-vx ball) (frame-duration))))
+                          (y (+ (sprite-y (ball-sprite ball)) (* (ball-vy ball) (frame-duration)))))
                       (cond
                         ((and (<= 0 x (- (window-logical-width win) 1))
                               (<= 0 y (- (window-logical-height win) 1)))
-                         (set! (sprite-center (ball-sprite ball)) (list x y)))
+                         (set-sprite-x! (ball-sprite ball) x)
+                         (set-sprite-y! (ball-sprite ball) y))
                         (else
                          (unless (<= 0 x (- (window-logical-width win) 1))
                            (ball-vx-set! ball (- (ball-vx ball))))
@@ -55,4 +56,5 @@
            (destroy-window win))
           ((f)
            (set! (window-fullscreen? win) (not (window-fullscreen? win))))))
-      )))
+      ))
+  0)
