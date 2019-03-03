@@ -242,6 +242,11 @@
 
           message-box
 
+          make-soundlet
+          compose-soundlets
+          append-soundlet!
+          play-soundlet
+
           graviton-read-eval-print-loop
           )
 
@@ -356,6 +361,50 @@
                               message::char*
                               continuation
                               consumed?::bool)))
+   "
+typedef enum {
+    SOUNDLET_TONE = 1,
+    SOUNDLET_COMPOSITE = 2,
+} SoundletType;
+
+struct GrvSoundletRec;
+
+typedef struct {
+    double *freqs;
+    double *amps;
+    int num_freqs;
+    double left_volume;
+    double right_volume;
+    int length;
+    // TODO: Add envelope.
+} GrvToneSoundlet;
+
+typedef struct {
+    struct GrvSoundletRec **children;
+    int num_children;
+} GrvCompositeSoundlet;
+
+typedef struct GrvSoundletRec {
+    struct GrvSoundletRec *next;
+    SoundletType type;
+    union {
+        GrvToneSoundlet* tone;
+        GrvCompositeSoundlet* composite;
+    } data;
+} GrvSoundlet;
+
+struct GrvSoundletPointerRec;;
+
+typedef struct GrvSoundletPointerRec {
+    int start_position;
+    GrvSoundlet *soundlet;
+    struct GrvSoundletPointerRec **children;
+    int num_children;
+} GrvSoundletPointer;
+"
+   (define-ctype GrvSoundContext::(.struct
+                                   (position::int
+                                    pointer::GrvSoundletPointer*)))
    ) ;; end of declcode
 
   (define-cvar main-thread-id::SDL_threadID :static)
@@ -393,8 +442,12 @@
   (define-cptr <graviton-future> :private
     "GrvFuture*" "GravitonFutureClass" "GRV_FUTURE_P" "MAKE_GRV_FUTURE" "GRV_FUTURE_PTR")
 
+  (define-cptr <graviton-soundlet> :private
+    "GrvSoundlet*" "GravitonSoundletClass" "GRV_SOUNDLET_P" "MAKE_GRV_SOUNDLET" "GRV_SOUNDLET_PTR")
+
   (.define GRAVITON_EXCEPTION_CODE 1)
   (.define GRAVITON_UNCAUGHT_EXCEPTION_CODE 2)
+  (.define GRAVITON_MUSIC_FINISH_CODE 3)
   )  ;; end of inline-stub
 
 (inline-stub
@@ -409,7 +462,7 @@
     ::void
     (SDL_Init (logior SDL_INIT_VIDEO SDL_INIT_AUDIO))
     (Mix_Init (logior MIX_INIT_FLAC MIX_INIT_MOD MIX_INIT_MP3 MIX_INIT_OGG))
-    (when (Mix_OpenAudio 44100 MIX_DEFAULT_FORMAT 2 1024)
+    (when (Mix_OpenAudio 44100 MIX_DEFAULT_FORMAT 2 2048)
       (Scm_Error "Mix_OpenAudio failed: %s" (Mix_GetError)))
     (IMG_Init (logior IMG_INIT_JPG IMG_INIT_PNG IMG_INIT_TIF))
 
@@ -2729,6 +2782,8 @@
              (Scm_Write (SCM_OBJ (ref (-> sdl-event user) data1)) (SCM_OBJ SCM_CURERR) SCM_WRITE_DISPLAY)
              (Scm_Printf SCM_CURERR "\n")
              (Scm_Error "async failed, but the exception wasn't caught."))
+            ((GRAVITON_MUSIC_FINISH_CODE)
+             (Mix_HookMusic NULL NULL))
             ) ;; end of case (for graviton-event-type)
           ))  ;; end of cond
        ))     ;; end of case
@@ -2804,7 +2859,11 @@
          (backlog-acc::int 0)
          (start-ticks::int (SDL_GetTicks))
          (last-frame-ticks::int))
-    (while (logior (not (SCM_NULLP grv-windows)) (is-repl-running?) (< 0 backlog))
+    (while (logior (not (SCM_NULLP grv-windows))
+                   (is-repl-running?)
+                   (< 0 backlog)
+                   (Mix_PlayingMusic)
+                   (!= (Mix_GetMusicHookData) NULL))
       (let* ((frame-ticks::int (+ start-ticks (* (+ frame 1) event-loop-ticks))))
         (set! last-frame-ticks (SDL_GetTicks))
 
@@ -3549,6 +3608,151 @@ typedef enum {
 
 (define (message-box title message :key (type 'info))
   (%message-box title message type))
+
+
+;;;
+;;; Music
+;;;
+
+(inline-stub
+ (define-cfn point-soundlet! (gpointer::GrvSoundletPointer* gsoundlet::GrvSoundlet* pos::int)
+   ::GrvSoundletPointer*
+   (set! (-> gpointer start-position) pos
+         (-> gpointer soundlet) gsoundlet
+         (-> gpointer children) NULL
+         (-> gpointer num-children) 0)
+   (when (and gsoundlet (== (-> gsoundlet type) SOUNDLET_COMPOSITE))
+     (let* ((gcomposite::GrvCompositeSoundlet* (ref (-> gsoundlet data) composite)))
+       (set! (-> gpointer num-children) (-> gcomposite num-children)
+             (-> gpointer children) (SCM_NEW_ARRAY (.type GrvSoundletPointer*) (-> gpointer num-children)))
+       (dotimes (i (-> gpointer num-children))
+         (set! (aref (-> gpointer children) i) (SCM_NEW (.type GrvSoundletPointer)))
+         (point-soundlet! (aref (-> gpointer children) i) (aref (-> gcomposite children) i) pos)))))
+
+ (define-cfn inc-buffer! (buf::int16_t* index::int dv::double)
+   ::void
+   (let* ((v::int (+ (aref buf index) (cast int (floor (* dv INT16_MAX))))))
+     (cond
+       ((< INT16_MAX v)
+        (set! (aref buf index) INT16_MAX))
+       ((< v INT16_MIN)
+        (set! (aref buf index) INT16_MIN))
+       (else
+        (set! (aref buf index) v)))))
+
+ (define-cfn render-tone (buf::int16_t* index::int pos::int gpointer::GrvSoundletPointer*)
+   ::bool
+   (let* ((gsoundlet::GrvSoundlet* (-> gpointer soundlet))
+          (gtone::GrvToneSoundlet* (ref (-> gsoundlet data) tone))
+          (rel-pos::int (- pos (-> gpointer start-position))))
+     (cond
+       ((< rel-pos (-> gtone length))
+        (let* ((v::double 0)
+               (t::double (/ rel-pos 44100.0)))
+          (dotimes (i (-> gtone num-freqs))
+            (set! v (+ v (* (aref (-> gtone amps) i) (sin (* 2 M_PI (aref (-> gtone freqs) i) t))))))
+          (inc-buffer! buf index (* (-> gtone left-volume) v))
+          (inc-buffer! buf (+ index 1) (* (-> gtone right-volume) v))
+          (return true)))
+       (else
+        (point-soundlet! gpointer (-> gsoundlet next) pos)
+        (return (render-soundlet buf index pos gpointer))))))
+
+ (define-cfn render-soundlet (buf::int16_t* index::int pos::int gpointer::GrvSoundletPointer*)
+   ::bool :static
+   (when (== (-> gpointer soundlet) NULL)
+     (return false))
+
+   (when (== (-> gpointer soundlet type) SOUNDLET_TONE)
+     (return (render-tone buf index pos gpointer)))
+
+   (let* ((num-finish::int 0))
+     (dotimes (i (-> gpointer num-children))
+       (unless (render-soundlet buf index pos (aref (-> gpointer children) i))
+         (inc! num-finish)))
+     (cond
+       ((== num-finish (-> gpointer num-children))
+        (point-soundlet! gpointer (-> gpointer soundlet next) pos)
+        (return (render-soundlet buf index pos gpointer)))
+       (else
+        (return true)))))
+
+ (define-cfn fill-audio-stream (udata::void* stream::Uint8* len::int)
+   ::void
+   (memset stream 0 len)
+
+   (let* ((buf::int16_t* (cast int16_t* stream))
+          (buf-length::int (/ len 2))
+          (index::int 0)
+          (gcontext::GrvSoundContext* (cast GrvSoundContext* udata))
+          (pos::int (-> gcontext position))
+          (pos-end::int (+ pos (/ buf-length 2)))
+          (gpointer::GrvSoundletPointer* (-> gcontext pointer)))
+     (while (< pos pos-end)
+       (unless (render-soundlet buf index pos gpointer)
+         (break))
+       (inc! pos)
+       (set! index (+ index 2)))
+     (set! (-> gcontext position) pos)
+
+     (unless (-> gpointer soundlet)
+       (let* ((event::SDL_Event))
+         (set! (ref event type) graviton-event-type
+               (ref event user code) GRAVITON_MUSIC_FINISH_CODE)
+         (SDL_PushEvent (& event))))))
+
+ ) ;; end of inline-stub
+
+(define-cproc make-soundlet (freqs::<f64vector> amps::<f64vector> left-volume::<double> right-volume::<double> sec::<double>)
+  ::<graviton-soundlet>
+  (unless (== (SCM_F64VECTOR_SIZE freqs) (SCM_F64VECTOR_SIZE amps))
+    (Scm_Error "freqs and amps must be the same size"))
+  (let* ((length::int (cast int (round (* 44100 sec))))
+         (gtone::GrvToneSoundlet* (SCM_NEW GrvToneSoundlet))
+         (gsoundlet::GrvSoundlet* (SCM_NEW GrvSoundlet)))
+    (set! (-> gtone freqs) (SCM_NEW_ATOMIC_ARRAY (.type double) (SCM_F64VECTOR_SIZE freqs))
+          (-> gtone amps) (SCM_NEW_ATOMIC_ARRAY (.type double) (SCM_F64VECTOR_SIZE amps))
+          (-> gtone num-freqs) (SCM_F64VECTOR_SIZE freqs)
+          (-> gtone left-volume) left-volume
+          (-> gtone right-volume) right-volume
+          (-> gtone length) length)
+    (memcpy (-> gtone freqs) (SCM_F64VECTOR_ELEMENTS freqs) (* (sizeof (.type double)) (SCM_F64VECTOR_SIZE freqs)))
+    (memcpy (-> gtone amps) (SCM_F64VECTOR_ELEMENTS amps) (* (sizeof (.type double)) (SCM_F64VECTOR_SIZE amps)))
+    (set! (-> gsoundlet next) NULL
+          (-> gsoundlet type) SOUNDLET_TONE
+          (ref (-> gsoundlet data) tone) gtone)
+    (return gsoundlet)))
+
+(define-cproc compose-soundlets (soundlets::<list>)
+  ::<graviton-soundlet>
+  (let* ((gcomposite::GrvCompositeSoundlet* (SCM_NEW GrvCompositeSoundlet))
+         (gsoundlet::GrvSoundlet* (SCM_NEW GrvSoundlet)))
+    (set! (-> gcomposite num-children) (Scm_Length soundlets)
+          (-> gcomposite children) (SCM_NEW_ARRAY (.type GrvSoundlet*) (-> gcomposite num-children)))
+    (let* ((i::int 0))
+      (for-each (lambda (child)
+                  (unless (GRV_SOUNDLET_P child)
+                    (Scm_Error "<graviton-soundlet> required, but got %S" child))
+                  (set! (aref (-> gcomposite children) i) (GRV_SOUNDLET_PTR child))
+                  (pre++ i))
+                soundlets))
+    (set! (-> gsoundlet next) NULL
+          (-> gsoundlet type) SOUNDLET_COMPOSITE
+          (ref (-> gsoundlet data) composite) gcomposite)
+    (return gsoundlet)))
+
+(define-cproc append-soundlet! (gsoundlet1::<graviton-soundlet> gsoundlet2::<graviton-soundlet>)
+  ::<void>
+  (set! (-> gsoundlet1 next) gsoundlet2))
+
+(define-cproc play-soundlet (gsoundlet::<graviton-soundlet>)
+  ::<void>
+  (let* ((gpointer::GrvSoundletPointer* (SCM_NEW (.type GrvSoundletPointer)))
+         (gcontext::GrvSoundContext* (SCM_NEW (.type GrvSoundContext))))
+    (point-soundlet! gpointer gsoundlet 0)
+    (set! (-> gcontext position) 0
+          (-> gcontext pointer) gpointer)
+    (Mix_HookMusic fill-audio-stream gcontext)))
 
 (include "graviton/enum2sym.scm")
 
