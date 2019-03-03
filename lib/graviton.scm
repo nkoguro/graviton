@@ -241,8 +241,6 @@
           compose-soundlets
           append-soundlet!
           play-soundlet
-
-          graviton-read-eval-print-loop
           )
 
   (extend graviton.color))
@@ -255,108 +253,108 @@
   (y point-y))
 
 (inline-stub
-  (declcode
-   (.include "SDL.h"
-             "SDL_image.h"
-             "SDL_mixer.h"
-             "float.h"
-             "gauche.h"
-             "gauche/number.h"
-             "gauche/vector.h"
-             "stdbool.h"
-             "stdio.h"
-             "string.h")
+ (declcode
+  (.include "SDL.h"
+            "SDL_image.h"
+            "SDL_mixer.h"
+            "float.h"
+            "gauche.h"
+            "gauche/number.h"
+            "gauche/vector.h"
+            "stdbool.h"
+            "stdio.h"
+            "string.h")
 
-   (define-ctype TransformParam::(.struct
-                                  (m00::double
-                                   m01::double
-                                   m10::double
-                                   m11::double
-                                   x0::double
-                                   y0::double
-                                   left::double
-                                   top::double
-                                   right::double
-                                   bottom::double)))
+  (define-ctype TransformParam::(.struct
+                                 (m00::double
+                                  m01::double
+                                  m10::double
+                                  m11::double
+                                  x0::double
+                                  y0::double
+                                  left::double
+                                  top::double
+                                  right::double
+                                  bottom::double)))
 
-   (define-ctype GrvTexture::(.struct
-                              (texture::SDL_Texture*
-                               ref_count::int)))
+  (define-ctype GrvTexture::(.struct
+                             (texture::SDL_Texture*
+                              ref_count::int)))
 
-   (define-ctype GrvImage::(.struct
-                            (surface::SDL_Surface*
-                             update_rect::SDL_Rect
-                             param::TransformParam
-                             texture_alist)))
+  (define-ctype GrvImage::(.struct
+                           (surface::SDL_Surface*
+                            update_rect::SDL_Rect
+                            param::TransformParam
+                            texture_alist)))
 
-   (define-ctype GrvTileImage::(.struct
-                                (image
-                                 rect::SDL_Rect)))
+  (define-ctype GrvTileImage::(.struct
+                               (image
+                                rect::SDL_Rect)))
 
-   (define-ctype GrvSprite::(.struct
-                             (window
+  (define-ctype GrvSprite::(.struct
+                            (window
+                             image
+                             srcrect::SDL_Rect*
+                             center-x::double
+                             center-y::double
+                             z::double
+                             angle::double
+                             zoom-x::double
+                             zoom-y::double
+                             visible::bool
+                             color::Uint32
+                             clip::SDL_Rect*)))
+
+  (define-ctype GrvWindow::(.struct
+                            (window::SDL_Window*
+                             renderer::SDL_Renderer*
+                             sprites
+                             icon
+                             logical-width::int
+                             logical-height::int
+                             offset-x::int
+                             offset-y::int
+                             handler-table
+                             clip::SDL_Rect*)))
+
+  (define-ctype ScratchArea::(.struct
+                              (x::int
+                               y::int
+                               w::int
+                               h::int
+                               data::char*)))
+
+  (define-ctype GrvAttribute::(.struct
+                               (foreground-color::Uint32
+                                background-color::Uint32)))
+
+  (define-ctype GrvTileMap::(.struct
+                             (tiles::Uint32*
+                              attrs::GrvAttribute**
+                              buf-tiles::Uint32*
+                              buf-attrs::GrvAttribute**
+                              columns::int
+                              rows::int
+                              offset::int
                               image
-                              srcrect::SDL_Rect*
-                              center-x::double
-                              center-y::double
-                              z::double
-                              angle::double
-                              zoom-x::double
-                              zoom-y::double
-                              visible::bool
-                              color::Uint32
-                              clip::SDL_Rect*)))
+                              tile-images
+                              tile-width::int
+                              tile-height::int
+                              sprite)))
 
-   (define-ctype GrvWindow::(.struct
-                             (window::SDL_Window*
-                              renderer::SDL_Renderer*
-                              sprites
-                              icon
-                              logical-width::int
-                              logical-height::int
-                              offset-x::int
-                              offset-y::int
-                              handler-table
-                              clip::SDL_Rect*)))
+  (define-ctype EventLoopStatus::(.struct
+                                  (lock::SDL_SpinLock
+                                   running?::bool)))
 
-   (define-ctype ScratchArea::(.struct
-                               (x::int
-                                y::int
-                                w::int
-                                h::int
-                                data::char*)))
-
-   (define-ctype GrvAttribute::(.struct
-                                (foreground-color::Uint32
-                                 background-color::Uint32)))
-
-   (define-ctype GrvTileMap::(.struct
-                              (tiles::Uint32*
-                               attrs::GrvAttribute**
-                               buf-tiles::Uint32*
-                               buf-attrs::GrvAttribute**
-                               columns::int
-                               rows::int
-                               offset::int
-                               image
-                               tile-images
-                               tile-width::int
-                               tile-height::int
-                               sprite)))
-
-   (define-ctype EventLoopStatus::(.struct
-                                   (lock::SDL_SpinLock
-                                    running?::bool)))
-
-   (define-ctype GrvFuture::(.struct
-                             (lock::SDL_mutex*
-                              cond::SDL_cond*
-                              result
-                              exception
-                              message::char*
-                              continuation
-                              consumed?::bool)))
-   "
+  (define-ctype GrvFuture::(.struct
+                            (lock::SDL_mutex*
+                             cond::SDL_cond*
+                             result
+                             exception
+                             message::char*
+                             continuation
+                             consumed?::bool)))
+  "
 typedef enum {
     SOUNDLET_TONE = 1,
     SOUNDLET_COMPOSITE = 2,
@@ -397,51 +395,62 @@ typedef struct GrvSoundletPointerRec {
     int num_children;
 } GrvSoundletPointer;
 "
-   (define-ctype GrvSoundContext::(.struct
-                                   (position::int
-                                    pointer::GrvSoundletPointer*)))
-   ) ;; end of declcode
+  (define-ctype GrvSoundContext::(.struct
+                                  (position::int
+                                   pointer::GrvSoundletPointer*
+                                   future)))
 
-  (define-cvar main-thread-id::SDL_threadID :static)
-  (define-cvar grv-windows :static SCM_NIL)
-  (define-cvar event-loop-status::EventLoopStatus)
-  (define-cvar frame-per-second::int :static 30)
-  (define-cvar global-handler-table :static)
-  (define-cvar repl-thread :static)
-  (define-cvar repl-channel :static)
-  (define-cvar graviton-event-type::Uint32 :static)
-  (define-cvar graviton-module :static)
+  (define-ctype GrvSoundContextQueue::(.struct
+                                       (buf::GrvSoundContext**
+                                        length::int
+                                        start::int
+                                        end::int)))
+  ) ;; end of declcode
 
-  (define-cptr <graviton-window> :private
-    "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
+ (define-cvar main-thread-id::SDL_threadID :static)
+ (define-cvar grv-windows :static SCM_NIL)
+ (define-cvar event-loop-status::EventLoopStatus)
+ (define-cvar frame-per-second::int :static 30)
+ (define-cvar global-handler-table :static)
+ (define-cvar repl-thread :static)
+ (define-cvar repl-channel :static)
+ (define-cvar graviton-event-type::Uint32 :static)
+ (define-cvar graviton-module :static)
+ (define-cvar sound-context-queue::GrvSoundContextQueue :static)
+ (define-cvar playing-music?::bool :static)
 
-  (define-cptr <graviton-image> :private
-    "GrvImage*" "GravitonImageClass" "GRV_IMAGE_P" "MAKE_GRV_IMAGE" "GRV_IMAGE_PTR")
+ (define-cptr <graviton-window> :private
+   "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
 
-  (define-cptr <graviton-tile-image> :private
-    "GrvTileImage*" "GravitonTileImageClass" "GRV_TILE_IMAGE_P" "MAKE_GRV_TILE_IMAGE" "GRV_TILE_IMAGE_PTR")
+ (define-cptr <graviton-image> :private
+   "GrvImage*" "GravitonImageClass" "GRV_IMAGE_P" "MAKE_GRV_IMAGE" "GRV_IMAGE_PTR")
 
-  (define-cptr <graviton-texture> :private
-    "GrvTexture*" "GravitonTextureClass" "GRV_TEXTURE_P" "MAKE_GRV_TEXTURE" "GRV_TEXTURE_PTR")
+ (define-cptr <graviton-tile-image> :private
+   "GrvTileImage*" "GravitonTileImageClass" "GRV_TILE_IMAGE_P" "MAKE_GRV_TILE_IMAGE" "GRV_TILE_IMAGE_PTR")
 
-  (define-cptr <graviton-sprite> :private
-    "GrvSprite*" "GravitonSpriteClass" "GRV_SPRITE_P" "MAKE_GRV_SPRITE" "GRV_SPRITE_PTR")
+ (define-cptr <graviton-texture> :private
+   "GrvTexture*" "GravitonTextureClass" "GRV_TEXTURE_P" "MAKE_GRV_TEXTURE" "GRV_TEXTURE_PTR")
 
-  (define-cptr <graviton-tile-map> :private
-    "GrvTileMap*" "GravitonTileMapClass" "GRV_TILE_MAP_P" "MAKE_GRV_TILE_MAP" "GRV_TILE_MAP_PTR")
+ (define-cptr <graviton-sprite> :private
+   "GrvSprite*" "GravitonSpriteClass" "GRV_SPRITE_P" "MAKE_GRV_SPRITE" "GRV_SPRITE_PTR")
 
-  (define-cptr <graviton-future> :private
-    "GrvFuture*" "GravitonFutureClass" "GRV_FUTURE_P" "MAKE_GRV_FUTURE" "GRV_FUTURE_PTR")
+ (define-cptr <graviton-tile-map> :private
+   "GrvTileMap*" "GravitonTileMapClass" "GRV_TILE_MAP_P" "MAKE_GRV_TILE_MAP" "GRV_TILE_MAP_PTR")
 
-  (define-cptr <graviton-soundlet> :private
-    "GrvSoundlet*" "GravitonSoundletClass" "GRV_SOUNDLET_P" "MAKE_GRV_SOUNDLET" "GRV_SOUNDLET_PTR")
+ (define-cptr <graviton-future> :private
+   "GrvFuture*" "GravitonFutureClass" "GRV_FUTURE_P" "MAKE_GRV_FUTURE" "GRV_FUTURE_PTR")
 
-  (.define GRAVITON_EXCEPTION_CODE 1)
-  (.define GRAVITON_UNCAUGHT_EXCEPTION_CODE 2)
-  (.define GRAVITON_MUSIC_FINISH_CODE 3)
-  (.define GRAVITON_APPLY_CODE 4)
-  (.define GRAVITON_UPDATE_WINDOWS 5)
-  )  ;; end of inline-stub
+ (define-cptr <graviton-soundlet> :private
+   "GrvSoundlet*" "GravitonSoundletClass" "GRV_SOUNDLET_P" "MAKE_GRV_SOUNDLET" "GRV_SOUNDLET_PTR")
+
+ (.define GRAVITON_EXCEPTION_CODE 1)
+ (.define GRAVITON_UNCAUGHT_EXCEPTION_CODE 2)
+ (.define GRAVITON_MUSIC_FINISH_CODE 3)
+ (.define GRAVITON_APPLY_CODE 4)
+ (.define GRAVITON_UPDATE_WINDOWS 5)
+
+ (.define SOUND_CONTEXT_INITIAL_LENGTH 16)
+ )  ;; end of inline-stub
 
 (inline-stub
   (define-cfn teardown-libs (data::|void*|)
@@ -472,8 +481,15 @@ typedef struct GrvSoundletPointerRec {
           graviton-module (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
     (set! (ref event-loop-status lock) 0
           (ref event-loop-status running?) false)
-    ;; (SDL_LogSetPriority SDL_LOG_CATEGORY_APPLICATION SDL_LOG_PRIORITY_DEBUG)
-    )
+
+    (set! playing-music? false
+          (ref sound-context-queue buf) (SCM_NEW_ARRAY (.type GrvSoundContext*) SOUND_CONTEXT_INITIAL_LENGTH)
+          (ref sound-context-queue length) SOUND_CONTEXT_INITIAL_LENGTH
+          (ref sound-context-queue start) 0
+          (ref sound-context-queue end) 0)
+    (dotimes (i (ref sound-context-queue length))
+      (set! (aref (ref sound-context-queue buf) i) NULL))
+    ) ;; end of initialize-libs
 
   (initcode
    (initialize-libs))
@@ -550,60 +566,67 @@ typedef struct GrvSoundletPointerRec {
 ;;;
 
 (inline-stub
-  (define-cfn notify-uncaught-exception (msg)
-    ::void
-    (let* ((event::SDL_Event))
-      (set! (ref event type) graviton-event-type
-            (ref event user code) GRAVITON_UNCAUGHT_EXCEPTION_CODE
-            (ref event user data1) msg)
-      (SDL_PushEvent (& event))))
+ (define-cfn notify-uncaught-exception (msg)
+   ::void
+   (let* ((event::SDL_Event))
+     (set! (ref event type) graviton-event-type
+           (ref event user code) GRAVITON_UNCAUGHT_EXCEPTION_CODE
+           (ref event user data1) msg)
+     (SDL_PushEvent (& event))))
 
-  (define-cfn finalize-future (z data::void*)
-    ::void
-    (when (GRV_FUTURE_P z)
-      (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR z)))
-        (SDL_DestroyCond (-> gfuture cond))
-        (SDL_DestroyMutex (-> gfuture lock))
-        (when (and (not (-> gfuture consumed?)) (-> gfuture message))
-          (notify-uncaught-exception (SCM_MAKE_STR_COPYING (-> gfuture message)))
-          (free (-> gfuture message))))))
+ (define-cfn finalize-future (z data::void*)
+   ::void
+   (when (GRV_FUTURE_P z)
+     (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR z)))
+       (SDL_DestroyCond (-> gfuture cond))
+       (SDL_DestroyMutex (-> gfuture lock))
+       (when (and (not (-> gfuture consumed?)) (-> gfuture message))
+         (notify-uncaught-exception (SCM_MAKE_STR_COPYING (-> gfuture message)))
+         (free (-> gfuture message))))))
 
-  (.define MAX_MESSAGE_LENGTH 1024)
-  ) ;; end of inline-stub
+ (define-cfn make-future ()
+   (let* ((gfuture::GrvFuture* (SCM_NEW GrvFuture))
+          (obj (MAKE_GRV_FUTURE gfuture)))
+     (set! (-> gfuture lock) (SDL_CreateMutex)
+           (-> gfuture cond) (SDL_CreateCond)
+           (-> gfuture result) SCM_FALSE
+           (-> gfuture exception) SCM_FALSE
+           (-> gfuture message) NULL
+           (-> gfuture continuation) SCM_FALSE
+           (-> gfuture consumed?) false)
+     (Scm_RegisterFinalizer obj finalize-future NULL)
+     (return obj)))
+
+ (define-cfn set-future-result! (gfuture::GrvFuture* result)
+   ::void
+   (let* ((cont SCM_FALSE)
+          (err?::bool false))
+     (SDL_LockMutex (-> gfuture lock))
+     (cond
+       ((and (SCM_FALSEP (-> gfuture result)) (SCM_FALSEP (-> gfuture exception)))
+        (set! (-> gfuture result) result
+              cont (-> gfuture continuation))
+        (SDL_CondSignal (-> gfuture cond)))
+       (else
+        (set! err? true)))
+     (SDL_UnlockMutex (-> gfuture lock))
+     (when err?
+       (Scm_Error "result has been already set in <graviton-future>"))
+     (when (SCM_PROCEDUREP cont)
+       (SDL_LockMutex (-> gfuture lock))
+       (set! (-> gfuture consumed?) true)
+       (SDL_UnlockMutex (-> gfuture lock))
+       (Scm_ApplyRec cont (SCM_LIST2 result SCM_FALSE)))))
+
+ (.define MAX_MESSAGE_LENGTH 1024)
+ ) ;; end of inline-stub
 
 (define-cproc make-future ()
-  (let* ((gfuture::GrvFuture* (SCM_NEW GrvFuture))
-         (obj (MAKE_GRV_FUTURE gfuture)))
-    (set! (-> gfuture lock) (SDL_CreateMutex)
-          (-> gfuture cond) (SDL_CreateCond)
-          (-> gfuture result) SCM_FALSE
-          (-> gfuture exception) SCM_FALSE
-          (-> gfuture message) NULL
-          (-> gfuture continuation) SCM_FALSE
-          (-> gfuture consumed?) false)
-    (Scm_RegisterFinalizer obj finalize-future NULL)
-    (return obj)))
+  (return (make-future)))
 
 (define-cproc set-future-result! (gfuture::<graviton-future> result)
   ::<void>
-  (let* ((cont SCM_FALSE)
-         (err?::bool false))
-    (SDL_LockMutex (-> gfuture lock))
-    (cond
-      ((and (SCM_FALSEP (-> gfuture result)) (SCM_FALSEP (-> gfuture exception)))
-       (set! (-> gfuture result) result
-             cont (-> gfuture continuation))
-       (SDL_CondSignal (-> gfuture cond)))
-      (else
-       (set! err? true)))
-    (SDL_UnlockMutex (-> gfuture lock))
-    (when err?
-      (Scm_Error "result has been already set in <graviton-future>"))
-    (when (SCM_PROCEDUREP cont)
-      (SDL_LockMutex (-> gfuture lock))
-      (set! (-> gfuture consumed?) true)
-      (SDL_UnlockMutex (-> gfuture lock))
-      (Scm_ApplyRec cont (SCM_LIST2 result SCM_FALSE)))))
+  (set-future-result! gfuture result))
 
 (define-cproc set-future-exception! (gfuture::<graviton-future> exception error-message::<const-cstring>)
   ::<void>
@@ -735,9 +758,11 @@ typedef struct GrvSoundletPointerRec {
                                    (lambda (result exception)
                                      (let1 thunk (cond
                                                    (result
-                                                    (apply cont result))
+                                                    (lambda ()
+                                                      (apply cont result)))
                                                    (exception
-                                                    (raise exception))
+                                                    (lambda ()
+                                                      (raise exception)))
                                                    (else
                                                     (errorf "[BUG] result and exception aren't specified.")))
                                        (%submit thunk)))))))
@@ -2768,7 +2793,16 @@ typedef struct GrvSoundletPointerRec {
              (Scm_Printf SCM_CURERR "\n")
              (Scm_Error "async failed, but the exception wasn't caught."))
             ((GRAVITON_MUSIC_FINISH_CODE)
-             (Mix_HookMusic NULL NULL))
+             (let* ((gfuture::GrvFuture* (ref (-> sdl-event user) data1))
+                    (status (ref (-> sdl-event user) data2)))
+               (Mix_HookMusic NULL NULL)
+               (set-future-result! gfuture (SCM_LIST1 status))
+               (set! playing-music? false)
+
+               (let* ((gcontext::GrvSoundContext* (dequeue-sound-context!)))
+                 (when gcontext
+                   (Mix_HookMusic fill-audio-stream gcontext)
+                   (set! playing-music? true)))))
             ((GRAVITON_APPLY_CODE)
              (let* ((thunk (ref (-> sdl-event user) data1)))
                (Scm_ApplyRec0 thunk)))
@@ -2836,8 +2870,7 @@ typedef struct GrvSoundletPointerRec {
   (let* ((callback-id::SDL_TimerID (SDL_AddTimer 0 update-windows-callback NULL)))
     (while (logior (not (SCM_NULLP grv-windows))
                    (is-repl-running?)
-                   (Mix_PlayingMusic)
-                   (!= (Mix_GetMusicHookData) NULL))
+                   playing-music?)
       (let* ((event::SDL_Event))
         (when (SDL_WaitEvent (& event))
           (process-event (& event)))))
@@ -3563,6 +3596,33 @@ typedef enum {
 ;;;
 
 (inline-stub
+ (define-cfn enqueue-sound-context! (gcontext::GrvSoundContext*)
+   ::void :static
+   (set! (aref (ref sound-context-queue buf) (ref sound-context-queue end)) gcontext
+         (ref sound-context-queue end) (% (+ (ref sound-context-queue end) 1)
+                                          (ref sound-context-queue length)))
+
+   (when (== (ref sound-context-queue start) (ref sound-context-queue end))
+     (let* ((newlen::int (* (ref sound-context-queue length) 2))
+            (newbuf::GrvSoundContext** (SCM_NEW_ARRAY (.type GrvSoundContext*) newlen)))
+       (dotimes (i (ref sound-context-queue length))
+         (set! (aref newbuf i) (aref (ref sound-context-queue buf) (% (+ i (ref sound-context-queue start))
+                                                                      (ref sound-context-queue length)))))
+       (set! (ref sound-context-queue start) 0
+             (ref sound-context-queue end) (ref sound-context-queue length)
+             (ref sound-context-queue buf) newbuf
+             (ref sound-context-queue length) newlen))))
+
+ (define-cfn dequeue-sound-context! ()
+   ::GrvSoundContext* :static
+   (when (== (ref sound-context-queue start) (ref sound-context-queue end))
+     (return NULL))
+
+   (let* ((gcontext::GrvSoundContext* (aref (ref sound-context-queue buf) (ref sound-context-queue start))))
+     (set! (ref sound-context-queue start) (% (+ (ref sound-context-queue start) 1)
+                                              (ref sound-context-queue length)))
+     (return gcontext)))
+
  (define-cfn point-soundlet! (gpointer::GrvSoundletPointer* gsoundlet::GrvSoundlet* pos::int)
    ::GrvSoundletPointer*
    (set! (-> gpointer start-position) pos
@@ -3626,7 +3686,7 @@ typedef enum {
         (return true)))))
 
  (define-cfn fill-audio-stream (udata::void* stream::Uint8* len::int)
-   ::void
+   ::void :static
    (let* ((buf::int16_t* (cast int16_t* stream))
           (buf-length::int (/ len 2))
           (index::int 0)
@@ -3637,7 +3697,9 @@ typedef enum {
      (unless (-> gpointer soundlet)
        (let* ((event::SDL_Event))
          (set! (ref event type) graviton-event-type
-               (ref event user code) GRAVITON_MUSIC_FINISH_CODE)
+               (ref event user code) GRAVITON_MUSIC_FINISH_CODE
+               (ref event user data1) (GRV_FUTURE_PTR (-> gcontext future))
+               (ref event user data2) 'finished)
          (SDL_PushEvent (& event))
          (return)))
 
@@ -3695,13 +3757,20 @@ typedef enum {
   (set! (-> gsoundlet1 next) gsoundlet2))
 
 (define-cproc play-soundlet (gsoundlet::<graviton-soundlet>)
-  ::<void>
   (let* ((gpointer::GrvSoundletPointer* (SCM_NEW (.type GrvSoundletPointer)))
-         (gcontext::GrvSoundContext* (SCM_NEW (.type GrvSoundContext))))
+         (gcontext::GrvSoundContext* (SCM_NEW (.type GrvSoundContext)))
+         (future (make-future)))
     (point-soundlet! gpointer gsoundlet 0)
     (set! (-> gcontext position) 0
-          (-> gcontext pointer) gpointer)
-    (Mix_HookMusic fill-audio-stream gcontext)))
+          (-> gcontext pointer) gpointer
+          (-> gcontext future) future)
+    (cond
+      (playing-music?
+       (enqueue-sound-context! gcontext))
+      (else
+       (set! playing-music? true)
+       (Mix_HookMusic fill-audio-stream gcontext)))
+    (return future)))
 
 (include "graviton/enum2sym.scm")
 
