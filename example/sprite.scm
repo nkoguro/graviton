@@ -11,7 +11,8 @@
 (define (ball-image)
   (let1 img (make-image 64 64)
     (draw-circle img
-                 (center-point img)
+                 (center-x img)
+                 (center-y img)
                  32
                  (color 'white)
                  :fill? #t)
@@ -37,8 +38,8 @@
            (balls (map (^z (make-ball win img z)) (iota 1000))))
       (on-update win ()
         (for-each (lambda (ball)
-                    (let ((x (+ (sprite-x (ball-sprite ball)) (* (ball-vx ball) (frame-duration))))
-                          (y (+ (sprite-y (ball-sprite ball)) (* (ball-vy ball) (frame-duration)))))
+                    (let ((x (+ (sprite-x (ball-sprite ball)) (* (ball-vx ball) (/ 1 (frame-per-second)))))
+                          (y (+ (sprite-y (ball-sprite ball)) (* (ball-vy ball) (/ 1 (frame-per-second))))))
                       (cond
                         ((and (<= 0 x (- (window-logical-width win) 1))
                               (<= 0 y (- (window-logical-height win) 1)))
