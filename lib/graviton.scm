@@ -102,13 +102,8 @@
           set-window-handler!
           reflect-resized-window-parameter
 
-          next-event
-          event-for-each
           frame-per-second
           set-frame-per-second!
-          actual-frame-per-second
-          load-average
-          frame-duration
           set-global-handler!
           grv-main
           grv-begin
@@ -411,10 +406,6 @@ typedef struct GrvSoundletPointerRec {
   (define-cvar grv-windows :static SCM_NIL)
   (define-cvar event-loop-status::EventLoopStatus)
   (define-cvar frame-per-second::int :static 30)
-  (define-cvar event-loop-ticks::Uint32 :static 33)
-  (define-cvar actual-frame-per-second::double :static)
-  (define-cvar frame-duration::double :static)
-  (define-cvar load-average::double :static)
   (define-cvar global-handler-table :static)
   (define-cvar repl-thread :static)
   (define-cvar repl-channel :static)
@@ -448,6 +439,8 @@ typedef struct GrvSoundletPointerRec {
   (.define GRAVITON_EXCEPTION_CODE 1)
   (.define GRAVITON_UNCAUGHT_EXCEPTION_CODE 2)
   (.define GRAVITON_MUSIC_FINISH_CODE 3)
+  (.define GRAVITON_APPLY_CODE 4)
+  (.define GRAVITON_UPDATE_WINDOWS 5)
   )  ;; end of inline-stub
 
 (inline-stub
@@ -675,10 +668,13 @@ typedef struct GrvSoundletPointerRec {
 
 (define graviton-thread-pool (make-parameter (make-thread-pool 1)))
 
-(define main-thread-thunk-queue (make-mtqueue))
-
-(define (submit-main-thread thunk)
-  (enqueue! main-thread-thunk-queue thunk))
+(define-cproc submit-main-thread (thunk::<procedure>)
+  ::<void>
+  (let* ((event::SDL_Event))
+    (set! (ref event type) graviton-event-type
+          (ref event user code) GRAVITON_APPLY_CODE
+          (ref event user data1) thunk)
+    (SDL_PushEvent (& event))))
 
 (define (submit-thread-pool thunk)
   (add-job! (graviton-thread-pool) thunk))
@@ -690,19 +686,6 @@ typedef struct GrvSoundletPointerRec {
                   (else
                    (errorf "type must be 'main or 'pool, but got ~s" thread)))
     (%submit thunk)))
-
-(define (process-thunk-on-main-thread available-ticks)
-  (let1 start-ticks (current-ticks)
-    (let loop ()
-      (cond
-        ((and (< (- (current-ticks) start-ticks) available-ticks)
-              (dequeue/wait! main-thread-thunk-queue (max (/. (- available-ticks (- (current-ticks) start-ticks)) 1000)
-                                                          0)))
-         => (lambda (thunk)
-              (thunk)
-              (loop)))
-        (else
-         (queue-length main-thread-thunk-queue))))))
 
 (define (force-future future)
   (receive (result exception) (future-result&exception future)
@@ -2300,14 +2283,16 @@ typedef struct GrvSoundletPointerRec {
 
 (define-cproc destroy-window (gwin::<graviton-window>)
   ::<void>
-  (destroy-window gwin))
+  (destroy-window gwin)
+  (remove-destroyed-windows))
 
 (define-cproc destroy-all-windows ()
   ::<void>
   (for-each (lambda (obj)
               (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
                 (destroy-window gwin)))
-            grv-windows))
+            grv-windows)
+  (remove-destroyed-windows))
 
 (define-cproc send-close-window-event (gwin::<graviton-window>)
   ::<void>
@@ -2784,6 +2769,14 @@ typedef struct GrvSoundletPointerRec {
              (Scm_Error "async failed, but the exception wasn't caught."))
             ((GRAVITON_MUSIC_FINISH_CODE)
              (Mix_HookMusic NULL NULL))
+            ((GRAVITON_APPLY_CODE)
+             (let* ((thunk (ref (-> sdl-event user) data1)))
+               (Scm_ApplyRec0 thunk)))
+            ((GRAVITON_UPDATE_WINDOWS)
+             (for-each (lambda (win)
+                         (%call-window-handler win 'update SCM_NIL))
+                       grv-windows)
+             (update-window-contents))
             ) ;; end of case (for graviton-event-type)
           ))  ;; end of cond
        ))     ;; end of case
@@ -2802,6 +2795,15 @@ typedef struct GrvSoundletPointerRec {
       (set! running? (ref event-loop-status running?))
       (SDL_AtomicUnlock (& (ref event-loop-status lock)))
       (return running?)))
+
+  (define-cfn update-windows-callback (interval::Uint32 param::void*)
+    ::Uint32
+    (let* ((event::SDL_Event))
+      (set! (ref event type) graviton-event-type
+            (ref event user code) GRAVITON_UPDATE_WINDOWS)
+      (SDL_PushEvent (& event))
+      (return (/ 1000 frame-per-second))))
+
   )  ;; end of inline-stub
 
 (define-cproc notify-exception (exception)
@@ -2823,28 +2825,7 @@ typedef struct GrvSoundletPointerRec {
 (define-cproc set-frame-per-second! (fps::<int>)
   ::<void>
   (let* ((t::Uint32 (cast Uint32 (floor (/ 1000.0 fps)))))
-    (set! frame-per-second fps
-          event-loop-ticks t)))
-
-(define-cproc actual-frame-per-second ()
-  ::<double>
-  (return actual-frame-per-second))
-
-(define-cproc load-average ()
-  ::<double>
-  (return load-average))
-
-(define-cproc frame-duration (:optional (limit #f))
-  ::<double>
-  (let* ((max-limit::double))
-    (cond
-      ((SCM_FALSEP limit)
-       (set! max-limit DBL_MAX))
-      ((SCM_REALP limit)
-       (set! max-limit (Scm_GetDouble limit)))
-      (else
-       (Scm_Error "<real> required, but got %S" limit)))
-    (return (?: (< frame-duration max-limit) frame-duration max-limit))))
+    (set! frame-per-second fps)))
 
 (define-cproc start-global-event-loop (thunk)
   ::<void>
@@ -2852,48 +2833,15 @@ typedef struct GrvSoundletPointerRec {
   (SDL_StartTextInput)
 
   (Scm_ApplyRec0 thunk)
-  (set! actual-frame-per-second 0.0
-        load-average 0.0)
-  (let* ((frame::int 0)
-         (backlog::int 0)
-         (backlog-acc::int 0)
-         (start-ticks::int (SDL_GetTicks))
-         (last-frame-ticks::int))
+  (let* ((callback-id::SDL_TimerID (SDL_AddTimer 0 update-windows-callback NULL)))
     (while (logior (not (SCM_NULLP grv-windows))
                    (is-repl-running?)
-                   (< 0 backlog)
                    (Mix_PlayingMusic)
                    (!= (Mix_GetMusicHookData) NULL))
-      (let* ((frame-ticks::int (+ start-ticks (* (+ frame 1) event-loop-ticks))))
-        (set! last-frame-ticks (SDL_GetTicks))
-
-        (remove-destroyed-windows)
-
-        (for-each (lambda (win)
-                    (%call-window-handler win 'update SCM_NIL))
-                  grv-windows)
-        (update-window-contents)
-
-        (let* ((event::SDL_Event))
-          (while (SDL_PollEvent (& event))
-            (process-event (& event))))
-
-        (when (< (SDL_GetTicks) frame-ticks)
-          (set! backlog (SCM_INT_VALUE (Scm_EvalRec (SCM_LIST2 'process-thunk-on-main-thread
-                                                               (SCM_MAKE_INT (- frame-ticks (SDL_GetTicks))))
-                                                    (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0))))
-                backlog-acc (+ backlog-acc backlog)))
-
-        (pre++ frame)
-        (when (== frame frame-per-second)
-          (let* ((elapse-in-sec::double (/ (- (SDL_GetTicks) start-ticks) 1000.0)))
-            (set! actual-frame-per-second (/ frame-per-second elapse-in-sec)
-                  load-average (/ backlog-acc elapse-in-sec)))
-          (SDL_LogDebug SDL_LOG_CATEGORY_APPLICATION "fps: %f, load-average: %f" actual-frame-per-second load-average)
-          (set! frame 0
-                backlog-acc 0
-                start-ticks (SDL_GetTicks)))
-        (set! frame-duration (/ (- (SDL_GetTicks) last-frame-ticks) 1000.0)))))
+      (let* ((event::SDL_Event))
+        (when (SDL_WaitEvent (& event))
+          (process-event (& event)))))
+    (SDL_RemoveTimer callback-id))
 
   (set-event-loop-status false))
 
@@ -3679,8 +3627,6 @@ typedef enum {
 
  (define-cfn fill-audio-stream (udata::void* stream::Uint8* len::int)
    ::void
-   (memset stream 0 len)
-
    (let* ((buf::int16_t* (cast int16_t* stream))
           (buf-length::int (/ len 2))
           (index::int 0)
@@ -3688,18 +3634,21 @@ typedef enum {
           (pos::int (-> gcontext position))
           (pos-end::int (+ pos (/ buf-length 2)))
           (gpointer::GrvSoundletPointer* (-> gcontext pointer)))
+     (unless (-> gpointer soundlet)
+       (let* ((event::SDL_Event))
+         (set! (ref event type) graviton-event-type
+               (ref event user code) GRAVITON_MUSIC_FINISH_CODE)
+         (SDL_PushEvent (& event))
+         (return)))
+
+     (memset stream 0 len)
+
      (while (< pos pos-end)
        (unless (render-soundlet buf index pos gpointer)
          (break))
        (inc! pos)
        (set! index (+ index 2)))
-     (set! (-> gcontext position) pos)
-
-     (unless (-> gpointer soundlet)
-       (let* ((event::SDL_Event))
-         (set! (ref event type) graviton-event-type
-               (ref event user code) GRAVITON_MUSIC_FINISH_CODE)
-         (SDL_PushEvent (& event))))))
+     (set! (-> gcontext position) pos)))
 
  ) ;; end of inline-stub
 
