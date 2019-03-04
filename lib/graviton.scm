@@ -360,9 +360,22 @@ typedef enum {
     SOUNDLET_COMPOSITE = 2,
 } SoundletType;
 
+typedef enum {
+    TONE_SILENT = 0,
+    TONE_SINE = 1,
+    TONE_SQUARE50 = 2,
+    TONE_SQUARE12 = 3,
+    TONE_SQUARE25 = 4,
+    TONE_TRIANGLE = 5,
+    TONE_SAWTOOTH = 6,
+    TONE_LONG_NOISE = 7,
+    TONE_SHORT_NOISE = 8,
+} ToneType;
+
 struct GrvSoundletRec;
 
 typedef struct {
+    ToneType type;
     double *freqs;
     double *amps;
     int num_freqs;
@@ -418,6 +431,8 @@ typedef struct GrvSoundletPointerRec {
  (define-cvar graviton-module :static)
  (define-cvar sound-context-queue::GrvSoundContextQueue :static)
  (define-cvar playing-music?::bool :static)
+ (define-cvar noise-table::double* :static)
+ (define-cvar music-last-finished-tick::Uint32 :static)
 
  (define-cptr <graviton-window> :private
    "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
@@ -450,6 +465,8 @@ typedef struct GrvSoundletPointerRec {
  (.define GRAVITON_UPDATE_WINDOWS 5)
 
  (.define SOUND_CONTEXT_INITIAL_LENGTH 16)
+ (.define NOISE_TABLE_SIZE 32768)
+
  )  ;; end of inline-stub
 
 (inline-stub
@@ -489,6 +506,12 @@ typedef struct GrvSoundletPointerRec {
           (ref sound-context-queue end) 0)
     (dotimes (i (ref sound-context-queue length))
       (set! (aref (ref sound-context-queue buf) i) NULL))
+
+    (set! noise-table (SCM_NEW_ATOMIC_ARRAY (.type double) NOISE_TABLE_SIZE))
+    (dotimes (i NOISE_TABLE_SIZE)
+      (set! (aref noise-table i) (* (- (/ (cast double (random)) RAND_MAX) 0.5) 2.0)))
+
+    (set! music-last-finished-tick 0)
     ) ;; end of initialize-libs
 
   (initcode
@@ -2797,7 +2820,8 @@ typedef struct GrvSoundletPointerRec {
                     (status (ref (-> sdl-event user) data2)))
                (Mix_HookMusic NULL NULL)
                (set-future-result! gfuture (SCM_LIST1 status))
-               (set! playing-music? false)
+               (set! playing-music? false
+                     music-last-finished-tick (SDL_GetTicks))
 
                (let* ((gcontext::GrvSoundContext* (dequeue-sound-context!)))
                  (when gcontext
@@ -2838,6 +2862,7 @@ typedef struct GrvSoundletPointerRec {
       (SDL_PushEvent (& event))
       (return (/ 1000 frame-per-second))))
 
+  (.define MUSIC_FINISHED_GRACE_PERIOD 100)
   )  ;; end of inline-stub
 
 (define-cproc notify-exception (exception)
@@ -2870,7 +2895,8 @@ typedef struct GrvSoundletPointerRec {
   (let* ((callback-id::SDL_TimerID (SDL_AddTimer 0 update-windows-callback NULL)))
     (while (logior (not (SCM_NULLP grv-windows))
                    (is-repl-running?)
-                   playing-music?)
+                   (or playing-music?
+                       (< (SDL_GetTicks) (+ music-last-finished-tick MUSIC_FINISHED_GRACE_PERIOD))))
       (let* ((event::SDL_Event))
         (when (SDL_WaitEvent (& event))
           (process-event (& event)))))
@@ -3601,7 +3627,6 @@ typedef enum {
    (set! (aref (ref sound-context-queue buf) (ref sound-context-queue end)) gcontext
          (ref sound-context-queue end) (% (+ (ref sound-context-queue end) 1)
                                           (ref sound-context-queue length)))
-
    (when (== (ref sound-context-queue start) (ref sound-context-queue end))
      (let* ((newlen::int (* (ref sound-context-queue length) 2))
             (newbuf::GrvSoundContext** (SCM_NEW_ARRAY (.type GrvSoundContext*) newlen)))
@@ -3648,6 +3673,121 @@ typedef enum {
        (else
         (set! (aref buf index) v)))))
 
+ (define-cfn compute-tone-silent (freqs::double* amps::double* num-freqs::int rel-pos::int)
+   ::double
+   (return 0))
+
+ (define-cfn compute-tone-sine (freqs::double* amps::double* num-freqs::int rel-pos::int)
+   ::double
+   (let* ((v::double 0))
+     (dotimes (i num-freqs)
+       (set! v (+ v (* (aref amps i) (sin (* 2 M_PI (aref freqs i) (/ rel-pos 44100.0)))))))
+     (return v)))
+
+ (define-cfn compute-tone-square50 (freqs::double* amps::double* num-freqs::int rel-pos::int)
+   ::double
+   (let* ((v::double 0))
+     (dotimes (i num-freqs)
+       (let* ((freq::double (aref freqs i))
+              (amp::double (aref amps i))
+              (len::int (cast int (round (/ 44100.0 freq))))
+              (len50::int (/ len 2)))
+         (cond
+           ((< (% rel-pos len) len50)
+            (set! v (+ v amp)))
+           (else
+            (set! v (- v amp))))))
+     (return v)))
+
+ (define-cfn compute-tone-square12 (freqs::double* amps::double* num-freqs::int rel-pos::int)
+   ::double
+   (let* ((v::double 0))
+     (dotimes (i num-freqs)
+       (let* ((freq::double (aref freqs i))
+              (amp::double (aref amps i))
+              (len::int (cast int (round (/ 44100.0 freq))))
+              (len12::int (/ len 8)))
+         (cond
+           ((< (% rel-pos len) len12)
+            (set! v (+ v amp)))
+           (else
+            (set! v (- v amp))))))
+     (return v)))
+
+ (define-cfn compute-tone-square25 (freqs::double* amps::double* num-freqs::int rel-pos::int)
+   ::double
+   (let* ((v::double 0))
+     (dotimes (i num-freqs)
+       (let* ((freq::double (aref freqs i))
+              (amp::double (aref amps i))
+              (len::int (cast int (round (/ 44100.0 freq))))
+              (len25::int (/ len 4)))
+         (cond
+           ((< (% rel-pos len) len25)
+            (set! v (+ v amp)))
+           (else
+            (set! v (- v amp))))))
+     (return v)))
+
+ (define-cfn compute-tone-triangle (freqs::double* amps::double* num-freqs::int rel-pos::int)
+   ::double
+   (let* ((v::double 0))
+     (dotimes (i num-freqs)
+       (let* ((freq::double (aref freqs i))
+              (amp::double (aref amps i))
+              (len::int (cast int (round (/ 44100.0 freq))))
+              (half::int (/ len 2)))
+         (cond
+           ((< (% rel-pos len) half)
+            (set! v (+ v (- (/ (* 2.0 amp (% rel-pos len)) half) amp))))
+           (else
+            (set! v (+ v (+ (/ (* -2.0 amp (% rel-pos len)) half) (* 3.0 amp))))))))
+     (return v)))
+
+ (define-cfn compute-tone-sawtooth (freqs::double* amps::double* num-freqs::int rel-pos::int)
+   ::double
+   (let* ((v::double 0))
+     (dotimes (i num-freqs)
+       (let* ((freq::double (aref freqs i))
+              (amp::double (aref amps i))
+              (len::int (cast int (round (/ 44100.0 freq)))))
+         (set! v (+ v (- (/ (* 2.0 amp (% rel-pos len)) len) amp)))))
+     (return v)))
+
+ (define-cfn compute-tone-long-noise (freqs::double* amps::double* num-freqs::int rel-pos::int)
+   ::double
+   (let* ((v::double 0))
+     (dotimes (i num-freqs)
+       (let* ((freq::double (aref freqs i))
+              (amp::double (aref amps i))
+              (len::int (cast int (round (/ 44100.0 freq))))
+              (len50::int (/ len 2)))
+         (when (< len50 1)
+           (set! len50 1))
+         (cond
+           ((< (% rel-pos len) len50)
+            (set! v (+ v (* amp (aref noise-table (% (/ rel-pos len50) NOISE_TABLE_SIZE))))))
+           (else
+            (set! v (- v (* amp (aref noise-table (% (/ rel-pos len50) NOISE_TABLE_SIZE)))))))))
+     (return v)))
+
+ (define-cfn compute-tone-short-noise (freqs::double* amps::double* num-freqs::int rel-pos::int)
+   ::double
+   (let* ((v::double 0))
+     (dotimes (i num-freqs)
+       (let* ((freq::double (aref freqs i))
+              (amp::double (aref amps i))
+              (len::int (cast int (round (/ 44100.0 freq))))
+              (len50::int (/ len 2)))
+         (when (< len50 1)
+           (set! len50 1))
+         (cond
+           ((< (% rel-pos len) len50)
+            (set! v (+ v (* amp (aref noise-table (% (/ rel-pos len50) 100))))))
+           (else
+            (set! v (- v (* amp (aref noise-table (% (/ rel-pos len50) 100)))))))))
+     (return v)))
+
  (define-cfn render-tone (buf::int16_t* index::int pos::int gpointer::GrvSoundletPointer*)
    ::bool
    (let* ((gsoundlet::GrvSoundlet* (-> gpointer soundlet))
@@ -3655,11 +3795,27 @@ typedef enum {
           (rel-pos::int (- pos (-> gpointer start-position))))
      (cond
        ((< rel-pos (-> gtone length))
-        (let* ((v::double 0)
-               (t::double (/ rel-pos 44100.0)))
-          (dotimes (i (-> gtone num-freqs))
-            (set! v (+ v (* (aref (-> gtone amps) i) (sin (* 2 M_PI (aref (-> gtone freqs) i) t))))))
-          (inc-buffer! buf index (* (-> gtone left-volume) v))
+        (let* ((v::double 0))
+          (case (-> gtone type)
+            ((TONE_SILENT)
+             (set! v (compute-tone-silent (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+            ((TONE_SINE)
+             (set! v (compute-tone-sine (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+            ((TONE_SQUARE50)
+             (set! v (compute-tone-square50 (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+            ((TONE_SQUARE12)
+             (set! v (compute-tone-square12 (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+            ((TONE_SQUARE25)
+             (set! v (compute-tone-square25 (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+            ((TONE_TRIANGLE)
+             (set! v (compute-tone-triangle (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+            ((TONE_SAWTOOTH)
+             (set! v (compute-tone-sawtooth (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+            ((TONE_LONG_NOISE)
+             (set! v (compute-tone-long-noise (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+            ((TONE_SHORT_NOISE)
+             (set! v (compute-tone-short-noise (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos))))
+            (inc-buffer! buf index (* (-> gtone left-volume) v))
           (inc-buffer! buf (+ index 1) (* (-> gtone right-volume) v))
           (return true)))
        (else
@@ -3694,13 +3850,15 @@ typedef enum {
           (pos::int (-> gcontext position))
           (pos-end::int (+ pos (/ buf-length 2)))
           (gpointer::GrvSoundletPointer* (-> gcontext pointer)))
-     (unless (-> gpointer soundlet)
+     (when (and (== (-> gpointer soundlet) NULL)
+                (GRV_FUTURE_P (-> gcontext future)))
        (let* ((event::SDL_Event))
          (set! (ref event type) graviton-event-type
                (ref event user code) GRAVITON_MUSIC_FINISH_CODE
                (ref event user data1) (GRV_FUTURE_PTR (-> gcontext future))
                (ref event user data2) 'finished)
          (SDL_PushEvent (& event))
+         (set! (-> gcontext future) SCM_FALSE)
          (return)))
 
      (memset stream 0 len)
@@ -3714,14 +3872,42 @@ typedef enum {
 
  ) ;; end of inline-stub
 
-(define-cproc make-soundlet (freqs::<f64vector> amps::<f64vector> left-volume::<double> right-volume::<double> sec::<double>)
+(define-cproc make-soundlet (type freqs::<f64vector> amps::<f64vector> left-volume::<double> right-volume::<double> sec::<double>)
   ::<graviton-soundlet>
   (unless (== (SCM_F64VECTOR_SIZE freqs) (SCM_F64VECTOR_SIZE amps))
     (Scm_Error "freqs and amps must be the same size"))
   (let* ((length::int (cast int (round (* 44100 sec))))
          (gtone::GrvToneSoundlet* (SCM_NEW GrvToneSoundlet))
-         (gsoundlet::GrvSoundlet* (SCM_NEW GrvSoundlet)))
-    (set! (-> gtone freqs) (SCM_NEW_ATOMIC_ARRAY (.type double) (SCM_F64VECTOR_SIZE freqs))
+         (gsoundlet::GrvSoundlet* (SCM_NEW GrvSoundlet))
+         (tone-type::ToneType))
+    (cond
+      ((SCM_EQ type 'silent)
+       (set! tone-type TONE_SILENT))
+      ((or (SCM_EQ type 'sine)
+           (SCM_EQ type 'sin))
+       (set! tone-type TONE_SINE))
+      ((or (SCM_EQ type 'square)
+           (SCM_EQ type 'square50))
+       (set! tone-type TONE_SQUARE50))
+      ((or (SCM_EQ type 'square12)
+           (SCM_EQ type 'square125))
+       (set! tone-type TONE_SQUARE12))
+      ((SCM_EQ type 'square25)
+       (set! tone-type TONE_SQUARE25))
+      ((SCM_EQ type 'triangle)
+       (set! tone-type TONE_TRIANGLE))
+      ((SCM_EQ type 'sawtooth)
+       (set! tone-type TONE_SAWTOOTH))
+      ((or (SCM_EQ type 'noise)
+           (SCM_EQ type 'long-noise))
+       (set! tone-type TONE_LONG_NOISE))
+      ((SCM_EQ type 'short-noise)
+       (set! tone-type TONE_SHORT_NOISE))
+      (else
+       (Scm_Error "Invalid tone type: %S" type)))
+
+    (set! (-> gtone type) tone-type
+          (-> gtone freqs) (SCM_NEW_ATOMIC_ARRAY (.type double) (SCM_F64VECTOR_SIZE freqs))
           (-> gtone amps) (SCM_NEW_ATOMIC_ARRAY (.type double) (SCM_F64VECTOR_SIZE amps))
           (-> gtone num-freqs) (SCM_F64VECTOR_SIZE freqs)
           (-> gtone left-volume) left-volume
