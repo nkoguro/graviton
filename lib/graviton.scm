@@ -35,6 +35,7 @@
   (use control.thread-pool)
   (use data.queue)
   (use file.util)
+  (use gauche.collection)
   (use gauche.parameter)
   (use gauche.partcont)
   (use gauche.record)
@@ -44,6 +45,7 @@
   (use gauche.vport)
   (use graviton.png)
   (use math.const)
+  (use parser.peg)
   (use scheme.charset)
   (use srfi-42)
   (use util.match)
@@ -237,10 +239,7 @@
 
           message-box
 
-          make-soundlet
-          compose-soundlets
-          append-soundlet!
-          play-soundlet
+          play-mml
           )
 
   (extend graviton.color))
@@ -381,8 +380,10 @@ typedef struct {
     int num_freqs;
     double left_volume;
     double right_volume;
-    int length;
-    // TODO: Add envelope.
+    int attack_time;   // sec * 44100
+    int decay_time;    // sec * 44100
+    double sustain_level;
+    int release_time;  // sec * 44100
 } GrvToneSoundlet;
 
 typedef struct {
@@ -393,24 +394,21 @@ typedef struct {
 typedef struct GrvSoundletRec {
     struct GrvSoundletRec *next;
     SoundletType type;
+    int length;
     union {
         GrvToneSoundlet* tone;
         GrvCompositeSoundlet* composite;
     } data;
 } GrvSoundlet;
-
-struct GrvSoundletPointerRec;;
-
-typedef struct GrvSoundletPointerRec {
-    int start_position;
-    GrvSoundlet *soundlet;
-    struct GrvSoundletPointerRec **children;
-    int num_children;
-} GrvSoundletPointer;
 "
+  (define-ctype GrvSoundletContext::(.struct
+                                     (start-position::int
+                                      soundlet::GrvSoundlet*)))
+
   (define-ctype GrvSoundContext::(.struct
                                   (position::int
-                                   pointer::GrvSoundletPointer*
+                                   soundlet-contexts::GrvSoundletContext**
+                                   num-soundlet-contexts::int
                                    future)))
 
   (define-ctype GrvSoundContextQueue::(.struct
@@ -3648,19 +3646,41 @@ typedef enum {
                                               (ref sound-context-queue length)))
      (return gcontext)))
 
- (define-cfn point-soundlet! (gpointer::GrvSoundletPointer* gsoundlet::GrvSoundlet* pos::int)
-   ::GrvSoundletPointer*
-   (set! (-> gpointer start-position) pos
-         (-> gpointer soundlet) gsoundlet
-         (-> gpointer children) NULL
-         (-> gpointer num-children) 0)
-   (when (and gsoundlet (== (-> gsoundlet type) SOUNDLET_COMPOSITE))
-     (let* ((gcomposite::GrvCompositeSoundlet* (ref (-> gsoundlet data) composite)))
-       (set! (-> gpointer num-children) (-> gcomposite num-children)
-             (-> gpointer children) (SCM_NEW_ARRAY (.type GrvSoundletPointer*) (-> gpointer num-children)))
-       (dotimes (i (-> gpointer num-children))
-         (set! (aref (-> gpointer children) i) (SCM_NEW (.type GrvSoundletPointer)))
-         (point-soundlet! (aref (-> gpointer children) i) (aref (-> gcomposite children) i) pos)))))
+ (define-cfn retain-soundlet! (gcontext::GrvSoundContext* gsoundlet::GrvSoundlet* pos::int)
+   ::void
+   (unless gsoundlet
+     (return))
+   (dotimes (i (-> gcontext num-soundlet-contexts))
+     (when (== (aref (-> gcontext soundlet-contexts) i) NULL)
+       (let* ((sctx:: GrvSoundletContext* (SCM_NEW (.type GrvSoundletContext))))
+         (set! (-> sctx start-position) pos
+               (-> sctx soundlet) gsoundlet
+               (aref (-> gcontext soundlet-contexts) i) sctx))
+       (when (== (-> gsoundlet type) SOUNDLET_COMPOSITE)
+         (let* ((gcomposite::GrvCompositeSoundlet* (ref (-> gsoundlet data) composite)))
+           (dotimes (j (-> gcomposite num-children))
+             (retain-soundlet! gcontext (aref (-> gcomposite children) j) pos))))
+       (return)))
+
+   (let* ((new-size::int (* (-> gcontext num-soundlet-contexts) 2))
+          (new-contexts::GrvSoundletContext** (SCM_NEW_ARRAY (.type GrvSoundletContext*) new-size)))
+     (dotimes (i new-size)
+       (cond
+         ((< i (-> gcontext num-soundlet-contexts))
+          (set! (aref new-contexts i) (aref (-> gcontext soundlet-contexts) i)))
+         (else
+          (set! (aref new-contexts i) NULL))))
+     (set! (-> gcontext soundlet-contexts) new-contexts
+           (-> gcontext num-soundlet-contexts) new-size)
+     (retain-soundlet! gcontext gsoundlet pos)))
+
+ (define-cfn release-soundlet! (gcontext::GrvSoundContext* gsoundlet::GrvSoundlet*)
+   ::void
+   (dotimes (i (-> gcontext num-soundlet-contexts))
+     (let* ((sctx::GrvSoundletContext* (aref (-> gcontext soundlet-contexts) i)))
+       (when (and sctx (== (-> sctx soundlet) gsoundlet))
+         (set! (aref (-> gcontext soundlet-contexts) i) NULL)
+         (return)))))
 
  (define-cfn inc-buffer! (buf::int16_t* index::int dv::double)
    ::void
@@ -3754,7 +3774,7 @@ typedef enum {
          (set! v (+ v (- (/ (* 2.0 amp (% rel-pos len)) len) amp)))))
      (return v)))
 
- (define-cfn compute-tone-long-noise (freqs::double* amps::double* num-freqs::int rel-pos::int)
+ (define-cfn compute-tone-long-noise (freqs::double* amps::double* num-freqs::int rel-pos::int dummy::int)
    ::double
    (let* ((v::double 0))
      (dotimes (i num-freqs)
@@ -3766,12 +3786,13 @@ typedef enum {
            (set! len50 1))
          (cond
            ((< (% rel-pos len) len50)
-            (set! v (+ v (* amp (aref noise-table (% (/ rel-pos len50) NOISE_TABLE_SIZE))))))
+            (set! v (+ v (* amp (aref noise-table (% (+ (/ rel-pos len50) dummy) NOISE_TABLE_SIZE))))))
            (else
-            (set! v (- v (* amp (aref noise-table (% (/ rel-pos len50) NOISE_TABLE_SIZE)))))))))
+            (set! v (- v (* amp (aref noise-table (% (+ (/ rel-pos len50) dummy) NOISE_TABLE_SIZE)))))))))
      (return v)))
 
- (define-cfn compute-tone-short-noise (freqs::double* amps::double* num-freqs::int rel-pos::int)
+ (.define SHORT_NOISE_SIZE 100)
+ (define-cfn compute-tone-short-noise (freqs::double* amps::double* num-freqs::int rel-pos::int dummy::int)
    ::double
    (let* ((v::double 0))
      (dotimes (i num-freqs)
@@ -3783,96 +3804,136 @@ typedef enum {
            (set! len50 1))
          (cond
            ((< (% rel-pos len) len50)
-            (set! v (+ v (* amp (aref noise-table (% (/ rel-pos len50) 100))))))
+            (set! v (+ v (* amp (aref noise-table (% (+ (/ rel-pos len50) dummy) SHORT_NOISE_SIZE))))))
            (else
-            (set! v (- v (* amp (aref noise-table (% (/ rel-pos len50) 100)))))))))
+            (set! v (- v (* amp (aref noise-table (% (+ (/ rel-pos len50) dummy) SHORT_NOISE_SIZE)))))))))
      (return v)))
 
- (define-cfn render-tone (buf::int16_t* index::int pos::int gpointer::GrvSoundletPointer*)
-   ::bool
-   (let* ((gsoundlet::GrvSoundlet* (-> gpointer soundlet))
+ (define-cfn render-tone (buf::int16_t* index::int gcontext::GrvSoundContext* gsoundlet-context::GrvSoundletContext*)
+   ::void
+   (let* ((gsoundlet::GrvSoundlet* (-> gsoundlet-context soundlet))
           (gtone::GrvToneSoundlet* (ref (-> gsoundlet data) tone))
-          (rel-pos::int (- pos (-> gpointer start-position))))
-     (cond
-       ((< rel-pos (-> gtone length))
-        (let* ((v::double 0))
-          (case (-> gtone type)
-            ((TONE_SILENT)
-             (set! v (compute-tone-silent (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
-            ((TONE_SINE)
-             (set! v (compute-tone-sine (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
-            ((TONE_SQUARE50)
-             (set! v (compute-tone-square50 (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
-            ((TONE_SQUARE12)
-             (set! v (compute-tone-square12 (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
-            ((TONE_SQUARE25)
-             (set! v (compute-tone-square25 (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
-            ((TONE_TRIANGLE)
-             (set! v (compute-tone-triangle (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
-            ((TONE_SAWTOOTH)
-             (set! v (compute-tone-sawtooth (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
-            ((TONE_LONG_NOISE)
-             (set! v (compute-tone-long-noise (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
-            ((TONE_SHORT_NOISE)
-             (set! v (compute-tone-short-noise (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos))))
-            (inc-buffer! buf index (* (-> gtone left-volume) v))
-          (inc-buffer! buf (+ index 1) (* (-> gtone right-volume) v))
-          (return true)))
-       (else
-        (point-soundlet! gpointer (-> gsoundlet next) pos)
-        (return (render-soundlet buf index pos gpointer))))))
+          (start-pos::int (-> gsoundlet-context start-position))
+          (cur-pos::int (-> gcontext position))
+          (rel-pos::int (- cur-pos start-pos))
+          (length::int (-> gsoundlet length))
+          (attack-time::int (-> gtone attack-time))
+          (decay-time::int (-> gtone decay-time))
+          (sustain-level::double (-> gtone sustain-level))
+          (release-time::int (-> gtone release-time)))
+     (when (< rel-pos 0)
+       (return))
+     (when (== rel-pos (- length 1))
+       (retain-soundlet! gcontext (-> gsoundlet next) (+ cur-pos 1)))
+     (when (<= (+ length release-time) rel-pos)
+       (release-soundlet! gcontext (-> gsoundlet-context soundlet))
+       (return))
 
- (define-cfn render-soundlet (buf::int16_t* index::int pos::int gpointer::GrvSoundletPointer*)
-   ::bool :static
-   (when (== (-> gpointer soundlet) NULL)
-     (return false))
+     (let* ((v::double 0))
+       (case (-> gtone type)
+         ((TONE_SILENT)
+          (set! v (compute-tone-silent (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+         ((TONE_SINE)
+          (set! v (compute-tone-sine (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+         ((TONE_SQUARE50)
+          (set! v (compute-tone-square50 (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+         ((TONE_SQUARE12)
+          (set! v (compute-tone-square12 (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+         ((TONE_SQUARE25)
+          (set! v (compute-tone-square25 (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+         ((TONE_TRIANGLE)
+          (set! v (compute-tone-triangle (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+         ((TONE_SAWTOOTH)
+          (set! v (compute-tone-sawtooth (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos)))
+         ((TONE_LONG_NOISE)
+          (set! v (compute-tone-long-noise (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos start-pos)))
+         ((TONE_SHORT_NOISE)
+          (set! v (compute-tone-short-noise (-> gtone freqs) (-> gtone amps) (-> gtone num-freqs) rel-pos start-pos))))
+       (cond
+         ((< rel-pos attack-time)
+          (set! v (* (/ 1.0 attack-time) rel-pos v)))
+         ((and (<= attack-time rel-pos) (< rel-pos (+ attack-time decay-time)))
+          (set! v (* (+ (* (/ (- sustain-level 1.0) decay-time) (- rel-pos attack-time)) 1.0) v)))
+         ((and (<= (+ attack-time decay-time) rel-pos) (< rel-pos length))
+          (set! v (* sustain-level v)))
+         (else
+          (set! v (* (+ (* (/ (- sustain-level) release-time) (- rel-pos length)) sustain-level) v))))
+       (inc-buffer! buf index (* (-> gtone left-volume) v))
+       (inc-buffer! buf (+ index 1) (* (-> gtone right-volume) v)))))
 
-   (when (== (-> gpointer soundlet type) SOUNDLET_TONE)
-     (return (render-tone buf index pos gpointer)))
+ (define-cfn render-composite (buf::int16_t* index::int gcontext::GrvSoundContext* gsoundlet-context::GrvSoundletContext*)
+   ::void
+   (let* ((gsoundlet::GrvSoundlet* (-> gsoundlet-context soundlet))
+          (gcomposite::GrvCompositeSoundlet* (ref (-> gsoundlet data) composite))
+          (start-pos::int (-> gsoundlet-context start-position))
+          (cur-pos::int (-> gcontext position))
+          (rel-pos::int (- cur-pos start-pos))
+          (length::int (-> gsoundlet length)))
+     (when (== rel-pos (- length 1))
+       (retain-soundlet! gcontext (-> gsoundlet next) (+ cur-pos 1)))
+     (when (<= length rel-pos)
+       (release-soundlet! gcontext (-> gsoundlet-context soundlet)))))
 
-   (let* ((num-finish::int 0))
-     (dotimes (i (-> gpointer num-children))
-       (unless (render-soundlet buf index pos (aref (-> gpointer children) i))
-         (inc! num-finish)))
-     (cond
-       ((== num-finish (-> gpointer num-children))
-        (point-soundlet! gpointer (-> gpointer soundlet next) pos)
-        (return (render-soundlet buf index pos gpointer)))
-       (else
-        (return true)))))
+ (define-cfn render-context (buf::int16_t* index::int gcontext::GrvSoundContext*)
+   ::void :static
+   (dotimes (i (-> gcontext num-soundlet-contexts))
+     (let* ((sctx::GrvSoundletContext* (aref (-> gcontext soundlet-contexts) i)))
+       (unless (== sctx NULL)
+         (cond
+           ((== (-> sctx soundlet type) SOUNDLET_TONE)
+            (render-tone buf index gcontext sctx))
+           ((== (-> sctx soundlet type) SOUNDLET_COMPOSITE)
+            (render-composite buf index gcontext sctx)))))))
 
  (define-cfn fill-audio-stream (udata::void* stream::Uint8* len::int)
    ::void :static
+   (memset stream 0 len)
    (let* ((buf::int16_t* (cast int16_t* stream))
           (buf-length::int (/ len 2))
           (index::int 0)
           (gcontext::GrvSoundContext* (cast GrvSoundContext* udata))
           (pos::int (-> gcontext position))
           (pos-end::int (+ pos (/ buf-length 2)))
-          (gpointer::GrvSoundletPointer* (-> gcontext pointer)))
-     (when (and (== (-> gpointer soundlet) NULL)
-                (GRV_FUTURE_P (-> gcontext future)))
-       (let* ((event::SDL_Event))
-         (set! (ref event type) graviton-event-type
-               (ref event user code) GRAVITON_MUSIC_FINISH_CODE
-               (ref event user data1) (GRV_FUTURE_PTR (-> gcontext future))
-               (ref event user data2) 'finished)
-         (SDL_PushEvent (& event))
-         (set! (-> gcontext future) SCM_FALSE)
-         (return)))
+          (i::int 0))
+     (while (< i buf-length)
+       (render-context buf i gcontext)
+       (inc! (-> gcontext position))
+       (set! i (+ i 2)))
 
-     (memset stream 0 len)
+     (let* ((num::int 0))
+       (dotimes (i (-> gcontext num-soundlet-contexts))
+         (unless (== (aref (-> gcontext soundlet-contexts) i) NULL)
+           (inc! num)))
+       (when (and (== num 0)
+                  (GRV_FUTURE_P (-> gcontext future)))
+         (let* ((event::SDL_Event))
+           (set! (ref event type) graviton-event-type
+                 (ref event user code) GRAVITON_MUSIC_FINISH_CODE
+                 (ref event user data1) (GRV_FUTURE_PTR (-> gcontext future))
+                 (ref event user data2) 'finished)
+           (SDL_PushEvent (& event))
+           (set! (-> gcontext future) SCM_FALSE))))))
 
-     (while (< pos pos-end)
-       (unless (render-soundlet buf index pos gpointer)
-         (break))
-       (inc! pos)
-       (set! index (+ index 2)))
-     (set! (-> gcontext position) pos)))
-
+ (define-cfn compute-total-length (gsoundlet::GrvSoundlet*)
+   ::int
+   (let* ((cursor::GrvSoundlet* gsoundlet)
+          (len::int 0))
+     (while cursor
+       (set! len (+ len (-> gsoundlet length))
+             cursor (-> cursor next)))
+     (return len)))
  ) ;; end of inline-stub
 
-(define-cproc make-soundlet (type freqs::<f64vector> amps::<f64vector> left-volume::<double> right-volume::<double> sec::<double>)
+(define-cproc make-soundlet (type
+                             freqs::<f64vector>
+                             amps::<f64vector>
+                             left-volume::<double>
+                             right-volume::<double>
+                             sec::<double>
+                             attack-time::<double>
+                             decay-time::<double>
+                             sustain-level::<double>
+                             release-time::<double>)
   ::<graviton-soundlet>
   (unless (== (SCM_F64VECTOR_SIZE freqs) (SCM_F64VECTOR_SIZE amps))
     (Scm_Error "freqs and amps must be the same size"))
@@ -3912,11 +3973,15 @@ typedef enum {
           (-> gtone num-freqs) (SCM_F64VECTOR_SIZE freqs)
           (-> gtone left-volume) left-volume
           (-> gtone right-volume) right-volume
-          (-> gtone length) length)
+          (-> gtone attack-time) (cast int (round (* 44100 attack-time)))
+          (-> gtone decay-time) (cast int (round (* 44100 decay-time)))
+          (-> gtone sustain-level) sustain-level
+          (-> gtone release-time) (cast int (round (* 44100 release-time))))
     (memcpy (-> gtone freqs) (SCM_F64VECTOR_ELEMENTS freqs) (* (sizeof (.type double)) (SCM_F64VECTOR_SIZE freqs)))
     (memcpy (-> gtone amps) (SCM_F64VECTOR_ELEMENTS amps) (* (sizeof (.type double)) (SCM_F64VECTOR_SIZE amps)))
     (set! (-> gsoundlet next) NULL
           (-> gsoundlet type) SOUNDLET_TONE
+          (-> gsoundlet length) length
           (ref (-> gsoundlet data) tone) gtone)
     (return gsoundlet)))
 
@@ -3926,16 +3991,23 @@ typedef enum {
          (gsoundlet::GrvSoundlet* (SCM_NEW GrvSoundlet)))
     (set! (-> gcomposite num-children) (Scm_Length soundlets)
           (-> gcomposite children) (SCM_NEW_ARRAY (.type GrvSoundlet*) (-> gcomposite num-children)))
-    (let* ((i::int 0))
+    (let* ((i::int 0)
+           (max-len::int 0))
       (for-each (lambda (child)
                   (unless (GRV_SOUNDLET_P child)
                     (Scm_Error "<graviton-soundlet> required, but got %S" child))
-                  (set! (aref (-> gcomposite children) i) (GRV_SOUNDLET_PTR child))
+                  (let* ((child-gsoundlet::GrvSoundlet* (GRV_SOUNDLET_PTR child))
+                         (len::int 0))
+                    (set! (aref (-> gcomposite children) i) child-gsoundlet
+                          len (compute-total-length child-gsoundlet))
+                    (when (< max-len len)
+                      (set! max-len len)))
                   (pre++ i))
-                soundlets))
-    (set! (-> gsoundlet next) NULL
-          (-> gsoundlet type) SOUNDLET_COMPOSITE
-          (ref (-> gsoundlet data) composite) gcomposite)
+                soundlets)
+      (set! (-> gsoundlet next) NULL
+            (-> gsoundlet length) max-len
+            (-> gsoundlet type) SOUNDLET_COMPOSITE
+            (ref (-> gsoundlet data) composite) gcomposite))
     (return gsoundlet)))
 
 (define-cproc append-soundlet! (gsoundlet1::<graviton-soundlet> gsoundlet2::<graviton-soundlet>)
@@ -3943,13 +4015,15 @@ typedef enum {
   (set! (-> gsoundlet1 next) gsoundlet2))
 
 (define-cproc play-soundlet (gsoundlet::<graviton-soundlet>)
-  (let* ((gpointer::GrvSoundletPointer* (SCM_NEW (.type GrvSoundletPointer)))
-         (gcontext::GrvSoundContext* (SCM_NEW (.type GrvSoundContext)))
+  (let* ((gcontext::GrvSoundContext* (SCM_NEW (.type GrvSoundContext)))
          (future (make-future)))
-    (point-soundlet! gpointer gsoundlet 0)
     (set! (-> gcontext position) 0
-          (-> gcontext pointer) gpointer
+          (-> gcontext num-soundlet-contexts) 16
+          (-> gcontext soundlet-contexts) (SCM_NEW_ARRAY (.type GrvSoundletContext*) (-> gcontext num-soundlet-contexts))
           (-> gcontext future) future)
+    (dotimes (i (-> gcontext num-soundlet-contexts))
+      (set! (aref (-> gcontext soundlet-contexts) i) NULL))
+    (retain-soundlet! gcontext gsoundlet 0)
     (cond
       (playing-music?
        (enqueue-sound-context! gcontext))
@@ -3957,6 +4031,258 @@ typedef enum {
        (set! playing-music? true)
        (Mix_HookMusic fill-audio-stream gcontext)))
     (return future)))
+
+(define (pitch n)
+  (* 440 (expt 2 (/. (- n 69) 12))))
+
+(define-record-type (<envelope> (pseudo-rtd <list>))
+  make-envelope envelope?
+  (attack-time envelope-attack-time)
+  (decay-time envelope-decay-time)
+  (sustain-level envelope-sustain-level)
+  (release-time envelope-release-time))
+
+(define (generate-make-simple-tone type)
+  (lambda (freq velocity vols sec envelope)
+    (make-soundlet type
+                   (make-f64vector 1 freq)
+                   (make-f64vector 1 velocity)
+                   (list-ref vols 0)
+                   (list-ref vols 1)
+                   sec
+                   (envelope-attack-time envelope)
+                   (envelope-decay-time envelope)
+                   (envelope-sustain-level envelope)
+                   (envelope-release-time envelope))))
+
+(define make-default-tone (generate-make-simple-tone 'sine))
+(define (make-silent sec)
+  (make-soundlet 'silent #f64() #f64() 0 0 sec 0 0 0 0))
+(define default-envelope (make-envelope 0 0 1.0 0))
+
+(define (merge-soundlet seq)
+  (fold (lambda (former latter)
+          (when latter
+            (append-soundlet! former latter))
+          former)
+        #f
+        seq))
+
+(define (compile-mml context seq mml cont)
+  (match mml
+    (()
+     (cont context seq))
+    ((('wave type freq vel sec) rest ...)
+     (let ((make-tone (generate-make-simple-tone type))
+           (vols (assoc-ref context 'volumes '(1.0 1.0)))
+           (envelope (assoc-ref context 'envelope default-envelope)))
+       (compile-mml
+         context
+         (cons (make-tone freq vel vols sec envelope) seq)
+         rest
+         cont)))
+    ((('note n v sec) rest ...)
+     (let ((make-tone (assoc-ref context 'make-tone make-default-tone))
+           (vols (assoc-ref context 'volumes '(1.0 1.0)))
+           (envelope (assoc-ref context 'envelope default-envelope)))
+       (compile-mml
+         context
+         (cons (make-tone (pitch n) v vols sec envelope) seq)
+         rest
+         cont)))
+    ((('rest sec) rest ...)
+     (compile-mml
+       context
+       (cons (make-silent sec) seq)
+       rest
+       cont))
+    ((('compose mmls ...) rest ...)
+     (compile-mml
+       context
+       (cons (compose-soundlets (filter values (map (lambda (mml)
+                                                      (compile-mml context '() mml (lambda (_ seq)
+                                                                                     (merge-soundlet seq))))
+                                                    mmls)))
+             seq)
+       rest
+       cont))
+    ((('begin mml ...) rest ...)
+     (let1 current-context (map (lambda (pair)
+                                  (list-copy pair))
+                                context)
+       (compile-mml context seq mml (lambda (context seq)
+                                      (compile-mml current-context seq rest cont)))))
+    ((('volume left right) rest ...)
+     (compile-mml
+       (assoc-set! context 'volume (list left right))
+       seq
+       rest
+       cont))
+    ((('tone (? symbol? type)) rest ...)
+     (compile-mml
+       (assoc-set! context 'make-tone (generate-make-simple-tone type))
+       seq
+       rest
+       cont))
+    ((('tone (freq-coff amp) ...) rest ...)
+     (compile-mml
+       (assoc-set! context 'make-tone (lambda (freq velocity vols sec envelope)
+                                        (make-soundlet type
+                                                       (list->f64vector (map (cut (* freq <>)) freq-coff))
+                                                       (list->f64vector amp)
+                                                       (list-ref vols 0)
+                                                       (list-ref vols 1)
+                                                       sec
+                                                       (envelope-attack-time envelope)
+                                                       (envelope-decay-time envelope)
+                                                       (envelope-sustain-level envelope)
+                                                       (envelope-release-time envelope))))
+       seq
+       rest
+       cont))
+    ((('envelope attack-time decay-time sustain-level release-time) rest ...)
+     (compile-mml
+       (assoc-set! context 'envelope (make-envelope attack-time decay-time sustain-level release-time))
+       seq
+       rest
+       cont))
+    ((('length n) rest ...)
+     (compile-mml
+       (assoc-set! context 'length (/ 1 n))
+       seq
+       rest
+       cont))
+    ((('velocity v) rest ...)
+     (compile-mml
+       (assoc-set! context 'velocity v)
+       seq
+       rest
+       cont))
+    ((('tempo n) rest ...)
+     (compile-mml
+       (assoc-set! context 'tempo-factor (* (/ 60 n) 4))
+       seq
+       rest
+       cont))
+    ((('tempo n m) rest ...)
+     (compile-mml
+       (assoc-set! context 'tempo-factor (* (/ 60 n) m))
+       seq
+       rest
+       cont))
+    ((('octave n) rest ...)
+     (compile-mml
+       (assoc-set! context 'octave n)
+       seq
+       rest
+       cont))
+    (((? symbol? note-spec) rest ...)
+     (compile-mml
+       context
+       (cons (note-spec->soundlet context (symbol->string note-spec)) seq)
+       rest
+       cont))
+    (((? string? note-spec) rest ...)
+     (compile-mml
+       context
+       (cons (note-spec->soundlet context note-spec) seq)
+       rest
+       cont))
+    (else
+     (errorf "Invalied mml: ~s" mml))))
+
+(define parse-note
+  (let* ((basic-note ($or ($string "c")
+                          ($string "d")
+                          ($string "e")
+                          ($string "f")
+                          ($string "g")
+                          ($string "a")
+                          ($string "b")
+                          ($string "r")))
+         (note ($do (bn basic-note)
+                    (qual ($optional ($or ($string "+") ($string "-"))))
+                    ($return (string-append (rope->string bn) (or (rope->string qual) "")))))
+         (chord ($many note))
+         (len ($do (digits ($many ($one-of #[\d])))
+                   (qual ($many ($string "+")))
+                   ($return (cond
+                              ((null? digits)
+                               #f)
+                              (else
+                               digits (let1 basic-len (/ 1 (string->number (apply string digits)))
+                                        (* basic-len (sum-ec (: i (+ (length qual) 1))
+                                                             (/ 1 (expt 2 i))))))))))
+         (chord+len ($do (ns chord)
+                         (l ($optional len))
+                         ($return (list ns l)))))
+    (lambda (str)
+      (call-with-input-string str
+        (lambda (in)
+          (begin0
+            (peg-parse-port chord+len in)
+            (unless (eof-object? (read-char in))
+              (errorf "Invalid note: ~s" str))))))))
+
+(define note->pitch
+  (let1 table '(("c-" . -1)
+                ("c" . 0)
+                ("c+" . 1)
+                ("d-" . 1)
+                ("d" . 2)
+                ("d+" . 3)
+                ("e-" . 3)
+                ("e" . 4)
+                ("e+" . 5)
+                ("f-" . 4)
+                ("f" . 5)
+                ("f+" . 6)
+                ("g-" . 6)
+                ("g" . 7)
+                ("g+" . 8)
+                ("a-" . 8)
+                ("a" . 9)
+                ("a+" . 10)
+                ("b-" . 10)
+                ("b" . 11)
+                ("b+" . 12))
+    (lambda (octave note)
+      (if (equal? note "r")
+          #f
+          (+ (* 12 (+ octave 1)) (assoc-ref table note))))))
+
+(define (note-spec->soundlet context str)
+  (match-let1 ((notes ...) len) (parse-note str)
+    (let ((sec (* (assoc-ref context 'tempo-factor 4)
+                  (or len (assoc-ref context 'length (/ 1 4)))))
+          (octave (assoc-ref context 'octave 4))
+          (make-tone (assoc-ref context 'make-tone make-default-tone))
+          (vols (assoc-ref context 'volumes '(1.0 1.0)))
+          (velocity (assoc-ref context 'velocity 1.0))
+          (envelope (assoc-ref context 'envelope default-envelope)))
+      (receive (pitches _) (fold2 (lambda (note pitches prev-pitch)
+                                    (let1 pitch-num (let1 p (note->pitch octave note)
+                                                      (cond
+                                                        ((not p)
+                                                         #f)
+                                                        ((<= prev-pitch p)
+                                                         p)
+                                                        (else
+                                                         (+ p 12))))
+                                      (values (cons pitch-num pitches)
+                                              (or pitch-num prev-pitch))))
+                                  '()
+                                  (least-fixnum)
+                                  notes)
+        (compose-soundlets (map (lambda (pitch-num)
+                                  (if pitch-num
+                                      (make-tone (pitch pitch-num) velocity vols sec envelope)
+                                      (make-silent sec)))
+                                pitches))))))
+
+(define (play-mml mml)
+  (play-soundlet (compile-mml '() '() mml (lambda (context seq)
+                                            (merge-soundlet seq)))))
 
 (include "graviton/enum2sym.scm")
 
