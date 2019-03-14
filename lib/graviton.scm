@@ -240,6 +240,17 @@
           message-box
 
           play-mml
+          set-music-volume!
+          music-volume
+          load-sound
+          play-sound
+          stop-channel
+          pause-channel
+          resume-channel
+          playing-channel?
+          paused-channel?
+          set-channel-volume!
+          channel-volume
           )
 
   (extend graviton.color))
@@ -431,6 +442,8 @@ typedef struct GrvSoundletRec {
  (define-cvar playing-music?::bool :static)
  (define-cvar noise-table::double* :static)
  (define-cvar music-last-finished-tick::Uint32 :static)
+ (define-cvar playing-sound-vector :static)
+ (define-cvar playing-sound-lock::SDL_SpinLock :static)
 
  (define-cptr <graviton-window> :private
    "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
@@ -456,6 +469,9 @@ typedef struct GrvSoundletRec {
  (define-cptr <graviton-soundlet> :private
    "GrvSoundlet*" "GravitonSoundletClass" "GRV_SOUNDLET_P" "MAKE_GRV_SOUNDLET" "GRV_SOUNDLET_PTR")
 
+ (define-cptr <graviton-sound> :private
+   "Mix_Chunk*" "GravitonSoundClass" "GRV_SOUND_P" "MAKE_GRV_SOUND" "GRV_SOUND_PTR")
+
  (.define GRAVITON_EXCEPTION_CODE 1)
  (.define GRAVITON_UNCAUGHT_EXCEPTION_CODE 2)
  (.define GRAVITON_MUSIC_FINISH_CODE 3)
@@ -464,6 +480,7 @@ typedef struct GrvSoundletRec {
 
  (.define SOUND_CONTEXT_INITIAL_LENGTH 16)
  (.define NOISE_TABLE_SIZE 32768)
+ (.define CHANNEL_SIZE 16)
 
  )  ;; end of inline-stub
 
@@ -510,6 +527,12 @@ typedef struct GrvSoundletRec {
       (set! (aref noise-table i) (* (- (/ (cast double (random)) RAND_MAX) 0.5) 2.0)))
 
     (set! music-last-finished-tick 0)
+
+    (Mix_AllocateChannels CHANNEL_SIZE)
+    (set! playing-sound-vector (Scm_MakeVector CHANNEL_SIZE SCM_FALSE)
+          playing-sound-lock 0)
+    (Mix_ChannelFinished finish-channel)
+
     ) ;; end of initialize-libs
 
   (initcode
@@ -4284,6 +4307,95 @@ typedef enum {
   (play-soundlet (compile-mml '() '() mml (lambda (context seq)
                                             (merge-soundlet seq)))))
 
+
+(define-cproc set-music-volume! (volume::<int>)
+  ::<void>
+  (Mix_VolumeMusic volume))
+
+(define-cproc music-volume ()
+  ::<int>
+  (return (Mix_VolumeMusic -1)))
+
+;;;
+;;; Sound
+;;;
+
+(inline-stub
+ (define-cfn finalize-sound (z data::void*)
+   ::void
+   (when (GRV_SOUND_P z)
+     (Mix_FreeChunk (GRV_SOUND_PTR z))))
+
+ (define-cfn set-playing-sound! (channel::int sound)
+   ::void
+   (SDL_AtomicLock (& playing-sound-lock))
+   (Scm_VectorSet (SCM_VECTOR playing-sound-vector) channel sound)
+   (SDL_AtomicUnlock (& playing-sound-lock)))
+
+ (define-cfn finish-channel (channel::int)
+   ::void :static
+   (set-playing-sound! channel SCM_FALSE))
+ ) ;; end of inline-stub
+
+(define-cproc load-sound (filename::<const-cstring>)
+  (let* ((chunk::Mix_Chunk* (Mix_LoadWAV filename)))
+    (unless chunk
+      (Scm_Error "Mix_LoadWAV failed: %s" (Mix_GetError)))
+    (let* ((sound (MAKE_GRV_SOUND chunk)))
+      (Scm_RegisterFinalizer sound finalize-sound NULL)
+      (return sound))))
+
+(define-cproc play-sound (sound :key (channel #f))
+  ::<int>
+  (unless (GRV_SOUND_P sound)
+    (Scm_Error "<graviton-sound> required, but got %S" sound))
+
+  (let* ((channel-num::int -1)
+         (which::int))
+    (cond
+      ((SCM_INTP channel)
+       (set! channel-num (SCM_INT_VALUE channel))
+       (unless (and (<= 0 channel-num) (< channel-num CHANNEL_SIZE))
+         (Scm_Error "channel out of range: %d" channel-num)))
+      ((SCM_FALSEP channel)
+       (set! channel-num -1))
+      (else
+       (Scm_Error "<integer> or #f required, but got %S" channel)))
+
+    (set! which (Mix_PlayChannel channel-num (GRV_SOUND_PTR sound) 0))
+    (when (< which 0)
+      (Scm_Error "Mix_PlayChannel failed: %s" (Mix_GetError)))
+    (set-playing-sound! which sound)
+    (return which)))
+
+(define-cproc stop-channel (channel::<int>)
+  ::<void>
+  (Mix_HaltChannel channel))
+
+(define-cproc playing-channel? (channel::<int>)
+  ::<boolean>
+  (return (Mix_Playing channel)))
+
+(define-cproc pause-channel (channel::<int>)
+  ::<void>
+  (Mix_Pause channel))
+
+(define-cproc resume-channel (channel::<int>)
+  ::<void>
+  (Mix_Resume channel))
+
+(define-cproc paused-channel? (channel::<int>)
+  ::<boolean>
+  (return (Mix_Paused channel)))
+
+(define-cproc set-channel-volume! (channel::<int> volume::<int>)
+  ::<void>
+  (Mix_Volume channel volume))
+
+(define-cproc channel-volume (channel::<int>)
+  ::<int>
+  (return (Mix_Volume channel -1)))
+
 (include "graviton/enum2sym.scm")
 
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
@@ -4347,3 +4459,6 @@ typedef enum {
 (set! (setter sprite-color) set-sprite-color!)
 
 (set! (setter tile-map-offset) set-tile-map-offset!)
+
+(set! (setter music-volume) set-music-volume!)
+(set! (setter channel-volume) set-channel-volume!)
