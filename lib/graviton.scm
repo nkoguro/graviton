@@ -56,6 +56,7 @@
           <graviton-sprite>
           <graviton-tile-map>
           <graviton-future>
+          <graviton-music>
 
           async
           async*
@@ -240,17 +241,25 @@
           message-box
 
           play-mml
+          stop-mml
+          load-music
+          play-music
+          stop-music
+          pause-music
+          resume-music
+          playing-music?
+          paused-music?
           set-music-volume!
           music-volume
           load-sound
           play-sound
-          stop-channel
-          pause-channel
-          resume-channel
-          playing-channel?
-          paused-channel?
-          set-channel-volume!
-          channel-volume
+          stop-sound
+          pause-sound
+          resume-sound
+          playing-sound?
+          paused-sound?
+          set-sound-volume!
+          sound-volume
           )
 
   (extend graviton.color))
@@ -416,17 +425,32 @@ typedef struct GrvSoundletRec {
                                      (start-position::int
                                       soundlet::GrvSoundlet*)))
 
-  (define-ctype GrvSoundContext::(.struct
-                                  (position::int
-                                   soundlet-contexts::GrvSoundletContext**
-                                   num-soundlet-contexts::int
+  (define-ctype GrvMMLMusicContext::(.struct
+                                     (position::int
+                                      soundlet-contexts::GrvSoundletContext**
+                                      num-soundlet-contexts::int
+                                      future)))
+
+  (define-ctype GrvMMLMusicContextQueue::(.struct
+                                          (buf::GrvMMLMusicContext**
+                                           length::int
+                                           start::int
+                                           end::int)))
+
+  (define-ctype GrvMusic::(.struct
+                           (music::Mix_Music*)))
+
+  (define-ctype GrvMusicContext::(.struct
+                                  (music
                                    future)))
 
-  (define-ctype GrvSoundContextQueue::(.struct
-                                       (buf::GrvSoundContext**
-                                        length::int
-                                        start::int
-                                        end::int)))
+  (define-ctype GrvSound::(.struct
+                           (chunk::Mix_Chunk*)))
+
+  (define-ctype GrvSoundContext::(.struct
+                                  (sound
+                                   future)))
+
   ) ;; end of declcode
 
  (define-cvar main-thread-id::SDL_threadID :static)
@@ -438,12 +462,13 @@ typedef struct GrvSoundletRec {
  (define-cvar repl-channel :static)
  (define-cvar graviton-event-type::Uint32 :static)
  (define-cvar graviton-module :static)
- (define-cvar sound-context-queue::GrvSoundContextQueue :static)
- (define-cvar playing-music?::bool :static)
+ (define-cvar mml-music-context-queue::GrvMMLMusicContextQueue :static)
+ (define-cvar playing-music-context::GrvMusicContext* :static)
+ (define-cvar playing-music-lock::SDL_SpinLock :static)
  (define-cvar noise-table::double* :static)
  (define-cvar music-last-finished-tick::Uint32 :static)
- (define-cvar playing-sound-vector :static)
- (define-cvar playing-sound-lock::SDL_SpinLock :static)
+ (define-cvar playing-sound-contexts::GrvSoundContext** :static)
+ (define-cvar global-lock::SDL_SpinLock :static)
 
  (define-cptr <graviton-window> :private
    "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
@@ -469,80 +494,99 @@ typedef struct GrvSoundletRec {
  (define-cptr <graviton-soundlet> :private
    "GrvSoundlet*" "GravitonSoundletClass" "GRV_SOUNDLET_P" "MAKE_GRV_SOUNDLET" "GRV_SOUNDLET_PTR")
 
+ (define-cptr <graviton-music> :private
+   "GrvMusic*" "GravitonMusicClass" "GRV_MUSIC_P" "MAKE_GRV_MUSIC" "GRV_MUSIC_PTR")
+
  (define-cptr <graviton-sound> :private
-   "Mix_Chunk*" "GravitonSoundClass" "GRV_SOUND_P" "MAKE_GRV_SOUND" "GRV_SOUND_PTR")
+   "GrvSound*" "GravitonSoundClass" "GRV_SOUND_P" "MAKE_GRV_SOUND" "GRV_SOUND_PTR")
 
  (.define GRAVITON_EXCEPTION_CODE 1)
  (.define GRAVITON_UNCAUGHT_EXCEPTION_CODE 2)
- (.define GRAVITON_MUSIC_FINISH_CODE 3)
- (.define GRAVITON_APPLY_CODE 4)
- (.define GRAVITON_UPDATE_WINDOWS 5)
+ (.define GRAVITON_MML_FINISH_CODE 3)
+ (.define GRAVITON_APPLY_CODE 5)
+ (.define GRAVITON_UPDATE_WINDOWS 6)
 
- (.define SOUND_CONTEXT_INITIAL_LENGTH 16)
+ (.define MML_MUSIC_CONTEXT_INITIAL_LENGTH 16)
  (.define NOISE_TABLE_SIZE 32768)
  (.define CHANNEL_SIZE 16)
 
  )  ;; end of inline-stub
 
 (inline-stub
-  (define-cfn teardown-libs (data::|void*|)
-    ::void
-    (Mix_CloseAudio)
-    (Mix_Quit)
+ (define-cfn teardown-libs (data::|void*|)
+   ::void
+   (Mix_CloseAudio)
+   (Mix_Quit)
 
-    (SDL_Quit))
+   (SDL_Quit))
 
-  (define-cfn initialize-libs ()
-    ::void
-    (SDL_Init (logior SDL_INIT_VIDEO SDL_INIT_AUDIO))
-    (Mix_Init (logior MIX_INIT_FLAC MIX_INIT_MOD MIX_INIT_MP3 MIX_INIT_OGG))
-    (when (Mix_OpenAudio 44100 MIX_DEFAULT_FORMAT 2 2048)
-      (Scm_Error "Mix_OpenAudio failed: %s" (Mix_GetError)))
-    (IMG_Init (logior IMG_INIT_JPG IMG_INIT_PNG IMG_INIT_TIF))
+ (define-cfn initialize-libs ()
+   ::void
+   (SDL_Init (logior SDL_INIT_VIDEO SDL_INIT_AUDIO))
+   (Mix_Init (logior MIX_INIT_FLAC MIX_INIT_MOD MIX_INIT_MP3 MIX_INIT_OGG))
+   (when (Mix_OpenAudio 44100 MIX_DEFAULT_FORMAT 2 2048)
+     (Scm_Error "Mix_OpenAudio failed: %s" (Mix_GetError)))
+   (IMG_Init (logior IMG_INIT_JPG IMG_INIT_PNG IMG_INIT_TIF))
 
-    (Scm_AddCleanupHandler teardown-libs NULL)
+   (Scm_AddCleanupHandler teardown-libs NULL)
 
-    (set! graviton-event-type (SDL_RegisterEvents 1))
-    (when (== graviton-event-type #xffffffff)
-      (Scm_Error "SDL_RegisterEvents failed: %s" (SDL_GetError)))
+   (set! graviton-event-type (SDL_RegisterEvents 1))
+   (when (== graviton-event-type #xffffffff)
+     (Scm_Error "SDL_RegisterEvents failed: %s" (SDL_GetError)))
 
-    (set! main-thread-id (SDL_ThreadID)
-          global-handler-table (Scm_MakeHashTableSimple SCM_HASH_EQ 16)
-          repl-thread SCM_FALSE
-          repl-channel SCM_FALSE
-          graviton-module (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
-    (set! (ref event-loop-status lock) 0
-          (ref event-loop-status running?) false)
+   (set! main-thread-id (SDL_ThreadID)
+         global-handler-table (Scm_MakeHashTableSimple SCM_HASH_EQ 16)
+         repl-thread SCM_FALSE
+         repl-channel SCM_FALSE
+         graviton-module (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
+   (set! (ref event-loop-status lock) 0
+         (ref event-loop-status running?) false)
 
-    (set! playing-music? false
-          (ref sound-context-queue buf) (SCM_NEW_ARRAY (.type GrvSoundContext*) SOUND_CONTEXT_INITIAL_LENGTH)
-          (ref sound-context-queue length) SOUND_CONTEXT_INITIAL_LENGTH
-          (ref sound-context-queue start) 0
-          (ref sound-context-queue end) 0)
-    (dotimes (i (ref sound-context-queue length))
-      (set! (aref (ref sound-context-queue buf) i) NULL))
+   (set! (ref mml-music-context-queue buf) (SCM_NEW_ARRAY (.type GrvMMLMusicContext*) MML_MUSIC_CONTEXT_INITIAL_LENGTH)
+         (ref mml-music-context-queue length) MML_MUSIC_CONTEXT_INITIAL_LENGTH
+         (ref mml-music-context-queue start) 0
+         (ref mml-music-context-queue end) 0)
+   (dotimes (i (ref mml-music-context-queue length))
+     (set! (aref (ref mml-music-context-queue buf) i) NULL))
 
-    (set! noise-table (SCM_NEW_ATOMIC_ARRAY (.type double) NOISE_TABLE_SIZE))
-    (dotimes (i NOISE_TABLE_SIZE)
-      (set! (aref noise-table i) (* (- (/ (cast double (random)) RAND_MAX) 0.5) 2.0)))
+   (set! noise-table (SCM_NEW_ATOMIC_ARRAY (.type double) NOISE_TABLE_SIZE))
+   (dotimes (i NOISE_TABLE_SIZE)
+     (set! (aref noise-table i) (* (- (/ (cast double (random)) RAND_MAX) 0.5) 2.0)))
 
-    (set! music-last-finished-tick 0)
+   (set! music-last-finished-tick 0
+         playing-music-context NULL
+         playing-music-lock 0)
+   (Mix_HookMusicFinished finish-music)
 
-    (Mix_AllocateChannels CHANNEL_SIZE)
-    (set! playing-sound-vector (Scm_MakeVector CHANNEL_SIZE SCM_FALSE)
-          playing-sound-lock 0)
-    (Mix_ChannelFinished finish-channel)
+   (Mix_AllocateChannels CHANNEL_SIZE)
+   (set! playing-sound-contexts (SCM_NEW_ARRAY (.type GrvSoundContext*) CHANNEL_SIZE))
+   (Mix_ChannelFinished finish-sound)
 
-    ) ;; end of initialize-libs
+   (set! global-lock 0)
+   ) ;; end of initialize-libs
 
-  (initcode
-   (initialize-libs))
-  ) ;; end of inline-stub
+ (initcode
+  (initialize-libs))
+ ) ;; end of inline-stub
 
 (define-cproc current-ticks ()
   ::<int>
   (return (SDL_GetTicks)))
 
+
+;;;
+;;; Lock
+;;;
+
+(inline-stub
+ (define-cfn lock-global-var ()
+   ::void
+   (SDL_AtomicLock (& global-lock)))
+
+ (define-cfn unlock-global-var ()
+   ::void
+   (SDL_AtomicUnlock (& global-lock)))
+ ) ;; end of inline-stub
 
 ;;;
 ;;; Scheduler
@@ -641,7 +685,7 @@ typedef struct GrvSoundletRec {
      (Scm_RegisterFinalizer obj finalize-future NULL)
      (return obj)))
 
- (define-cfn set-future-result! (gfuture::GrvFuture* result)
+ (define-cfn set-future-result! (gfuture::GrvFuture* result report-error?::bool)
    ::void
    (let* ((cont SCM_FALSE)
           (err?::bool false))
@@ -654,13 +698,24 @@ typedef struct GrvSoundletRec {
        (else
         (set! err? true)))
      (SDL_UnlockMutex (-> gfuture lock))
-     (when err?
-       (Scm_Error "result has been already set in <graviton-future>"))
-     (when (SCM_PROCEDUREP cont)
-       (SDL_LockMutex (-> gfuture lock))
-       (set! (-> gfuture consumed?) true)
-       (SDL_UnlockMutex (-> gfuture lock))
-       (Scm_ApplyRec cont (SCM_LIST2 result SCM_FALSE)))))
+     (cond
+       ((not err?)
+        (when (SCM_PROCEDUREP cont)
+          (SDL_LockMutex (-> gfuture lock))
+          (set! (-> gfuture consumed?) true)
+          (SDL_UnlockMutex (-> gfuture lock))
+          (cond
+            ((Scm_VM)
+             (Scm_ApplyRec cont (SCM_LIST2 result SCM_FALSE)))
+            (else
+             (let* ((event::SDL_Event))
+               (set! (ref event type) graviton-event-type
+                     (ref event user code) GRAVITON_APPLY_CODE
+                     (ref event user data1) cont
+                     (ref event user data2) (SCM_LIST2 result SCM_FALSE))
+               (SDL_PushEvent (& event)))))))
+       (report-error?
+        (Scm_Error "result has been already set in <graviton-future>")))))
 
  (.define MAX_MESSAGE_LENGTH 1024)
  ) ;; end of inline-stub
@@ -670,7 +725,7 @@ typedef struct GrvSoundletRec {
 
 (define-cproc set-future-result! (gfuture::<graviton-future> result)
   ::<void>
-  (set-future-result! gfuture result))
+  (set-future-result! gfuture result true))
 
 (define-cproc set-future-exception! (gfuture::<graviton-future> exception error-message::<const-cstring>)
   ::<void>
@@ -740,7 +795,8 @@ typedef struct GrvSoundletRec {
   (let* ((event::SDL_Event))
     (set! (ref event type) graviton-event-type
           (ref event user code) GRAVITON_APPLY_CODE
-          (ref event user data1) thunk)
+          (ref event user data1) thunk
+          (ref event user data2) SCM_NIL)
     (SDL_PushEvent (& event))))
 
 (define (submit-thread-pool thunk)
@@ -2648,243 +2704,235 @@ typedef struct GrvSoundletRec {
 ;;;
 
 (inline-stub
-  (define-cfn %call-window-handler (win event args)
-    ::void
-    (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
-      (let* ((handler (Scm_HashTableRef (SCM_HASH_TABLE (-> gwin handler-table)) event SCM_FALSE)))
-        (when (SCM_PROCEDUREP handler)
-          (Scm_ApplyRec handler (Scm_Cons win args))
-          (return)))))
+ (define-cfn %call-window-handler (win event args)
+   ::void
+   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
+     (let* ((handler (Scm_HashTableRef (SCM_HASH_TABLE (-> gwin handler-table)) event SCM_FALSE)))
+       (when (SCM_PROCEDUREP handler)
+         (Scm_ApplyRec handler (Scm_Cons win args))
+         (return)))))
 
-  (define-cfn call-window-handler (window-id::Uint32 event args)
-    ::void
-    (for-each (lambda (win)
-                (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
-                  (when (== (SDL_GetWindowID (-> gwin window)) window-id)
-                    (%call-window-handler win event args)
-                    (return))))
-              grv-windows))
+ (define-cfn call-window-handler (window-id::Uint32 event args)
+   ::void
+   (for-each (lambda (win)
+               (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
+                 (when (== (SDL_GetWindowID (-> gwin window)) window-id)
+                   (%call-window-handler win event args)
+                   (return))))
+             grv-windows))
 
-  (define-cfn call-global-handler (event args)
-    ::void
-    (let* ((handler (Scm_HashTableRef (SCM_HASH_TABLE global-handler-table) event SCM_FALSE)))
-      (when (SCM_PROCEDUREP handler)
-        (Scm_ApplyRec handler args))))
+ (define-cfn call-global-handler (event args)
+   ::void
+   (let* ((handler (Scm_HashTableRef (SCM_HASH_TABLE global-handler-table) event SCM_FALSE)))
+     (when (SCM_PROCEDUREP handler)
+       (Scm_ApplyRec handler args))))
 
-  (define-cfn process-event (sdl-event::SDL_Event*)
-    ::ScmObj
-    (case (-> sdl-event type)
-      ((SDL_WINDOWEVENT)
-       (case (ref (-> sdl-event window) event)
-         ((SDL_WINDOWEVENT_MOVED SDL_WINDOWEVENT_RESIZED SDL_WINDOWEVENT_SIZE_CHANGED)
-          (call-window-handler (ref (-> sdl-event window) windowID)
-                               (window-event->symbol (ref (-> sdl-event window) event))
-                               (SCM_LIST2 (SCM_MAKE_INT (ref (-> sdl-event window) data1))
-                                          (SCM_MAKE_INT (ref (-> sdl-event window) data2)))))
-         (else
-          (call-window-handler (ref (-> sdl-event window) windowID)
-                               (window-event->symbol (ref (-> sdl-event window) event))
-                               SCM_NIL))))
-      ((SDL_KEYDOWN SDL_KEYUP)
-       (call-window-handler (ref (-> sdl-event key) windowID)
-                            (?: (== (-> sdl-event type) SDL_KEYDOWN) 'key-down 'key-up)
-                            (SCM_LIST4 (scancode->symbol (ref (-> sdl-event key) keysym scancode))
-                                       (keycode->symbol (ref (-> sdl-event key) keysym sym))
-                                       (kmod->symbols (ref (-> sdl-event key) keysym mod))
-                                       (SCM_MAKE_BOOL (ref (-> sdl-event key) repeat)))))
-      ((SDL_TEXTEDITING)
-       (call-window-handler (ref (-> sdl-event edit) windowID)
-                            'text-editing
-                            (SCM_LIST3 (SCM_MAKE_STR_COPYING (ref (-> sdl-event edit) text))
-                                       (SCM_MAKE_INT (ref (-> sdl-event edit) start))
-                                       (SCM_MAKE_INT (ref (-> sdl-event edit) length)))))
-      ((SDL_TEXTINPUT)
-       (call-window-handler (ref (-> sdl-event text) windowID)
-                            'text-input
-                            (SCM_LIST1 (SCM_MAKE_STR_COPYING (ref (-> sdl-event text) text)))))
-      ((SDL_MOUSEMOTION)
-       (call-window-handler (ref (-> sdl-event motion) windowID)
-                            'mouse-motion
-                            (Scm_List (SCM_MAKE_INT (ref (-> sdl-event motion) which))
-                                      (mouse-button-state->symbols (ref (-> sdl-event motion) state))
-                                      (SCM_MAKE_INT (ref (-> sdl-event motion) x))
-                                      (SCM_MAKE_INT (ref (-> sdl-event motion) y))
-                                      (SCM_MAKE_INT (ref (-> sdl-event motion) xrel))
-                                      (SCM_MAKE_INT (ref (-> sdl-event motion) yrel))
-                                      NULL)))
-      ((SDL_MOUSEBUTTONDOWN SDL_MOUSEBUTTONUP)
-       (call-window-handler (ref (-> sdl-event button) windowID)
-                            (?: (== (-> sdl-event type) SDL_MOUSEBUTTONDOWN) 'mouse-button-down 'mouse-button-up)
-                            (SCM_LIST5 (SCM_MAKE_INT (ref (-> sdl-event button) which))
-                                       (mouse-button->symbol (ref (-> sdl-event button) button))
-                                       (SCM_MAKE_INT (ref (-> sdl-event button) clicks))
-                                       (SCM_MAKE_INT (ref (-> sdl-event button) x))
-                                       (SCM_MAKE_INT (ref (-> sdl-event button) y)))))
-      ((SDL_MOUSEWHEEL)
-       (call-window-handler (ref (-> sdl-event wheel) windowID)
-                            'mouse-wheel
-                            (SCM_LIST4 (SCM_MAKE_INT (ref (-> sdl-event wheel) which))
-                                       (SCM_MAKE_INT (ref (-> sdl-event wheel) x))
-                                       (SCM_MAKE_INT (ref (-> sdl-event wheel) y))
-                                       (?: (== (ref (-> sdl-event wheel) direction) SDL_MOUSEWHEEL_NORMAL) 'normal 'flipped))))
-      ((SDL_JOYAXISMOTION)
-       (call-global-handler 'joystick-axis-motion
-                            (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event jaxis) which))
-                                       (SCM_MAKE_INT (ref (-> sdl-event jaxis) axis))
-                                       (SCM_MAKE_INT (ref (-> sdl-event jaxis) value)))))
-      ((SDL_JOYBALLMOTION)
-       (call-global-handler 'joystick-ball-motion
-                            (SCM_LIST4 (SCM_MAKE_INT (ref (-> sdl-event jball) which))
-                                       (SCM_MAKE_INT (ref (-> sdl-event jball) ball))
-                                       (SCM_MAKE_INT (ref (-> sdl-event jball) xrel))
-                                       (SCM_MAKE_INT (ref (-> sdl-event jball) yrel)))))
-      ((SDL_JOYHATMOTION)
-       (call-global-handler 'joystick-hat-motion
-                            (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event jhat) which))
-                                       (SCM_MAKE_INT (ref (-> sdl-event jhat) hat))
-                                       (hat-position->symbol (ref (-> sdl-event jhat) value)))))
-      ((SDL_JOYBUTTONDOWN SDL_JOYBUTTONUP)
-       (call-global-handler (?: (== (ref (-> sdl-event jbutton) type) SDL_JOYBUTTONDOWN)
-                                'joystick-button-down
-                                'joystick-button-up)
-                            (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event jbutton) which))
-                                       (SCM_MAKE_INT (ref (-> sdl-event jbutton) button))
-                                       (state->symbol (ref (-> sdl-event jbutton) state)))))
-      ((SDL_JOYDEVICEADDED SDL_JOYDEVICEREMOVED)
-       (call-global-handler (?: (== (-> sdl-event type) SDL_JOYDEVICEADDED)
-                                'joystick-device-added
-                                'joystick-device-removed)
-                            (SCM_LIST1 (SCM_MAKE_INT (ref (-> sdl-event jdevice) which)))))
-      ((SDL_CONTROLLERAXISMOTION)
-       (call-global-handler 'controller-axis-motion
-                            (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event caxis) which))
-                                       (axis->symbol (ref (-> sdl-event caxis) axis))
-                                       (SCM_MAKE_INT (ref (-> sdl-event caxis) value)))))
-      ((SDL_CONTROLLERBUTTONDOWN SDL_CONTROLLERBUTTONUP)
-       (call-global-handler (?: (== (-> sdl-event type) SDL_CONTROLLERBUTTONDOWN)
-                                'controller-button-down
-                                'controller-button-up)
-                            (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event cbutton) which))
-                                       (button->symbol (ref (-> sdl-event cbutton) button))
-                                       (state->symbol (ref (-> sdl-event cbutton) state)))))
-      ((SDL_CONTROLLERDEVICEADDED SDL_CONTROLLERDEVICEREMOVED SDL_CONTROLLERDEVICEREMAPPED)
-       (call-global-handler (?: (== (-> sdl-event type) SDL_CONTROLLERDEVICEADDED)
-                                'controller-device-added
-                                (?: (== (-> sdl-event type) SDL_CONTROLLERDEVICEREMOVED)
-                                    'controller-device-removed
-                                    'controller-device-remapped))
-                            (SCM_LIST1 (SCM_MAKE_INT (ref (-> sdl-event cdevice) which)))))
-      ((SDL_AUDIODEVICEADDED SDL_AUDIODEVICEREMOVED)
-       (call-global-handler (?: (== (-> sdl-event type) SDL_AUDIODEVICEADDED)
-                                'audio-device-added
-                                'audio-device-removed)
-                            (SCM_LIST2 (SCM_MAKE_INT (ref (-> sdl-event adevice) which))
-                                       (SCM_MAKE_BOOL (ref (-> sdl-event adevice) iscapture)))))
-      ((SDL_QUIT)
-       (call-global-handler 'quit SCM_NIL))
-      ((SDL_FINGERMOTION SDL_FINGERDOWN SDL_FINGERUP)
-       (call-global-handler (?: (== (-> sdl-event type) SDL_FINGERMOTION)
-                                'finger-motion
-                                (?: (== (-> sdl-event type) SDL_FINGERDOWN)
-                                    'finger-down
-                                    'finger-up))
-                            (Scm_List (Scm_MakeInteger (ref (-> sdl-event tfinger) touchId))
-                                      (Scm_MakeInteger (ref (-> sdl-event tfinger) fingerId))
-                                      (Scm_MakeFlonum (ref (-> sdl-event tfinger) x))
-                                      (Scm_MakeFlonum (ref (-> sdl-event tfinger) y))
-                                      (Scm_MakeFlonum (ref (-> sdl-event tfinger) dx))
-                                      (Scm_MakeFlonum (ref (-> sdl-event tfinger) dy))
-                                      (Scm_MakeFlonum (ref (-> sdl-event tfinger) pressure))
-                                      NULL)))
-      ((SDL_MULTIGESTURE)
-       (call-global-handler 'multi-gesture
-                            (Scm_List (Scm_MakeInteger (ref (-> sdl-event mgesture) touchId))
-                                      (Scm_MakeFlonum (ref (-> sdl-event mgesture) dTheta))
-                                      (Scm_MakeFlonum (ref (-> sdl-event mgesture) dDist))
-                                      (Scm_MakeFlonum (ref (-> sdl-event mgesture) x))
-                                      (Scm_MakeFlonum (ref (-> sdl-event mgesture) y))
-                                      (SCM_MAKE_INT (ref (-> sdl-event mgesture) numFingers))
-                                      NULL)))
-      ((SDL_DOLLARGESTURE SDL_DOLLARRECORD)
-       (call-global-handler (?: (== (-> sdl-event type) SDL_DOLLARGESTURE)
-                                'dollar-gesture
-                                'dollar-record)
-                            (Scm_List (Scm_MakeInteger (ref (-> sdl-event dgesture) touchId))
-                                      (Scm_MakeInteger (ref (-> sdl-event dgesture) gestureId))
-                                      (SCM_MAKE_INT (ref (-> sdl-event dgesture) numFingers))
-                                      (Scm_MakeFlonum (ref (-> sdl-event dgesture) error))
-                                      (Scm_MakeFlonum (ref (-> sdl-event dgesture) x))
-                                      (Scm_MakeFlonum (ref (-> sdl-event dgesture) y))
-                                      NULL)))
-      ((SDL_DROPFILE SDL_DROPTEXT)
-       (call-window-handler (ref (-> sdl-event drop) windowID)
-                            (?: (== (-> sdl-event type) SDL_DROPFILE) 'drop-file 'drop-text)
-                            (SCM_LIST1 (SCM_MAKE_STR_COPYING (ref (-> sdl-event drop) file))))
-       (SDL_free (ref (-> sdl-event drop) file)))
-      ((SDL_DROPBEGIN SDL_DROPCOMPLETE)
-       (call-window-handler (ref (-> sdl-event drop) windowID)
-                            (?: (== (-> sdl-event type) SDL_DROPBEGIN) 'drop-begin 'drop-complete)
-                            SCM_NIL))
-      (else
-       (cond
-         ((== (-> sdl-event type) graviton-event-type)
-          (case (ref (-> sdl-event user) code)
-            ((GRAVITON_EXCEPTION_CODE)
-             (let* ((exception (ref (-> sdl-event user) data1)))
-               (Scm_Raise exception 0)))
-            ((GRAVITON_UNCAUGHT_EXCEPTION_CODE)
-             (Scm_Write (SCM_OBJ (ref (-> sdl-event user) data1)) (SCM_OBJ SCM_CURERR) SCM_WRITE_DISPLAY)
-             (Scm_Printf SCM_CURERR "\n")
-             (Scm_Error "async failed, but the exception wasn't caught."))
-            ((GRAVITON_MUSIC_FINISH_CODE)
-             (let* ((gfuture::GrvFuture* (ref (-> sdl-event user) data1))
-                    (status (ref (-> sdl-event user) data2)))
-               (Mix_HookMusic NULL NULL)
-               (set-future-result! gfuture (SCM_LIST1 status))
-               (set! playing-music? false
-                     music-last-finished-tick (SDL_GetTicks))
+ (define-cfn process-event (sdl-event::SDL_Event*)
+   ::ScmObj
+   (case (-> sdl-event type)
+     ((SDL_WINDOWEVENT)
+      (case (ref (-> sdl-event window) event)
+        ((SDL_WINDOWEVENT_MOVED SDL_WINDOWEVENT_RESIZED SDL_WINDOWEVENT_SIZE_CHANGED)
+         (call-window-handler (ref (-> sdl-event window) windowID)
+                              (window-event->symbol (ref (-> sdl-event window) event))
+                              (SCM_LIST2 (SCM_MAKE_INT (ref (-> sdl-event window) data1))
+                                         (SCM_MAKE_INT (ref (-> sdl-event window) data2)))))
+        (else
+         (call-window-handler (ref (-> sdl-event window) windowID)
+                              (window-event->symbol (ref (-> sdl-event window) event))
+                              SCM_NIL))))
+     ((SDL_KEYDOWN SDL_KEYUP)
+      (call-window-handler (ref (-> sdl-event key) windowID)
+                           (?: (== (-> sdl-event type) SDL_KEYDOWN) 'key-down 'key-up)
+                           (SCM_LIST4 (scancode->symbol (ref (-> sdl-event key) keysym scancode))
+                                      (keycode->symbol (ref (-> sdl-event key) keysym sym))
+                                      (kmod->symbols (ref (-> sdl-event key) keysym mod))
+                                      (SCM_MAKE_BOOL (ref (-> sdl-event key) repeat)))))
+     ((SDL_TEXTEDITING)
+      (call-window-handler (ref (-> sdl-event edit) windowID)
+                           'text-editing
+                           (SCM_LIST3 (SCM_MAKE_STR_COPYING (ref (-> sdl-event edit) text))
+                                      (SCM_MAKE_INT (ref (-> sdl-event edit) start))
+                                      (SCM_MAKE_INT (ref (-> sdl-event edit) length)))))
+     ((SDL_TEXTINPUT)
+      (call-window-handler (ref (-> sdl-event text) windowID)
+                           'text-input
+                           (SCM_LIST1 (SCM_MAKE_STR_COPYING (ref (-> sdl-event text) text)))))
+     ((SDL_MOUSEMOTION)
+      (call-window-handler (ref (-> sdl-event motion) windowID)
+                           'mouse-motion
+                           (Scm_List (SCM_MAKE_INT (ref (-> sdl-event motion) which))
+                                     (mouse-button-state->symbols (ref (-> sdl-event motion) state))
+                                     (SCM_MAKE_INT (ref (-> sdl-event motion) x))
+                                     (SCM_MAKE_INT (ref (-> sdl-event motion) y))
+                                     (SCM_MAKE_INT (ref (-> sdl-event motion) xrel))
+                                     (SCM_MAKE_INT (ref (-> sdl-event motion) yrel))
+                                     NULL)))
+     ((SDL_MOUSEBUTTONDOWN SDL_MOUSEBUTTONUP)
+      (call-window-handler (ref (-> sdl-event button) windowID)
+                           (?: (== (-> sdl-event type) SDL_MOUSEBUTTONDOWN) 'mouse-button-down 'mouse-button-up)
+                           (SCM_LIST5 (SCM_MAKE_INT (ref (-> sdl-event button) which))
+                                      (mouse-button->symbol (ref (-> sdl-event button) button))
+                                      (SCM_MAKE_INT (ref (-> sdl-event button) clicks))
+                                      (SCM_MAKE_INT (ref (-> sdl-event button) x))
+                                      (SCM_MAKE_INT (ref (-> sdl-event button) y)))))
+     ((SDL_MOUSEWHEEL)
+      (call-window-handler (ref (-> sdl-event wheel) windowID)
+                           'mouse-wheel
+                           (SCM_LIST4 (SCM_MAKE_INT (ref (-> sdl-event wheel) which))
+                                      (SCM_MAKE_INT (ref (-> sdl-event wheel) x))
+                                      (SCM_MAKE_INT (ref (-> sdl-event wheel) y))
+                                      (?: (== (ref (-> sdl-event wheel) direction) SDL_MOUSEWHEEL_NORMAL) 'normal 'flipped))))
+     ((SDL_JOYAXISMOTION)
+      (call-global-handler 'joystick-axis-motion
+                           (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event jaxis) which))
+                                      (SCM_MAKE_INT (ref (-> sdl-event jaxis) axis))
+                                      (SCM_MAKE_INT (ref (-> sdl-event jaxis) value)))))
+     ((SDL_JOYBALLMOTION)
+      (call-global-handler 'joystick-ball-motion
+                           (SCM_LIST4 (SCM_MAKE_INT (ref (-> sdl-event jball) which))
+                                      (SCM_MAKE_INT (ref (-> sdl-event jball) ball))
+                                      (SCM_MAKE_INT (ref (-> sdl-event jball) xrel))
+                                      (SCM_MAKE_INT (ref (-> sdl-event jball) yrel)))))
+     ((SDL_JOYHATMOTION)
+      (call-global-handler 'joystick-hat-motion
+                           (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event jhat) which))
+                                      (SCM_MAKE_INT (ref (-> sdl-event jhat) hat))
+                                      (hat-position->symbol (ref (-> sdl-event jhat) value)))))
+     ((SDL_JOYBUTTONDOWN SDL_JOYBUTTONUP)
+      (call-global-handler (?: (== (ref (-> sdl-event jbutton) type) SDL_JOYBUTTONDOWN)
+                               'joystick-button-down
+                               'joystick-button-up)
+                           (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event jbutton) which))
+                                      (SCM_MAKE_INT (ref (-> sdl-event jbutton) button))
+                                      (state->symbol (ref (-> sdl-event jbutton) state)))))
+     ((SDL_JOYDEVICEADDED SDL_JOYDEVICEREMOVED)
+      (call-global-handler (?: (== (-> sdl-event type) SDL_JOYDEVICEADDED)
+                               'joystick-device-added
+                               'joystick-device-removed)
+                           (SCM_LIST1 (SCM_MAKE_INT (ref (-> sdl-event jdevice) which)))))
+     ((SDL_CONTROLLERAXISMOTION)
+      (call-global-handler 'controller-axis-motion
+                           (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event caxis) which))
+                                      (axis->symbol (ref (-> sdl-event caxis) axis))
+                                      (SCM_MAKE_INT (ref (-> sdl-event caxis) value)))))
+     ((SDL_CONTROLLERBUTTONDOWN SDL_CONTROLLERBUTTONUP)
+      (call-global-handler (?: (== (-> sdl-event type) SDL_CONTROLLERBUTTONDOWN)
+                               'controller-button-down
+                               'controller-button-up)
+                           (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event cbutton) which))
+                                      (button->symbol (ref (-> sdl-event cbutton) button))
+                                      (state->symbol (ref (-> sdl-event cbutton) state)))))
+     ((SDL_CONTROLLERDEVICEADDED SDL_CONTROLLERDEVICEREMOVED SDL_CONTROLLERDEVICEREMAPPED)
+      (call-global-handler (?: (== (-> sdl-event type) SDL_CONTROLLERDEVICEADDED)
+                               'controller-device-added
+                               (?: (== (-> sdl-event type) SDL_CONTROLLERDEVICEREMOVED)
+                                   'controller-device-removed
+                                   'controller-device-remapped))
+                           (SCM_LIST1 (SCM_MAKE_INT (ref (-> sdl-event cdevice) which)))))
+     ((SDL_AUDIODEVICEADDED SDL_AUDIODEVICEREMOVED)
+      (call-global-handler (?: (== (-> sdl-event type) SDL_AUDIODEVICEADDED)
+                               'audio-device-added
+                               'audio-device-removed)
+                           (SCM_LIST2 (SCM_MAKE_INT (ref (-> sdl-event adevice) which))
+                                      (SCM_MAKE_BOOL (ref (-> sdl-event adevice) iscapture)))))
+     ((SDL_QUIT)
+      (call-global-handler 'quit SCM_NIL))
+     ((SDL_FINGERMOTION SDL_FINGERDOWN SDL_FINGERUP)
+      (call-global-handler (?: (== (-> sdl-event type) SDL_FINGERMOTION)
+                               'finger-motion
+                               (?: (== (-> sdl-event type) SDL_FINGERDOWN)
+                                   'finger-down
+                                   'finger-up))
+                           (Scm_List (Scm_MakeInteger (ref (-> sdl-event tfinger) touchId))
+                                     (Scm_MakeInteger (ref (-> sdl-event tfinger) fingerId))
+                                     (Scm_MakeFlonum (ref (-> sdl-event tfinger) x))
+                                     (Scm_MakeFlonum (ref (-> sdl-event tfinger) y))
+                                     (Scm_MakeFlonum (ref (-> sdl-event tfinger) dx))
+                                     (Scm_MakeFlonum (ref (-> sdl-event tfinger) dy))
+                                     (Scm_MakeFlonum (ref (-> sdl-event tfinger) pressure))
+                                     NULL)))
+     ((SDL_MULTIGESTURE)
+      (call-global-handler 'multi-gesture
+                           (Scm_List (Scm_MakeInteger (ref (-> sdl-event mgesture) touchId))
+                                     (Scm_MakeFlonum (ref (-> sdl-event mgesture) dTheta))
+                                     (Scm_MakeFlonum (ref (-> sdl-event mgesture) dDist))
+                                     (Scm_MakeFlonum (ref (-> sdl-event mgesture) x))
+                                     (Scm_MakeFlonum (ref (-> sdl-event mgesture) y))
+                                     (SCM_MAKE_INT (ref (-> sdl-event mgesture) numFingers))
+                                     NULL)))
+     ((SDL_DOLLARGESTURE SDL_DOLLARRECORD)
+      (call-global-handler (?: (== (-> sdl-event type) SDL_DOLLARGESTURE)
+                               'dollar-gesture
+                               'dollar-record)
+                           (Scm_List (Scm_MakeInteger (ref (-> sdl-event dgesture) touchId))
+                                     (Scm_MakeInteger (ref (-> sdl-event dgesture) gestureId))
+                                     (SCM_MAKE_INT (ref (-> sdl-event dgesture) numFingers))
+                                     (Scm_MakeFlonum (ref (-> sdl-event dgesture) error))
+                                     (Scm_MakeFlonum (ref (-> sdl-event dgesture) x))
+                                     (Scm_MakeFlonum (ref (-> sdl-event dgesture) y))
+                                     NULL)))
+     ((SDL_DROPFILE SDL_DROPTEXT)
+      (call-window-handler (ref (-> sdl-event drop) windowID)
+                           (?: (== (-> sdl-event type) SDL_DROPFILE) 'drop-file 'drop-text)
+                           (SCM_LIST1 (SCM_MAKE_STR_COPYING (ref (-> sdl-event drop) file))))
+      (SDL_free (ref (-> sdl-event drop) file)))
+     ((SDL_DROPBEGIN SDL_DROPCOMPLETE)
+      (call-window-handler (ref (-> sdl-event drop) windowID)
+                           (?: (== (-> sdl-event type) SDL_DROPBEGIN) 'drop-begin 'drop-complete)
+                           SCM_NIL))
+     (else
+      (cond
+        ((== (-> sdl-event type) graviton-event-type)
+         (case (ref (-> sdl-event user) code)
+           ((GRAVITON_EXCEPTION_CODE)
+            (let* ((exception (ref (-> sdl-event user) data1)))
+              (Scm_Raise exception 0)))
+           ((GRAVITON_UNCAUGHT_EXCEPTION_CODE)
+            (Scm_Write (SCM_OBJ (ref (-> sdl-event user) data1)) (SCM_OBJ SCM_CURERR) SCM_WRITE_DISPLAY)
+            (Scm_Printf SCM_CURERR "\n")
+            (Scm_Error "async failed, but the exception wasn't caught."))
+           ((GRAVITON_MML_FINISH_CODE)
+            (Mix_HookMusic NULL NULL)
+            (set! music-last-finished-tick (SDL_GetTicks)))
+           ((GRAVITON_APPLY_CODE)
+            (let* ((proc (ref (-> sdl-event user) data1))
+                   (args (ref (-> sdl-event user) data2)))
+              (Scm_ApplyRec proc args)))
+           ((GRAVITON_UPDATE_WINDOWS)
+            (for-each (lambda (win)
+                        (%call-window-handler win 'update SCM_NIL))
+                      grv-windows)
+            (update-window-contents))
+           ) ;; end of case (for graviton-event-type)
+         ))  ;; end of cond
+      ))     ;; end of case
+   )         ;; end of define-cfn
 
-               (let* ((gcontext::GrvSoundContext* (dequeue-sound-context!)))
-                 (when gcontext
-                   (Mix_HookMusic fill-audio-stream gcontext)
-                   (set! playing-music? true)))))
-            ((GRAVITON_APPLY_CODE)
-             (let* ((thunk (ref (-> sdl-event user) data1)))
-               (Scm_ApplyRec0 thunk)))
-            ((GRAVITON_UPDATE_WINDOWS)
-             (for-each (lambda (win)
-                         (%call-window-handler win 'update SCM_NIL))
-                       grv-windows)
-             (update-window-contents))
-            ) ;; end of case (for graviton-event-type)
-          ))  ;; end of cond
-       ))     ;; end of case
-    )         ;; end of define-cfn
+ (define-cfn set-event-loop-status (running?::bool)
+   ::void
+   (SDL_AtomicLock (& (ref event-loop-status lock)))
+   (set! (ref event-loop-status running?) running?)
+   (SDL_AtomicUnlock (& (ref event-loop-status lock))))
 
-  (define-cfn set-event-loop-status (running?::bool)
-    ::void
-    (SDL_AtomicLock (& (ref event-loop-status lock)))
-    (set! (ref event-loop-status running?) running?)
-    (SDL_AtomicUnlock (& (ref event-loop-status lock))))
+ (define-cfn event-loop-running? ()
+   ::bool
+   (let* ((running?::bool))
+     (SDL_AtomicLock (& (ref event-loop-status lock)))
+     (set! running? (ref event-loop-status running?))
+     (SDL_AtomicUnlock (& (ref event-loop-status lock)))
+     (return running?)))
 
-  (define-cfn event-loop-running? ()
-    ::bool
-    (let* ((running?::bool))
-      (SDL_AtomicLock (& (ref event-loop-status lock)))
-      (set! running? (ref event-loop-status running?))
-      (SDL_AtomicUnlock (& (ref event-loop-status lock)))
-      (return running?)))
+ (define-cfn update-windows-callback (interval::Uint32 param::void*)
+   ::Uint32
+   (let* ((event::SDL_Event))
+     (set! (ref event type) graviton-event-type
+           (ref event user code) GRAVITON_UPDATE_WINDOWS)
+     (SDL_PushEvent (& event))
+     (return (/ 1000 frame-per-second))))
 
-  (define-cfn update-windows-callback (interval::Uint32 param::void*)
-    ::Uint32
-    (let* ((event::SDL_Event))
-      (set! (ref event type) graviton-event-type
-            (ref event user code) GRAVITON_UPDATE_WINDOWS)
-      (SDL_PushEvent (& event))
-      (return (/ 1000 frame-per-second))))
-
-  (.define MUSIC_FINISHED_GRACE_PERIOD 100)
-  )  ;; end of inline-stub
+ (.define MUSIC_FINISHED_GRACE_PERIOD 100)
+ )  ;; end of inline-stub
 
 (define-cproc notify-exception (exception)
   ::<void>
@@ -2916,7 +2964,9 @@ typedef struct GrvSoundletRec {
   (let* ((callback-id::SDL_TimerID (SDL_AddTimer 0 update-windows-callback NULL)))
     (while (logior (not (SCM_NULLP grv-windows))
                    (is-repl-running?)
-                   (or playing-music?
+                   (or (playing-mml?)
+                       (Mix_PlayingMusic)
+                       (Mix_Playing -1)
                        (< (SDL_GetTicks) (+ music-last-finished-tick MUSIC_FINISHED_GRACE_PERIOD))))
       (let* ((event::SDL_Event))
         (when (SDL_WaitEvent (& event))
@@ -3639,37 +3689,44 @@ typedef enum {
 
 
 ;;;
-;;; Music
+;;; MML
 ;;;
 
 (inline-stub
- (define-cfn enqueue-sound-context! (gcontext::GrvSoundContext*)
+ (define-cfn playing-mml? ()
+   ::bool :static
+   (return (!= (Mix_GetMusicHookData) NULL)))
+
+ (define-cfn enqueue-mml-music-context! (gcontext::GrvMMLMusicContext*)
    ::void :static
-   (set! (aref (ref sound-context-queue buf) (ref sound-context-queue end)) gcontext
-         (ref sound-context-queue end) (% (+ (ref sound-context-queue end) 1)
-                                          (ref sound-context-queue length)))
-   (when (== (ref sound-context-queue start) (ref sound-context-queue end))
-     (let* ((newlen::int (* (ref sound-context-queue length) 2))
-            (newbuf::GrvSoundContext** (SCM_NEW_ARRAY (.type GrvSoundContext*) newlen)))
-       (dotimes (i (ref sound-context-queue length))
-         (set! (aref newbuf i) (aref (ref sound-context-queue buf) (% (+ i (ref sound-context-queue start))
-                                                                      (ref sound-context-queue length)))))
-       (set! (ref sound-context-queue start) 0
-             (ref sound-context-queue end) (ref sound-context-queue length)
-             (ref sound-context-queue buf) newbuf
-             (ref sound-context-queue length) newlen))))
+   (lock-global-var)
+   (set! (aref (ref mml-music-context-queue buf) (ref mml-music-context-queue end)) gcontext
+         (ref mml-music-context-queue end) (% (+ (ref mml-music-context-queue end) 1)
+                                              (ref mml-music-context-queue length)))
+   (when (== (ref mml-music-context-queue start) (ref mml-music-context-queue end))
+     (let* ((newlen::int (* (ref mml-music-context-queue length) 2))
+            (newbuf::GrvMMLMusicContext** (SCM_NEW_ARRAY (.type GrvMMLMusicContext*) newlen)))
+       (dotimes (i (ref mml-music-context-queue length))
+         (set! (aref newbuf i) (aref (ref mml-music-context-queue buf) (% (+ i (ref mml-music-context-queue start))
+                                                                          (ref mml-music-context-queue length)))))
+       (set! (ref mml-music-context-queue start) 0
+             (ref mml-music-context-queue end) (ref mml-music-context-queue length)
+             (ref mml-music-context-queue buf) newbuf
+             (ref mml-music-context-queue length) newlen)))
+   (unlock-global-var))
 
- (define-cfn dequeue-sound-context! ()
-   ::GrvSoundContext* :static
-   (when (== (ref sound-context-queue start) (ref sound-context-queue end))
-     (return NULL))
-
-   (let* ((gcontext::GrvSoundContext* (aref (ref sound-context-queue buf) (ref sound-context-queue start))))
-     (set! (ref sound-context-queue start) (% (+ (ref sound-context-queue start) 1)
-                                              (ref sound-context-queue length)))
+ (define-cfn dequeue-mml-music-context! ()
+   ::GrvMMLMusicContext* :static
+   (let* ((gcontext::GrvMMLMusicContext* NULL))
+     (lock-global-var)
+     (unless (== (ref mml-music-context-queue start) (ref mml-music-context-queue end))
+       (set! gcontext (aref (ref mml-music-context-queue buf) (ref mml-music-context-queue start))
+             (ref mml-music-context-queue start) (% (+ (ref mml-music-context-queue start) 1)
+                                                    (ref mml-music-context-queue length))))
+     (unlock-global-var)
      (return gcontext)))
 
- (define-cfn retain-soundlet! (gcontext::GrvSoundContext* gsoundlet::GrvSoundlet* pos::int)
+ (define-cfn retain-soundlet! (gcontext::GrvMMLMusicContext* gsoundlet::GrvSoundlet* pos::int)
    ::void
    (unless gsoundlet
      (return))
@@ -3697,7 +3754,7 @@ typedef enum {
            (-> gcontext num-soundlet-contexts) new-size)
      (retain-soundlet! gcontext gsoundlet pos)))
 
- (define-cfn release-soundlet! (gcontext::GrvSoundContext* gsoundlet::GrvSoundlet*)
+ (define-cfn release-soundlet! (gcontext::GrvMMLMusicContext* gsoundlet::GrvSoundlet*)
    ::void
    (dotimes (i (-> gcontext num-soundlet-contexts))
      (let* ((sctx::GrvSoundletContext* (aref (-> gcontext soundlet-contexts) i)))
@@ -3832,7 +3889,7 @@ typedef enum {
             (set! v (- v (* amp (aref noise-table (% (+ (/ rel-pos len50) dummy) SHORT_NOISE_SIZE)))))))))
      (return v)))
 
- (define-cfn render-tone (buf::int16_t* index::int gcontext::GrvSoundContext* gsoundlet-context::GrvSoundletContext*)
+ (define-cfn render-tone (buf::int16_t* index::int gcontext::GrvMMLMusicContext* gsoundlet-context::GrvSoundletContext*)
    ::void
    (let* ((gsoundlet::GrvSoundlet* (-> gsoundlet-context soundlet))
           (gtone::GrvToneSoundlet* (ref (-> gsoundlet data) tone))
@@ -3884,7 +3941,7 @@ typedef enum {
        (inc-buffer! buf index (* (-> gtone left-volume) v))
        (inc-buffer! buf (+ index 1) (* (-> gtone right-volume) v)))))
 
- (define-cfn render-composite (buf::int16_t* index::int gcontext::GrvSoundContext* gsoundlet-context::GrvSoundletContext*)
+ (define-cfn render-composite (buf::int16_t* index::int gcontext::GrvMMLMusicContext* gsoundlet-context::GrvSoundletContext*)
    ::void
    (let* ((gsoundlet::GrvSoundlet* (-> gsoundlet-context soundlet))
           (gcomposite::GrvCompositeSoundlet* (ref (-> gsoundlet data) composite))
@@ -3897,7 +3954,7 @@ typedef enum {
      (when (<= length rel-pos)
        (release-soundlet! gcontext (-> gsoundlet-context soundlet)))))
 
- (define-cfn render-context (buf::int16_t* index::int gcontext::GrvSoundContext*)
+ (define-cfn render-context (buf::int16_t* index::int gcontext::GrvMMLMusicContext*)
    ::void :static
    (dotimes (i (-> gcontext num-soundlet-contexts))
      (let* ((sctx::GrvSoundletContext* (aref (-> gcontext soundlet-contexts) i)))
@@ -3914,7 +3971,7 @@ typedef enum {
    (let* ((buf::int16_t* (cast int16_t* stream))
           (buf-length::int (/ len 2))
           (index::int 0)
-          (gcontext::GrvSoundContext* (cast GrvSoundContext* udata))
+          (gcontext::GrvMMLMusicContext* (cast GrvMMLMusicContext* udata))
           (pos::int (-> gcontext position))
           (pos-end::int (+ pos (/ buf-length 2)))
           (i::int 0))
@@ -3927,15 +3984,35 @@ typedef enum {
        (dotimes (i (-> gcontext num-soundlet-contexts))
          (unless (== (aref (-> gcontext soundlet-contexts) i) NULL)
            (inc! num)))
-       (when (and (== num 0)
-                  (GRV_FUTURE_P (-> gcontext future)))
-         (let* ((event::SDL_Event))
-           (set! (ref event type) graviton-event-type
-                 (ref event user code) GRAVITON_MUSIC_FINISH_CODE
-                 (ref event user data1) (GRV_FUTURE_PTR (-> gcontext future))
-                 (ref event user data2) 'finished)
-           (SDL_PushEvent (& event))
-           (set! (-> gcontext future) SCM_FALSE))))))
+       (when (== num 0)
+         (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> gcontext future))))
+           (set-future-result! gfuture (SCM_LIST1 'finished) false))
+
+         (let* ((next-gcontext::GrvMMLMusicContext* (dequeue-mml-music-context!)))
+           (cond
+             (next-gcontext
+              (set! (-> gcontext position) (-> next-gcontext position)
+                    (-> gcontext soundlet-contexts) (-> next-gcontext soundlet-contexts)
+                    (-> gcontext num-soundlet-contexts) (-> next-gcontext num-soundlet-contexts)
+                    (-> gcontext future) (-> next-gcontext future)))
+             (else
+              (let* ((event::SDL_Event))
+                (set! (ref event type) graviton-event-type
+                      (ref event user code) GRAVITON_MML_FINISH_CODE)
+                (SDL_PushEvent (& event))))))))))
+
+ (define-cfn stop-mml ()
+   ::void
+   (let* ((gcontext::GrvMMLMusicContext* (Mix_GetMusicHookData)))
+     (when gcontext
+       (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> gcontext future))))
+         (set-future-result! gfuture (SCM_LIST1 'stopped) false))))
+   (Mix_HookMusic NULL NULL)
+
+   (let* ((gcontext::GrvMMLMusicContext* NULL))
+     (while (= gcontext (dequeue-mml-music-context!))
+       (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> gcontext future))))
+         (set-future-result! gfuture (SCM_LIST1 'cancelled) false)))))
 
  (define-cfn compute-total-length (gsoundlet::GrvSoundlet*)
    ::int
@@ -4038,7 +4115,9 @@ typedef enum {
   (set! (-> gsoundlet1 next) gsoundlet2))
 
 (define-cproc play-soundlet (gsoundlet::<graviton-soundlet>)
-  (let* ((gcontext::GrvSoundContext* (SCM_NEW (.type GrvSoundContext)))
+  (Mix_HaltMusic)
+
+  (let* ((gcontext::GrvMMLMusicContext* (SCM_NEW (.type GrvMMLMusicContext)))
          (future (make-future)))
     (set! (-> gcontext position) 0
           (-> gcontext num-soundlet-contexts) 16
@@ -4048,10 +4127,9 @@ typedef enum {
       (set! (aref (-> gcontext soundlet-contexts) i) NULL))
     (retain-soundlet! gcontext gsoundlet 0)
     (cond
-      (playing-music?
-       (enqueue-sound-context! gcontext))
+      ((playing-mml?)
+       (enqueue-mml-music-context! gcontext))
       (else
-       (set! playing-music? true)
        (Mix_HookMusic fill-audio-stream gcontext)))
     (return future)))
 
@@ -4097,7 +4175,7 @@ typedef enum {
      (cont context seq))
     ((('wave type freq vel sec) rest ...)
      (let ((make-tone (generate-make-simple-tone type))
-           (vols (assoc-ref context 'volumes '(1.0 1.0)))
+           (vols (assoc-ref context 'stereo-balance '(1.0 1.0)))
            (envelope (assoc-ref context 'envelope default-envelope)))
        (compile-mml
          context
@@ -4106,7 +4184,7 @@ typedef enum {
          cont)))
     ((('note n v sec) rest ...)
      (let ((make-tone (assoc-ref context 'make-tone make-default-tone))
-           (vols (assoc-ref context 'volumes '(1.0 1.0)))
+           (vols (assoc-ref context 'stereo-balance '(1.0 1.0)))
            (envelope (assoc-ref context 'envelope default-envelope)))
        (compile-mml
          context
@@ -4135,9 +4213,9 @@ typedef enum {
                                 context)
        (compile-mml context seq mml (lambda (context seq)
                                       (compile-mml current-context seq rest cont)))))
-    ((('volume left right) rest ...)
+    ((('stereo-balance left right) rest ...)
      (compile-mml
-       (assoc-set! context 'volume (list left right))
+       (assoc-set! context 'stereo-balance (list left right))
        seq
        rest
        cont))
@@ -4280,7 +4358,7 @@ typedef enum {
                   (or len (assoc-ref context 'length (/ 1 4)))))
           (octave (assoc-ref context 'octave 4))
           (make-tone (assoc-ref context 'make-tone make-default-tone))
-          (vols (assoc-ref context 'volumes '(1.0 1.0)))
+          (vols (assoc-ref context 'stereo-balance '(1.0 1.0)))
           (velocity (assoc-ref context 'velocity 1.0))
           (envelope (assoc-ref context 'envelope default-envelope)))
       (receive (pitches _) (fold2 (lambda (note pitches prev-pitch)
@@ -4307,6 +4385,94 @@ typedef enum {
   (play-soundlet (compile-mml '() '() mml (lambda (context seq)
                                             (merge-soundlet seq)))))
 
+(define-cproc stop-mml ()
+  ::<void>
+  (stop-mml))
+
+
+;;;
+;;; Music
+;;;
+
+(inline-stub
+ (define-cfn finalize-music (z data::void*)
+   ::void
+   (when (GRV_MUSIC_P z)
+     (let* ((gmusic::GrvMusic* (GRV_MUSIC_PTR z)))
+       (Mix_FreeMusic (-> gmusic music))
+       (set! (-> gmusic music) NULL))))
+
+ (define-cfn set-playing-music-context! (music-context::GrvMusicContext*)
+   ::GrvMusicContext*
+   (lock-global-var)
+   (let* ((prev::GrvMusicContext* playing-music-context))
+     (set! playing-music-context music-context)
+     (unlock-global-var)
+     (return prev)))
+
+ (define-cfn finish-music ()
+   ::void :static
+   (let* ((music-context::GrvMusicContext* (set-playing-music-context! NULL)))
+     (when music-context
+       (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> music-context future))))
+         (set-future-result! gfuture (SCM_LIST1 'finished) false)
+         (set! music-last-finished-tick (SDL_GetTicks))))))
+
+ (define-cfn stop-music ()
+   ::void
+   (let* ((music-context::GrvMusicContext* (set-playing-music-context! NULL)))
+     (when music-context
+       (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> music-context future))))
+         (set-future-result! gfuture (SCM_LIST1 'stopped) false)
+         (set! music-last-finished-tick (SDL_GetTicks)))))
+   (Mix_HaltMusic))
+ ) ;; end of inline-stub
+
+(define-cproc load-music (filename::<const-cstring>)
+  (let* ((mmusic::Mix_Music* (Mix_LoadMUS filename)))
+    (unless mmusic
+      (Scm_Error "Mix_LoadMUS failed: %s" (Mix_GetError)))
+    (let* ((gmusic::GrvMusic* (SCM_NEW (.type GrvMusic)))
+           (music (MAKE_GRV_MUSIC gmusic)))
+      (set! (-> gmusic music) mmusic)
+      (Scm_RegisterFinalizer music finalize-music NULL)
+      (return music))))
+
+(define-cproc play-music (music)
+  (unless (GRV_MUSIC_P music)
+    (Scm_Error "<graviton-music> required, but got %S" music))
+
+  (stop-mml)
+  (stop-music)
+
+  (let* ((music-context::GrvMusicContext* (SCM_NEW (.type GrvMusicContext))))
+    (set! (-> music-context music) music
+          (-> music-context future) (make-future))
+    (set-playing-music-context! music-context)
+    (when (< (Mix_PlayMusic (-> (GRV_MUSIC_PTR music) music) 0) 0)
+      (set-playing-music-context! NULL)
+      (Scm_Error "Mix_PlayMusic failed: %s" (Mix_GetError)))
+    (return (-> music-context future))))
+
+(define-cproc stop-music ()
+  ::<void>
+  (stop-music))
+
+(define-cproc pause-music ()
+  ::<void>
+  (Mix_PauseMusic))
+
+(define-cproc resume-music ()
+  ::<void>
+  (Mix_ResumeMusic))
+
+(define-cproc playing-music? ()
+  ::<boolean>
+  (return (Mix_PlayingMusic)))
+
+(define-cproc paused-music? ()
+  ::<boolean>
+  (return (Mix_PausedMusic)))
 
 (define-cproc set-music-volume! (volume::<int>)
   ::<void>
@@ -4324,77 +4490,185 @@ typedef enum {
  (define-cfn finalize-sound (z data::void*)
    ::void
    (when (GRV_SOUND_P z)
-     (Mix_FreeChunk (GRV_SOUND_PTR z))))
+     (Mix_FreeChunk (-> (GRV_SOUND_PTR z) chunk))))
 
- (define-cfn set-playing-sound! (channel::int sound)
+ (define-cfn set-playing-sound-context! (channel::int sound-context::GrvSoundContext*)
+   ::GrvSoundContext*
+   (lock-global-var)
+   (let* ((prev::GrvSoundContext* (aref playing-sound-contexts channel)))
+     (set! (aref playing-sound-contexts channel) sound-context)
+     (unlock-global-var)
+     (return prev)))
+
+ (define-cfn find-available-channel ()
+   ::int
+   (let* ((i::int))
+     (lock-global-var)
+     (for ((set! i 0) (< i CHANNEL_SIZE) (inc! i))
+       (when (== (aref playing-sound-contexts i) NULL)
+         (break)))
+     (unlock-global-var)
+
+     (cond
+       ((== i CHANNEL_SIZE)
+        (return -1))
+       (else
+        (return i)))))
+
+ (define-cfn stop-sound (channel::int)
    ::void
-   (SDL_AtomicLock (& playing-sound-lock))
-   (Scm_VectorSet (SCM_VECTOR playing-sound-vector) channel sound)
-   (SDL_AtomicUnlock (& playing-sound-lock)))
+   (let* ((sound-context::GrvSoundContext* (set-playing-sound-context! channel NULL)))
+     (when sound-context
+       (set-future-result! (GRV_FUTURE_PTR (-> sound-context future)) 'stopped false))
+     (Mix_HaltChannel channel)))
 
- (define-cfn finish-channel (channel::int)
+ (define-cfn finish-sound (channel::int)
    ::void :static
-   (set-playing-sound! channel SCM_FALSE))
+   (let* ((sound-context::GrvSoundContext* (set-playing-sound-context! channel NULL)))
+     (when sound-context
+       (set-future-result! (GRV_FUTURE_PTR (-> sound-context future)) 'finished false))))
  ) ;; end of inline-stub
 
 (define-cproc load-sound (filename::<const-cstring>)
   (let* ((chunk::Mix_Chunk* (Mix_LoadWAV filename)))
     (unless chunk
       (Scm_Error "Mix_LoadWAV failed: %s" (Mix_GetError)))
-    (let* ((sound (MAKE_GRV_SOUND chunk)))
+    (let* ((gsound::GrvSound* (SCM_NEW (.type GrvSound)))
+           (sound (MAKE_GRV_SOUND gsound)))
+      (set! (-> gsound chunk) chunk)
       (Scm_RegisterFinalizer sound finalize-sound NULL)
       (return sound))))
 
 (define-cproc play-sound (sound :key (channel #f))
-  ::<int>
+  ::(<top> <int>)
   (unless (GRV_SOUND_P sound)
     (Scm_Error "<graviton-sound> required, but got %S" sound))
 
-  (let* ((channel-num::int -1)
-         (which::int))
+  (let* ((which::int))
     (cond
       ((SCM_INTP channel)
-       (set! channel-num (SCM_INT_VALUE channel))
-       (unless (and (<= 0 channel-num) (< channel-num CHANNEL_SIZE))
-         (Scm_Error "channel out of range: %d" channel-num)))
+       (set! which (SCM_INT_VALUE channel))
+       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+         (Scm_Error "channel out of range: %d" which)))
       ((SCM_FALSEP channel)
-       (set! channel-num -1))
+       (set! which (find-available-channel))
+       (when (< which 0)
+         (Scm_Error "no available channels")))
       (else
        (Scm_Error "<integer> or #f required, but got %S" channel)))
 
-    (set! which (Mix_PlayChannel channel-num (GRV_SOUND_PTR sound) 0))
-    (when (< which 0)
-      (Scm_Error "Mix_PlayChannel failed: %s" (Mix_GetError)))
-    (set-playing-sound! which sound)
-    (return which)))
+    (stop-sound which)
+    (let* ((sound-context::GrvSoundContext* (SCM_NEW (.type GrvSoundContext))))
+      (set! (-> sound-context sound) sound
+            (-> sound-context future) (make-future))
+      (set-playing-sound-context! which sound-context)
+      (when (< (Mix_PlayChannel which (-> (GRV_SOUND_PTR sound) chunk) 0) 0)
+        (set-playing-sound-context! which NULL)
+        (Scm_Error "Mix_PlayChannel failed: %s" (Mix_GetError)))
+      (return (-> sound-context future) which))))
 
-(define-cproc stop-channel (channel::<int>)
+(define-cproc stop-sound (:optional (channel #f))
   ::<void>
-  (Mix_HaltChannel channel))
+  (cond
+    ((SCM_FALSEP channel)
+     (let* ((i::int))
+       (for ((set! i 0) (< i CHANNEL_SIZE) (inc! i))
+         (stop-sound i))))
+    ((SCM_INTP channel)
+     (let* ((which::int (SCM_INT_VALUE channel)))
+       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+         (Scm_Error "channel out of range: %d" which))
+       (stop-sound which)))
+    (else
+     (Scm_Error "<integer> or #f required, but got %S" channel))))
 
-(define-cproc playing-channel? (channel::<int>)
+(define-cproc playing-sound? (:optional (channel #f))
   ::<boolean>
-  (return (Mix_Playing channel)))
+  (cond
+    ((SCM_FALSEP channel)
+     (return (Mix_Playing -1)))
+    ((SCM_INTP channel)
+     (let* ((which::int (SCM_INT_VALUE channel)))
+       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+         (Scm_Error "channel out of range: %d" which))
+       (return (Mix_Playing which))))
+    (else
+     (Scm_Error "<integer> or #f required, but got %S" channel))))
 
-(define-cproc pause-channel (channel::<int>)
+(define-cproc pause-sound (:optional (channel #f))
   ::<void>
-  (Mix_Pause channel))
+  (cond
+    ((SCM_FALSEP channel)
+     (Mix_Pause -1))
+    ((SCM_INTP channel)
+     (let* ((which::int (SCM_INT_VALUE channel)))
+       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+         (Scm_Error "channel out of range: %d" which))
+       (Mix_Pause which)))
+    (else
+     (Scm_Error "<integer> or #f required, but got %S" channel))))
 
-(define-cproc resume-channel (channel::<int>)
+(define-cproc resume-sound (:optional (channel #f))
   ::<void>
-  (Mix_Resume channel))
+  (cond
+    ((SCM_FALSEP channel)
+     (Mix_Resume -1))
+    ((SCM_INTP channel)
+     (let* ((which::int (SCM_INT_VALUE channel)))
+       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+         (Scm_Error "channel out of range: %d" which))
+       (Mix_Resume which)))
+    (else
+     (Scm_Error "<integer> or #f required, but got %S" channel))))
 
-(define-cproc paused-channel? (channel::<int>)
+(define-cproc paused-sound? (:optional (channel #f))
   ::<boolean>
-  (return (Mix_Paused channel)))
+  (cond
+    ((SCM_FALSEP channel)
+     (return (Mix_Paused -1)))
+    ((SCM_INTP channel)
+     (let* ((which::int (SCM_INT_VALUE channel)))
+       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+         (Scm_Error "channel out of range: %d" which))
+       (return (Mix_Paused which))))
+    (else
+     (Scm_Error "<integer> or #f required, but got %S" channel))))
 
-(define-cproc set-channel-volume! (channel::<int> volume::<int>)
+(define-cproc set-sound-volume! (arg0 :optional arg1)
   ::<void>
-  (Mix_Volume channel volume))
+  (cond
+    ((and (SCM_INTP arg0)
+          (SCM_UNBOUNDP arg1))
+     ;; arg0: volume
+     (Mix_Volume -1 (SCM_INT_VALUE arg0)))
+    ((and (SCM_FALSEP arg0)
+          (SCM_INTP arg1))
+     ;; arg0: #f, arg1: volume
+     (Mix_Volume -1 (SCM_INT_VALUE arg0)))
+    ((and (SCM_INTP arg0)
+          (SCM_INTP arg1))
+     ;; arg0: channel, arg1: volume
+     (let* ((which::int (SCM_INT_VALUE arg0)))
+       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+         (Scm_Error "channel out of range: %d" which))
+       (Mix_Volume which (SCM_INT_VALUE arg1))))
+    ((SCM_UNBOUNDP arg1)
+     (Scm_Error "invalid argument: %S" arg0))
+    (else
+     (Scm_Error "invalid arguments: %S %S" arg0 arg1))))
 
-(define-cproc channel-volume (channel::<int>)
+(define-cproc sound-volume (:optional (channel #f))
   ::<int>
-  (return (Mix_Volume channel -1)))
+  (cond
+    ((SCM_FALSEP channel)
+     (return (Mix_Volume -1 -1)))
+    ((SCM_INTP channel)
+     (let* ((which::int (SCM_INT_VALUE channel)))
+       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+         (Scm_Error "channel out of range: %d" which))
+       (return (Mix_Volume which -1))))
+    (else
+     (Scm_Error "<integer> or #f required, but got %S" channel))))
 
 (include "graviton/enum2sym.scm")
 
@@ -4461,4 +4735,4 @@ typedef enum {
 (set! (setter tile-map-offset) set-tile-map-offset!)
 
 (set! (setter music-volume) set-music-volume!)
-(set! (setter channel-volume) set-channel-volume!)
+(set! (setter sound-volume) set-sound-volume!)
