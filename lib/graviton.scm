@@ -242,6 +242,7 @@
 
           play-mml
           stop-mml
+          beep
           load-music
           play-music
           stop-music
@@ -4388,6 +4389,10 @@ typedef enum {
 (define-cproc stop-mml ()
   ::<void>
   (stop-mml))
+
+
+(define (beep :optional (freq 2000) (len 0.1))
+  (play-mml `((wave square ,freq 1.0 ,len))))
 
 
 ;;;
