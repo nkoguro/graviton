@@ -241,10 +241,6 @@
           message-box
 
           play-mml
-          stop-mml
-          pause-mml
-          resume-mml
-          paused-mml?
           beep
           load-music
           play-music
@@ -4414,22 +4410,6 @@ typedef enum {
   (play-soundlet (compile-mml '() '() mml (lambda (context seq)
                                             (merge-soundlet seq)))))
 
-(define-cproc stop-mml ()
-  ::<void>
-  (stop-mml))
-
-(define-cproc pause-mml ()
-  ::<void>
-  (pause-mml))
-
-(define-cproc resume-mml ()
-  ::<void>
-  (resume-mml))
-
-(define-cproc paused-mml? ()
-  ::<boolean>
-  (return (paused-mml?)))
-
 (define (beep :optional (freq 2000) (len 0.1))
   (play-mml `((wave square ,freq 1.0 ,len))))
 
@@ -4500,23 +4480,43 @@ typedef enum {
 
 (define-cproc stop-music ()
   ::<void>
-  (stop-music))
+  (cond
+    ((playing-mml?)
+     (stop-mml))
+    (else
+     (stop-music))))
 
 (define-cproc pause-music ()
   ::<void>
-  (Mix_PauseMusic))
+  (cond
+    ((playing-mml?)
+     (pause-mml))
+    (else
+     (Mix_PauseMusic))))
 
 (define-cproc resume-music ()
   ::<void>
-  (Mix_ResumeMusic))
+  (cond
+    ((playing-mml?)
+     (resume-mml))
+    (else
+     (Mix_ResumeMusic))))
 
 (define-cproc playing-music? ()
   ::<boolean>
-  (return (Mix_PlayingMusic)))
+  (cond
+    ((playing-mml?)
+     (return true))
+    (else
+     (return (Mix_PlayingMusic)))))
 
 (define-cproc paused-music? ()
   ::<boolean>
-  (return (Mix_PausedMusic)))
+  (cond
+    ((playing-mml?)
+     (return (paused-mml?)))
+    (else
+     (return (Mix_PausedMusic)))))
 
 (define-cproc set-music-volume! (volume::<int>)
   ::<void>
