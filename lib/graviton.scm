@@ -242,6 +242,9 @@
 
           play-mml
           stop-mml
+          pause-mml
+          resume-mml
+          paused-mml?
           beep
           load-music
           play-music
@@ -464,6 +467,7 @@ typedef struct GrvSoundletRec {
  (define-cvar graviton-event-type::Uint32 :static)
  (define-cvar graviton-module :static)
  (define-cvar mml-music-context-queue::GrvMMLMusicContextQueue :static)
+ (define-cvar mml-paused?::bool :static)
  (define-cvar playing-music-context::GrvMusicContext* :static)
  (define-cvar playing-music-lock::SDL_SpinLock :static)
  (define-cvar noise-table::double* :static)
@@ -546,7 +550,8 @@ typedef struct GrvSoundletRec {
    (set! (ref mml-music-context-queue buf) (SCM_NEW_ARRAY (.type GrvMMLMusicContext*) MML_MUSIC_CONTEXT_INITIAL_LENGTH)
          (ref mml-music-context-queue length) MML_MUSIC_CONTEXT_INITIAL_LENGTH
          (ref mml-music-context-queue start) 0
-         (ref mml-music-context-queue end) 0)
+         (ref mml-music-context-queue end) 0
+         mml-paused? false)
    (dotimes (i (ref mml-music-context-queue length))
      (set! (aref (ref mml-music-context-queue buf) i) NULL))
 
@@ -3969,6 +3974,10 @@ typedef enum {
  (define-cfn fill-audio-stream (udata::void* stream::Uint8* len::int)
    ::void :static
    (memset stream 0 len)
+
+   (when mml-paused?
+     (return))
+
    (let* ((buf::int16_t* (cast int16_t* stream))
           (buf-length::int (/ len 2))
           (index::int 0)
@@ -4014,6 +4023,25 @@ typedef enum {
      (while (= gcontext (dequeue-mml-music-context!))
        (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> gcontext future))))
          (set-future-result! gfuture (SCM_LIST1 'cancelled) false)))))
+
+ (define-cfn pause-mml ()
+   ::void
+   (lock-global-var)
+   (set! mml-paused? true)
+   (unlock-global-var))
+
+ (define-cfn resume-mml ()
+   ::void
+   (lock-global-var)
+   (set! mml-paused? false)
+   (unlock-global-var))
+
+ (define-cfn paused-mml? ()
+   ::bool
+   (lock-global-var)
+   (let* ((paused?::bool mml-paused?))
+     (unlock-global-var)
+     (return paused?)))
 
  (define-cfn compute-total-length (gsoundlet::GrvSoundlet*)
    ::int
@@ -4390,6 +4418,17 @@ typedef enum {
   ::<void>
   (stop-mml))
 
+(define-cproc pause-mml ()
+  ::<void>
+  (pause-mml))
+
+(define-cproc resume-mml ()
+  ::<void>
+  (resume-mml))
+
+(define-cproc paused-mml? ()
+  ::<boolean>
+  (return (paused-mml?)))
 
 (define (beep :optional (freq 2000) (len 0.1))
   (play-mml `((wave square ,freq 1.0 ,len))))
