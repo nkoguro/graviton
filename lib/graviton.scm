@@ -32,7 +32,6 @@
 
 (define-module graviton
   (use compile-stub)
-  (use control.thread-pool)
   (use data.queue)
   (use file.util)
   (use gauche.collection)
@@ -59,11 +58,11 @@
           <graviton-music>
 
           async
-          async*
+          async/thread
           async-apply
-          async*-apply
-          main-async
+          async/thread-apply
           await
+          force-future
           yield
           await-sleep
 
@@ -801,9 +800,7 @@ typedef struct GrvSoundletRec {
   ::<boolean>
   (return (== main-thread-id (SDL_ThreadID))))
 
-(define graviton-thread-pool (make-parameter (make-thread-pool 1)))
-
-(define-cproc submit-main-thread (thunk::<procedure>)
+(define-cproc submit/main (thunk::<procedure>)
   ::<void>
   (let* ((event::SDL_Event))
     (set! (ref event type) graviton-event-type
@@ -812,15 +809,17 @@ typedef struct GrvSoundletRec {
           (ref event user data2) SCM_NIL)
     (SDL_PushEvent (& event))))
 
-(define (submit-thread-pool thunk)
-  (add-job! (graviton-thread-pool) thunk))
+(define (submit/thread thunk)
+  (thread-start! (make-thread
+                   (lambda ()
+                     (thunk)))))
 
-(define (submit thunk :optional (type (if (on-main-thread?) 'main 'pool)))
+(define (submit thunk type)
   (let1 %submit (case type
-                  ((main) submit-main-thread)
-                  ((pool) submit-thread-pool)
+                  ((main) submit/main)
+                  ((thread) submit/thread)
                   (else
-                   (errorf "type must be 'main or 'pool, but got ~s" thread)))
+                   (errorf "type must be 'main or 'thread, but got ~s" thread)))
     (%submit thunk)))
 
 (define (force-future future)
@@ -845,50 +844,48 @@ typedef struct GrvSoundletRec {
     future))
 
 (define (async-apply proc :rest args)
-  (%async-apply 'pool proc args))
-
-(define (async*-apply proc :rest args)
   (%async-apply 'main proc args))
+
+(define (async/thread-apply proc :rest args)
+  (%async-apply 'thread proc args))
 
 (define-syntax async
   (syntax-rules ()
     ((_ expr ...)
      (async-apply (lambda () expr ...)))))
 
-(define-syntax async*
+(define-syntax async/thread
   (syntax-rules ()
     ((_ expr ...)
-     (async*-apply (lambda () expr ...)))))
+     (async/thread-apply (lambda () expr ...)))))
 
 (define (await future)
+  (unless (on-main-thread?)
+    (error "await is unavailable on non-main thread."))
   (cond
     ((is-a? future <graviton-future>)
-     (let1 %submit (if (on-main-thread?)
-                       submit-main-thread
-                       submit-thread-pool)
-       (shift cont
-         (add-future-continuation! future
-                                   (lambda (result exception)
-                                     (let1 thunk (cond
-                                                   (result
-                                                    (lambda ()
-                                                      (apply cont result)))
-                                                   (exception
-                                                    (lambda ()
-                                                      (raise exception)))
-                                                   (else
-                                                    (errorf "[BUG] result and exception aren't specified.")))
-                                       (%submit thunk)))))))
+     (shift cont
+       (add-future-continuation! future
+                                 (lambda (result exception)
+                                   (let1 thunk (cond
+                                                 (result
+                                                  (lambda ()
+                                                    (apply cont result)))
+                                                 (exception
+                                                  (lambda ()
+                                                    (raise exception)))
+                                                 (else
+                                                  (errorf "[BUG] result and exception aren't specified.")))
+                                     (submit/main thunk))))))
     (else
      future)))
 
 (define (await-sleep sec)
-  (let1 %submit (if (on-main-thread?)
-                    submit-main-thread
-                    submit-thread-pool)
-    (shift cont
-      (add-timer! sec (lambda ()
-                        (%submit cont))))))
+  (unless (on-main-thread?)
+    (error "await-sleep is unavailable on non-main thread."))
+  (shift cont
+    (add-timer! sec (lambda ()
+                      (submit/main cont)))))
 
 (define (report-uncaught-future-exceptions messages)
   (for-each (lambda (msg)
@@ -898,7 +895,9 @@ typedef struct GrvSoundletRec {
   (error "async failed, but the exception wasn't caught."))
 
 (define (yield)
-  (shift cont (submit cont)))
+  (unless (on-main-thread?)
+    (error "yield is unavailable on non-main thread."))
+  (shift cont (submit/main cont)))
 
 ;;;
 ;;; Coordinate calculation
@@ -2650,7 +2649,7 @@ typedef struct GrvSoundletRec {
         (%set-history-expr! (eval '%set-history-expr! (find-module 'gauche.interactive))))
     (guard (e (else (%set-history-exception! e)
                     (raise e)))
-      (receive r (force-future (async*
+      (receive r (force-future (async
                                  (eval sexpr ((with-module gauche.internal vm-current-module)))))
         (%set-history-expr! r)
         (apply values r)))))
@@ -2658,7 +2657,7 @@ typedef struct GrvSoundletRec {
 (define %prompter
   (let1 user-module (find-module 'user)
     (lambda ()
-      (let1 m (force-future (async*
+      (let1 m (force-future (async
                               ((with-module gauche.internal vm-current-module))))
         (if (eq? m user-module)
             (display "graviton> ")
