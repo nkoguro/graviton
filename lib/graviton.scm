@@ -371,7 +371,7 @@
                              result
                              exception
                              message::char*
-                             continuation
+                             continuations
                              consumed?::bool)))
   "
 typedef enum {
@@ -682,38 +682,41 @@ typedef struct GrvSoundletRec {
            (-> gfuture result) SCM_FALSE
            (-> gfuture exception) SCM_FALSE
            (-> gfuture message) NULL
-           (-> gfuture continuation) SCM_FALSE
+           (-> gfuture continuations) SCM_NIL
            (-> gfuture consumed?) false)
      (Scm_RegisterFinalizer obj finalize-future NULL)
      (return obj)))
 
  (define-cfn set-future-result! (gfuture::GrvFuture* result report-error?::bool)
    ::void
-   (let* ((cont SCM_FALSE)
+   (let* ((conts SCM_NIL)
           (err?::bool false))
      (SDL_LockMutex (-> gfuture lock))
      (cond
        ((and (SCM_FALSEP (-> gfuture result)) (SCM_FALSEP (-> gfuture exception)))
         (set! (-> gfuture result) result
-              cont (-> gfuture continuation))
+              conts (-> gfuture continuations)
+              (-> gfuture continuations) SCM_NIL)
         (SDL_CondSignal (-> gfuture cond)))
        (else
         (set! err? true)))
      (SDL_UnlockMutex (-> gfuture lock))
      (cond
        ((not err?)
-        (when (SCM_PROCEDUREP cont)
+        (unless (SCM_NULLP conts)
           (SDL_LockMutex (-> gfuture lock))
           (set! (-> gfuture consumed?) true)
           (SDL_UnlockMutex (-> gfuture lock))
           (cond
             ((Scm_VM)
-             (Scm_ApplyRec cont (SCM_LIST2 result SCM_FALSE)))
+             (for-each (lambda (cont)
+                         (Scm_ApplyRec cont (SCM_LIST2 result SCM_FALSE)))
+                       conts))
             (else
              (let* ((event::SDL_Event))
                (set! (ref event type) graviton-event-type
                      (ref event user code) GRAVITON_APPLY_CODE
-                     (ref event user data1) cont
+                     (ref event user data1) conts
                      (ref event user data2) (SCM_LIST2 result SCM_FALSE))
                (SDL_PushEvent (& event)))))))
        (report-error?
@@ -731,7 +734,7 @@ typedef struct GrvSoundletRec {
 
 (define-cproc set-future-exception! (gfuture::<graviton-future> exception error-message::<const-cstring>)
   ::<void>
-  (let* ((cont SCM_FALSE)
+  (let* ((conts SCM_NIL)
          (err?::bool false))
     (SDL_LockMutex (-> gfuture lock))
     (cond
@@ -741,18 +744,21 @@ typedef struct GrvSoundletRec {
          (strncpy msg error-message (- MAX_MESSAGE_LENGTH 1))
          (set! (-> gfuture exception) exception
                (-> gfuture message) msg
-               cont (-> gfuture continuation))
+               conts (-> gfuture continuations)
+               (-> gfuture continuations) SCM_NIL)
          (SDL_CondSignal (-> gfuture cond))))
       (else
        (set! err? true)))
     (SDL_UnlockMutex (-> gfuture lock))
     (when err?
       (Scm_Error "result has been already set in <graviton-future>"))
-    (when (SCM_PROCEDUREP cont)
+    (unless (SCM_NULLP conts)
       (SDL_LockMutex (-> gfuture lock))
       (set! (-> gfuture consumed?) true)
       (SDL_UnlockMutex (-> gfuture lock))
-      (Scm_ApplyRec cont (SCM_LIST2 SCM_FALSE exception)))))
+      (for-each (lambda (cont)
+                  (Scm_ApplyRec cont (SCM_LIST2 SCM_FALSE exception)))
+                conts))))
 
 (define-cproc future-result&exception (gfuture::<graviton-future>)
   ::(<top> <top>)
@@ -771,20 +777,25 @@ typedef struct GrvSoundletRec {
     (SDL_UnlockMutex (-> gfuture lock))
     (return result exception)))
 
-(define-cproc set-future-continuation! (gfuture::<graviton-future> cont)
+(define-cproc add-future-continuation! (gfuture::<graviton-future> cont)
   ::<void>
   (let* ((result SCM_FALSE)
-         (exception SCM_FALSE))
+         (exception SCM_FALSE)
+         (conts SCM_NIL))
     (SDL_LockMutex (-> gfuture lock))
-    (set! (-> gfuture continuation) cont
+    (set! conts (Scm_Cons cont (-> gfuture continuations))
+          (-> gfuture continuations) conts
           result (-> gfuture result)
           exception (-> gfuture exception))
     (SDL_UnlockMutex (-> gfuture lock))
     (unless (and (SCM_FALSEP result) (SCM_FALSEP exception))
       (SDL_LockMutex (-> gfuture lock))
-      (set! (-> gfuture consumed?) true)
+      (set! (-> gfuture consumed?) true
+            (-> gfuture continuations) SCM_NIL)
       (SDL_UnlockMutex (-> gfuture lock))
-      (Scm_ApplyRec cont (SCM_LIST2 result exception)))))
+      (for-each (lambda (cont)
+                  (Scm_ApplyRec cont (SCM_LIST2 result exception)))
+                conts))))
 
 (define-cproc on-main-thread? ()
   ::<boolean>
@@ -797,7 +808,7 @@ typedef struct GrvSoundletRec {
   (let* ((event::SDL_Event))
     (set! (ref event type) graviton-event-type
           (ref event user code) GRAVITON_APPLY_CODE
-          (ref event user data1) thunk
+          (ref event user data1) (SCM_LIST1 (SCM_OBJ thunk))
           (ref event user data2) SCM_NIL)
     (SDL_PushEvent (& event))))
 
@@ -856,7 +867,7 @@ typedef struct GrvSoundletRec {
                        submit-main-thread
                        submit-thread-pool)
        (shift cont
-         (set-future-continuation! future
+         (add-future-continuation! future
                                    (lambda (result exception)
                                      (let1 thunk (cond
                                                    (result
@@ -2898,9 +2909,11 @@ typedef struct GrvSoundletRec {
             (Mix_HookMusic NULL NULL)
             (set! music-last-finished-tick (SDL_GetTicks)))
            ((GRAVITON_APPLY_CODE)
-            (let* ((proc (ref (-> sdl-event user) data1))
+            (let* ((procs (ref (-> sdl-event user) data1))
                    (args (ref (-> sdl-event user) data2)))
-              (Scm_ApplyRec proc args)))
+              (for-each (lambda (proc)
+                          (Scm_ApplyRec proc args))
+                        procs)))
            ((GRAVITON_UPDATE_WINDOWS)
             (for-each (lambda (win)
                         (%call-window-handler win 'update SCM_NIL))
