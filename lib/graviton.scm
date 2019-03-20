@@ -35,6 +35,7 @@
   (use data.queue)
   (use file.util)
   (use gauche.collection)
+  (use gauche.interactive)
   (use gauche.parameter)
   (use gauche.partcont)
   (use gauche.record)
@@ -110,6 +111,7 @@
           grv-main
           grv-begin
           grv-exit
+          grv-repl
 
           on-window-shown
           on-window-hidden
@@ -457,8 +459,6 @@ typedef struct GrvSoundletRec {
  (define-cvar event-loop-status::EventLoopStatus)
  (define-cvar frame-per-second::int :static 30)
  (define-cvar global-handler-table :static)
- (define-cvar repl-thread :static)
- (define-cvar repl-channel :static)
  (define-cvar graviton-event-type::Uint32 :static)
  (define-cvar graviton-module :static)
  (define-cvar mml-music-context-queue::GrvMMLMusicContextQueue :static)
@@ -469,6 +469,7 @@ typedef struct GrvSoundletRec {
  (define-cvar music-last-finished-tick::Uint32 :static)
  (define-cvar playing-sound-contexts::GrvSoundContext** :static)
  (define-cvar global-lock::SDL_SpinLock :static)
+ (define-cvar repl-running?::bool :static)
 
  (define-cptr <graviton-window> :private
    "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
@@ -536,8 +537,6 @@ typedef struct GrvSoundletRec {
 
    (set! main-thread-id (SDL_ThreadID)
          global-handler-table (Scm_MakeHashTableSimple SCM_HASH_EQ 16)
-         repl-thread SCM_FALSE
-         repl-channel SCM_FALSE
          graviton-module (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
    (set! (ref event-loop-status lock) 0
          (ref event-loop-status running?) false)
@@ -843,6 +842,10 @@ typedef struct GrvSoundletRec {
             type)
     future))
 
+;; NOTE: It is better to avoid throwing an exception in async if the exception can be caught by an error handler.
+;; If async throws an exception, await will also throw the exception.
+;; An error handler outside await can catch the exception. But the continuation of the error handler is
+;; different from the continuation of await. It will make unexpected behavior.
 (define (async-apply proc :rest args)
   (%async-apply 'main proc args))
 
@@ -2614,101 +2617,73 @@ typedef struct GrvSoundletRec {
 ;;;
 
 (inline-stub
-  (define-cfn is-repl-running? ()
-    ::bool
-    (if (and (not (SCM_FALSEP repl-thread))
-             (== (-> (SCM_VM repl-thread) state) SCM_VM_RUNNABLE))
-        (return true)
-        (return false)))
-  ) ;; end of inline-stub
+ (define-cfn is-repl-running? ()
+   ::bool
+   (return repl-running?))
+ ) ;; end of inline-stub
 
-(define-cproc repl-thread ()
-  (return repl-thread))
-
-(define-cproc repl-channel ()
-  (return repl-channel))
-
-(define-cproc set-repl! (thread channel)
+(define-cproc set-repl-running? (flag::<boolean>)
   ::<void>
-  (set! repl-thread thread)
-  (set! repl-channel channel))
+  (set! repl-running? flag))
 
-(define-cproc is-repl-running? ()
-  ::<boolean>
-  (return (is-repl-running?)))
-
-(define (is-interactive?)
-  (let ((gosh? (and (not (null? (command-line)))
-                    (equal? (values-ref (decompose-path (car (command-line))) 1) "gosh"))))
-    (and gosh? (find-module 'gauche.interactive))))
-
-(define run-graviton-repl? (make-parameter (is-interactive?)))
-
-(define (%evaluator sexpr _)
-  (let ((%set-history-exception! (eval '%set-history-exception! (find-module 'gauche.interactive)))
-        (%set-history-expr! (eval '%set-history-expr! (find-module 'gauche.interactive))))
-    (guard (e (else (%set-history-exception! e)
-                    (raise e)))
-      (receive r (force-future (async
-                                 (eval sexpr ((with-module gauche.internal vm-current-module)))))
-        (%set-history-expr! r)
-        (apply values r)))))
+(define %evaluator
+  (let ((%set-history-exception! (with-module gauche.interactive %set-history-exception!))
+        (%set-history-expr! (with-module gauche.interactive %set-history-expr!)))
+    (lambda (sexpr mod)
+      (guard (e (else (%set-history-exception! e)
+                      (values #f e)))
+        (receive r (eval sexpr mod)
+          (%set-history-expr! r)
+          (values r #f))))))
 
 (define %prompter
   (let1 user-module (find-module 'user)
     (lambda ()
-      (let1 m (force-future (async
-                              ((with-module gauche.internal vm-current-module))))
+      (let1 m ((with-module gauche.internal vm-current-module))
         (if (eq? m user-module)
             (display "graviton> ")
             (format #t "graviton[~a]> " (module-name m)))
         (flush)))))
 
-(define (make-printer)
-  (eval '%printer (find-module 'gauche.interactive)))
+(define %printer
+  (with-module gauche.interactive
+    %printer))
 
-(define (make-reader channel)
-  (lambda ()
-    (let1 signal (dequeue! channel #f)
-      (match signal
-        ('exit
-          (eof-object))
-        (_
-         (match (read)
-           (('unquote command)
-            (eval `(handle-toplevel-command ',command ',(read-line))
-                  (find-module 'gauche.interactive)))
-           (expr
-            (unless (eof-object? expr)
-              (consume-trailing-whitespaces))
-            expr)))))))
+(define (%reader)
+  (cond
+    ((event-loop-running?)
+     (await (async/thread
+              (match (read)
+                (('unquote command)
+                 (with-module gauche.interactive
+                   (handle-toplevel-command command (read-line))))
+                (expr
+                 (unless (eof-object? expr)
+                   (consume-trailing-whitespaces))
+                 expr)))))
+    (else
+     (eof-object))))
 
-(define (run-grv-repl in out err)
-  (let* ((channel (make-mtqueue))
-         (repl-thread (make-thread
-                        (lambda ()
-                          (with-ports in out err
-                            (lambda ()
-                              (guard (e (else (report-error e)))
-                                (read-eval-print-loop (make-reader channel)
-                                                      %evaluator
-                                                      (make-printer)
-                                                      %prompter))))))))
-    (thread-start! repl-thread)
-    (set-repl! repl-thread channel)))
-
-(define (exit-repl)
-  (when (is-repl-running?)
-    (enqueue! (repl-channel) 'exit))
-  (undefined))
-
-(define (kill-repl)
-  (when (is-repl-running?)
-    (unwind-protect
-        (guard (e (else (report-error e)))
-          (thread-terminate! (repl-thread)))
-      (set-repl! #f #f)))
-  (undefined))
+(define (grv-repl)
+  (grv-main
+    (lambda ()
+      (set-repl-running? #t)
+      (unwind-protect
+          ;; We can't use usual read-eval-print-loop here, because the continuation of the error-handler in
+          ;; read-eval-print-loop and the continuation of the current environment can be different.
+          ;; (%reader uses await and it makes different continuation.)
+          (let loop ()
+            (%prompter)
+            (let1 exp (%reader)
+              (and (not (eof-object? exp))
+                   (receive (results e) (%evaluator exp ((with-module gauche.internal vm-current-module)))
+                     (cond
+                       (results
+                        (apply %printer results))
+                       (else
+                        (report-error e)))
+                     (loop)))))
+        (set-repl-running? #f)))))
 
 
 ;;;
@@ -3076,21 +3051,16 @@ typedef struct GrvSoundletRec {
   dollar-record
   ) ;; end of define-on-global-event-macros
 
-(define (grv-main thunk :key (repl? (is-interactive?)))
+(define (grv-main thunk)
   (cond
     ((event-loop-running?)
      (thunk))
     (else
      (guard (e (else (destroy-all-windows)
-                     (kill-repl)
                      (kill-scheduler)
                      (raise e)))
        (start-global-event-loop (lambda ()
                                   (run-scheduler)
-                                  (when repl?
-                                    (run-grv-repl (current-input-port)
-                                                  (current-output-port)
-                                                  (current-error-port)))
                                   (thunk)))
        (shutdown-scheduler)))))
 
@@ -3102,8 +3072,7 @@ typedef struct GrvSoundletRec {
      (grv-main (lambda () expr ...)))))
 
 (define (grv-exit)
-  (destroy-all-windows)
-  (exit-repl))
+  (destroy-all-windows))
 
 
 ;;;
