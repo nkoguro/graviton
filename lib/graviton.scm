@@ -4147,10 +4147,10 @@ typedef enum {
   (release-time envelope-release-time))
 
 (define (generate-make-simple-tone type)
-  (lambda (freq velocity vols sec envelope)
+  (lambda (freq amp-factor vols sec envelope)
     (make-soundlet type
                    (make-f64vector 1 freq)
-                   (make-f64vector 1 velocity)
+                   (make-f64vector 1 amp-factor)
                    (list-ref vols 0)
                    (list-ref vols 1)
                    sec
@@ -4234,10 +4234,10 @@ typedef enum {
        cont))
     ((('tone (freq-coff amp) ...) rest ...)
      (compile-mml
-       (assoc-set! context 'make-tone (lambda (freq velocity vols sec envelope)
+       (assoc-set! context 'make-tone (lambda (freq amp-factor vols sec envelope)
                                         (make-soundlet type
                                                        (list->f64vector (map (cut (* freq <>)) freq-coff))
-                                                       (list->f64vector amp)
+                                                       (list->f64vector (map (^x (* amp amp-factor)) amp))
                                                        (list-ref vols 0)
                                                        (list-ref vols 1)
                                                        sec
@@ -4262,7 +4262,7 @@ typedef enum {
        cont))
     ((('velocity v) rest ...)
      (compile-mml
-       (assoc-set! context 'velocity v)
+       (assoc-set! context 'amp-factor v)
        seq
        rest
        cont))
@@ -4365,8 +4365,8 @@ typedef enum {
                   (or len (assoc-ref context 'length (/ 1 4)))))
           (octave (assoc-ref context 'octave 4))
           (make-tone (assoc-ref context 'make-tone make-default-tone))
-          (velocity (assoc-ref context 'velocity 1.0))
           (vols (stereo-volumes (assoc-ref context 'panning 0)))
+          (amp-factor (assoc-ref context 'amp-factor 1.0))
           (envelope (assoc-ref context 'envelope default-envelope)))
       (receive (pitches _) (fold2 (lambda (note pitches prev-pitch)
                                     (let1 pitch-num (let1 p (note->pitch octave note)
@@ -4384,7 +4384,7 @@ typedef enum {
                                   notes)
         (compose-soundlets (map (lambda (pitch-num)
                                   (if pitch-num
-                                      (make-tone (pitch pitch-num) velocity vols sec envelope)
+                                      (make-tone (pitch pitch-num) amp-factor vols sec envelope)
                                       (make-silent sec)))
                                 pitches))))))
 
