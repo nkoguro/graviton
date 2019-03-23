@@ -31,6 +31,7 @@
 ;;;
 
 (define-module graviton
+  (use binary.pack)
   (use compile-stub)
   (use data.queue)
   (use file.util)
@@ -243,6 +244,7 @@
 
           play-mml
           beep
+          save-mml
           load-music
           play-music
           stop-music
@@ -3949,9 +3951,6 @@ typedef enum {
    ::void :static
    (memset stream 0 len)
 
-   (when mml-paused?
-     (return))
-
    (let* ((buf::int16_t* (cast int16_t* stream))
           (buf-length::int (/ len 2))
           (index::int 0)
@@ -3959,6 +3958,10 @@ typedef enum {
           (pos::int (-> gcontext position))
           (pos-end::int (+ pos (/ buf-length 2)))
           (i::int 0))
+     (when (and mml-paused?
+                (GRV_FUTURE_P (-> gcontext future)))
+     (return))
+
      (while (< i buf-length)
        (render-context buf i gcontext)
        (inc! (-> gcontext position))
@@ -3968,7 +3971,8 @@ typedef enum {
        (dotimes (i (-> gcontext num-soundlet-contexts))
          (unless (== (aref (-> gcontext soundlet-contexts) i) NULL)
            (inc! num)))
-       (when (== num 0)
+       (when (and (== num 0)
+                  (GRV_FUTURE_P (-> gcontext future)))
          (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> gcontext future))))
            (set-future-result! gfuture (SCM_LIST1 'finished) false))
 
@@ -4135,6 +4139,21 @@ typedef enum {
       (else
        (Mix_HookMusic fill-audio-stream gcontext)))
     (return future)))
+
+(define-cproc soundlet->wave-data (gsoundlet::<graviton-soundlet>)
+  (let* ((len::int (compute-total-length gsoundlet))
+         (buf (Scm_MakeS16Vector (* len 2) 0))
+         (gcontext::GrvMMLMusicContext* (SCM_NEW (.type GrvMMLMusicContext)))
+         (i::int))
+    (set! (-> gcontext position) 0
+          (-> gcontext num-soundlet-contexts) 16
+          (-> gcontext soundlet-contexts) (SCM_NEW_ARRAY (.type GrvSoundletContext*) (-> gcontext num-soundlet-contexts))
+          (-> gcontext future) SCM_FALSE)
+    (dotimes (i (-> gcontext num-soundlet-contexts))
+      (set! (aref (-> gcontext soundlet-contexts) i) NULL))
+    (retain-soundlet! gcontext gsoundlet 0)
+    (fill-audio-stream gcontext (cast Uint8* (SCM_S16VECTOR_ELEMENTS buf)) (* len 2 (sizeof int16_t)))
+    (return buf)))
 
 (define (pitch n)
   (* 440 (expt 2 (/. (- n 69) 12))))
@@ -4394,6 +4413,29 @@ typedef enum {
 
 (define (beep :optional (freq 2000) (velocity 1.0) (len 0.1))
   (play-mml `((wave square ,freq ,velocity ,len))))
+
+(define (save-mml filename mml)
+  (let* ((soundlet (compile-mml '() '() mml (lambda (context seq)
+                                              (merge-soundlet seq))))
+         (wave-data (soundlet->wave-data soundlet)))
+    (call-with-output-file filename
+      (lambda (out)
+        (pack "A4LA4A4LSSLLSSA4L"
+              `("RIFF"  ;; RIFF header
+                ,(+ 4 4 16 4 4 (* (s16vector-length wave-data) 2)) ;; filesize - 8
+                "WAVE"  ;; WAVE header
+                "fmt " ;; fmt chunk
+                16  ;; chunk size
+                1 ;; PCM
+                2 ;; num of channel
+                44100 ;; sampling rate
+                ,(* 44100 2 2) ;; byte rate
+                4 ;; block align
+                16 ;; bits per sample
+                "data" ;; data chunk
+                ,(* (s16vector-length wave-data) 2))
+              :output out)
+        (write-uvector wave-data out)))))
 
 
 ;;;
