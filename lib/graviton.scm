@@ -4392,8 +4392,8 @@ typedef enum {
   (play-soundlet (compile-mml '() '() mml (lambda (context seq)
                                             (merge-soundlet seq)))))
 
-(define (beep :optional (freq 2000) (len 0.1))
-  (play-mml `((wave square ,freq 1.0 ,len))))
+(define (beep :optional (freq 2000) (velocity 1.0) (len 0.1))
+  (play-mml `((wave square ,freq ,velocity ,len))))
 
 
 ;;;
