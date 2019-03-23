@@ -4172,13 +4172,17 @@ typedef enum {
         #f
         seq))
 
+(define (stereo-volumes panning)
+  (list (cos (* pi/4 (+ panning 1)))
+        (sin (* pi/4 (+ panning 1)))))
+
 (define (compile-mml context seq mml cont)
   (match mml
     (()
      (cont context seq))
     ((('wave type freq vel sec) rest ...)
      (let ((make-tone (generate-make-simple-tone type))
-           (vols (assoc-ref context 'stereo-balance '(1.0 1.0)))
+           (vols (stereo-volumes (assoc-ref context 'panning 0)))
            (envelope (assoc-ref context 'envelope default-envelope)))
        (compile-mml
          context
@@ -4187,7 +4191,7 @@ typedef enum {
          cont)))
     ((('note n v sec) rest ...)
      (let ((make-tone (assoc-ref context 'make-tone make-default-tone))
-           (vols (assoc-ref context 'stereo-balance '(1.0 1.0)))
+           (vols (stereo-volumes (assoc-ref context 'panning 0)))
            (envelope (assoc-ref context 'envelope default-envelope)))
        (compile-mml
          context
@@ -4216,9 +4220,9 @@ typedef enum {
                                 context)
        (compile-mml context seq mml (lambda (context seq)
                                       (compile-mml current-context seq rest cont)))))
-    ((('stereo-balance left right) rest ...)
+    ((('pan v) rest ...)
      (compile-mml
-       (assoc-set! context 'stereo-balance (list left right))
+       (assoc-set! context 'panning v)
        seq
        rest
        cont))
@@ -4361,8 +4365,8 @@ typedef enum {
                   (or len (assoc-ref context 'length (/ 1 4)))))
           (octave (assoc-ref context 'octave 4))
           (make-tone (assoc-ref context 'make-tone make-default-tone))
-          (vols (assoc-ref context 'stereo-balance '(1.0 1.0)))
           (velocity (assoc-ref context 'velocity 1.0))
+          (vols (stereo-volumes (assoc-ref context 'panning 0)))
           (envelope (assoc-ref context 'envelope default-envelope)))
       (receive (pitches _) (fold2 (lambda (note pitches prev-pitch)
                                     (let1 pitch-num (let1 p (note->pitch octave note)
