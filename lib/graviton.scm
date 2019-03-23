@@ -4026,7 +4026,7 @@ typedef enum {
    (let* ((cursor::GrvSoundlet* gsoundlet)
           (len::int 0))
      (while cursor
-       (set! len (+ len (-> gsoundlet length))
+       (set! len (+ len (-> cursor length))
              cursor (-> cursor next)))
      (return len)))
  ) ;; end of inline-stub
