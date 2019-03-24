@@ -32,7 +32,6 @@
 
 (define-module graviton
   (use binary.pack)
-  (use compile-stub)
   (use data.queue)
   (use file.util)
   (use gauche.collection)
@@ -4737,11 +4736,8 @@ typedef enum {
     (else
      (Scm_Error "<integer> or #f required, but got %S" channel))))
 
-(include "graviton/enum2sym.scm")
+(include "enum2sym.scm")
 (include "png.scm")
-
-(compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
-
 
 (define (display-image image :key (fullscreen? #f) (resizable? #f))
   (grv-begin

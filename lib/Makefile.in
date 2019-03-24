@@ -52,6 +52,9 @@ graviton.sci graviton.c: graviton.scm png.scm
 graviton.$(SOEXT): $(graviton_SRCS)
 	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton $<
 
+enum2sym.scm:
+	$(GOSH) ../scripts/genenum2sym > $@
+
 install : all
 	$(INSTALL) -m 444 -T $(GAUCHE_PKGINCDIR) $(HEADERS)
 	$(INSTALL) -m 444 -T $(GAUCHE_PKGLIBDIR) $(SCMFILES)
