@@ -46,7 +46,7 @@ graviton_SRCS = graviton.c
 
 all : $(TARGET)
 
-graviton.sci graviton.c: graviton.scm png.scm
+graviton.sci graviton.c: graviton.scm enum2sym.scm png.scm color.scm
 	$(PRECOMP) -e $<
 
 graviton.$(SOEXT): $(graviton_SRCS)

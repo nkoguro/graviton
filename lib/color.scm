@@ -30,17 +30,7 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
-(define-module graviton.color
-  (use gauche.threads)
-
-  (export rgb
-          rgba
-          color
-
-          register-color!
-          define-color))
-
-(select-module graviton.color)
+(use gauche.threads)
 
 (define (rgb r g b)
   (rgba r g b #xff))

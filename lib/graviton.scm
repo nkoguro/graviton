@@ -261,9 +261,14 @@
           paused-sound?
           set-sound-volume!
           sound-volume
-          )
 
-  (extend graviton.color))
+          rgb
+          rgba
+          color
+          register-color!
+          define-color
+          ) ;; end of export
+  ) ;; end of define-module
 
 (select-module graviton)
 
@@ -4736,6 +4741,7 @@ typedef enum {
     (else
      (Scm_Error "<integer> or #f required, but got %S" channel))))
 
+(include "color.scm")
 (include "enum2sym.scm")
 (include "png.scm")
 
