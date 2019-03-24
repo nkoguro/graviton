@@ -30,25 +30,12 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
-(define-module graviton.png
-  (use binary.io)
-  (use compile-stub)
-  (use gauche.generator)
-  (use gauche.uvector)
-  (use gauche.vport)
-  (use rfc.zlib)
-  (use srfi-11)
-
-  (export read-png-image
-          write-png-image
-
-          PNG-FILTER-NONE
-          PNG-FILTER-SUB
-          PNG-FILTER-UP
-          PNG-FILTER-AVERAGE
-          PNG-FILTER-PAETH))
-
-(select-module graviton.png)
+(use binary.io)
+(use gauche.generator)
+(use gauche.uvector)
+(use gauche.vport)
+(use rfc.zlib)
+(use srfi-11)
 
 ;; Returns true if the signature is PNG.
 (define (read-png-signature in)
@@ -975,5 +962,3 @@
      (return 8 (SCM_U8VECTOR buf) (* width 3))))
 
  )
-
-(compile-stub)

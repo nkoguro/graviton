@@ -44,7 +44,6 @@
   (use gauche.threads)
   (use gauche.uvector)
   (use gauche.vport)
-  (use graviton.png)
   (use math.const)
   (use parser.peg)
   (use scheme.charset)
@@ -4739,6 +4738,7 @@ typedef enum {
      (Scm_Error "<integer> or #f required, but got %S" channel))))
 
 (include "graviton/enum2sym.scm")
+(include "png.scm")
 
 (compile-stub :pkg-config '("sdl2" "SDL2_mixer SDL2_image") :cflags "-g")
 

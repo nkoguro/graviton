@@ -1,1 +1,9 @@
+*.gpd
+*.log
 .envrc
+VERSION
+lib/*.c
+lib/*.o
+lib/*.sci
+lib/*.so
+lib/Makefile
