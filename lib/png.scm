@@ -30,13 +30,6 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
-(use binary.io)
-(use gauche.generator)
-(use gauche.uvector)
-(use gauche.vport)
-(use rfc.zlib)
-(use srfi-11)
-
 ;; Returns true if the signature is PNG.
 (define (read-png-signature in)
   (equal? (read-uvector <u8vector> 8 in)

@@ -30,8 +30,6 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
-(use gauche.threads)
-
 (define (rgb r g b)
   (rgba r g b #xff))
 
