@@ -2,8 +2,8 @@
 *.log
 .envrc
 VERSION
-lib/*.c
-lib/*.o
-lib/*.sci
-lib/*.so
-lib/Makefile
+src/*.c
+src/*.o
+src/*.sci
+src/*.so
+src/Makefile

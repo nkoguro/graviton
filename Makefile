@@ -1,11 +1,11 @@
-SCRIPT_GENERATED = lib/graviton/enum2sym.scm
+SCRIPT_GENERATED = src/enum2sym.scm
 
 all:
-	(cd lib; make)
+	(cd src; make)
 
 clean:
-	(cd lib; make clean)
+	(cd src; make clean)
 
 maintainer-clean: clean
 	rm -f $(SCRIPT_GENERATED)
-	(cd lib; make maintainer-clean)
+	(cd src; make maintainer-clean)
