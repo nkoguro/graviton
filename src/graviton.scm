@@ -600,10 +600,6 @@ typedef struct GrvSoundletRec {
      (SDL_PushEvent (& event))))
  ) ;; end of inline-stub
 
-(define-cproc current-ticks ()
-  ::<int>
-  (return (SDL_GetTicks)))
-
 ;;;
 ;;;
 ;;;
