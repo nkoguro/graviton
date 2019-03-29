@@ -67,7 +67,6 @@
           async-apply
           async/thread-apply
           await
-          force-future
           yield
           await-sleep
 
