@@ -42,7 +42,6 @@ GAUCHE_PKGARCHDIR = "$(DESTDIR)@GAUCHE_PKGARCHDIR@"
 
 graviton_SRCS = graviton.scm \
 	async.scm \
-	color.scm \
 	draw.scm \
 	enum2sym.scm \
 	event.scm \

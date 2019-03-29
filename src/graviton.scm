@@ -45,6 +45,7 @@
   (use gauche.threads)
   (use gauche.uvector)
   (use gauche.vport)
+  (use graviton.color)
   (use math.const)
   (use parser.peg)
   (use rfc.zlib)
@@ -607,7 +608,6 @@ typedef struct GrvSoundletRec {
 ;;;
 ;;;
 
-(include "color.scm")
 (include "enum2sym.scm")
 (include "scheduler.scm")
 (include "async.scm")
