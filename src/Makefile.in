@@ -28,7 +28,7 @@ LOCAL_PATHS = "@LOCAL_PATHS@"
 # Module-specific stuff
 PACKAGE   = graviton
 
-ARCHFILES = graviton.$(SOEXT)
+ARCHFILES = graviton-png.$(SOEXT) graviton.$(SOEXT)
 SCMFILES  = $(srcdir)/graviton.scm
 HEADERS   =
 
@@ -48,7 +48,6 @@ graviton_SRCS = graviton.scm \
 	image.scm \
 	messagebox.scm \
 	music.scm \
-	png.scm \
 	repl.scm \
 	scheduler.scm \
 	sound.scm \
@@ -59,6 +58,12 @@ graviton_SRCS = graviton.scm \
 .PHONY: all check install uninstall clean distclean maintainer-clean
 
 all : $(TARGET)
+
+png-lib.c: png-lib.scm
+	$(PRECOMP) png-lib.scm
+
+graviton-png.$(SOEXT): graviton-png.c png-lib.c
+	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton-png $^
 
 graviton.sci graviton.c: $(graviton_SRCS)
 	$(PRECOMP) -e $<
