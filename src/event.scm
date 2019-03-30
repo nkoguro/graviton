@@ -31,6 +31,8 @@
 ;;;
 
 (inline-stub
+ "Uint32 Grv_CustomEventType;"
+
  (define-cfn id->window (window-id::Uint32)
    ::ScmObj
    (for-each (lambda (win)
@@ -229,24 +231,28 @@
                 args (SCM_LIST1 win))))
        (else
         (cond
-          ((== (-> sdl-event type) graviton-event-type)
+          ((== (-> sdl-event type) Grv_CustomEventType)
            (case (ref (-> sdl-event user) code)
-             ((GRAVITON_EXCEPTION_CODE)
+             ((GRV_EVENT_EXCEPTION)
               (let* ((exception (ref (-> sdl-event user) data1)))
-                (Scm_Raise exception 0)))
-             ((GRAVITON_UNCAUGHT_EXCEPTION_CODE)
-              (Scm_Write (SCM_OBJ (ref (-> sdl-event user) data1)) (SCM_OBJ SCM_CURERR) SCM_WRITE_DISPLAY)
-              (Scm_Printf SCM_CURERR "\n")
-              (Scm_Error "async failed, but the exception wasn't caught."))
-             ((GRAVITON_MML_FINISH_CODE)
+                (cond
+                  ((SCM_CONDITIONP exception)
+                   (Scm_Raise exception 0))
+                  ((SCM_STRINGP exception)
+                   (Scm_Write exception (SCM_OBJ SCM_CURERR) SCM_WRITE_DISPLAY)
+                   (Scm_Printf SCM_CURERR "\n")
+                   (Scm_Error "uncaught exception"))
+                  (else
+                   (Scm_Error "uncaught exception: %S" exception)))))
+             ((GRV_EVENT_MML_FINISH)
               (Mix_HookMusic NULL NULL)
               (set! music-last-finished-tick (SDL_GetTicks)))
-             ((GRAVITON_APPLY_CODE)
+             ((GRV_EVENT_APPLY)
               (set! proc (ref (-> sdl-event user) data1)
                     args (ref (-> sdl-event user) data2)))
-             ((GRAVITON_UPDATE_WINDOWS)
+             ((GRV_EVENT_WINDOW_UPDATE)
               (update-window-contents))
-             ) ;; end of case (for graviton-event-type)
+             ) ;; end of case (for Grv_CustomEventType)
            ))  ;; end of cond
         ))     ;; end of case
      (when (SCM_PROCEDUREP proc)
@@ -276,10 +282,7 @@
                    (main-loop-apply proc (SCM_LIST1 win)))))
              grv-windows)
 
-   (let* ((event::SDL_Event))
-     (set! (ref event type) graviton-event-type
-           (ref event user code) GRAVITON_UPDATE_WINDOWS)
-     (SDL_PushEvent (& event)))
+   (GRV_SEND_EVENT GRV_EVENT_WINDOW_UPDATE NULL NULL)
 
    (return (/ 1000 frame-per-second)))
 
@@ -288,11 +291,7 @@
 
 (define-cproc notify-exception (exception)
   ::<void>
-  (let* ((event::SDL_Event))
-    (set! (ref event type) graviton-event-type
-          (ref event user code) GRAVITON_EXCEPTION_CODE
-          (ref event user data1) exception)
-    (SDL_PushEvent (& event))))
+  (GRV_SEND_EVENT GRV_EVENT_EXCEPTION exception NULL))
 
 (define-cproc event-loop-running? ()
   ::<boolean>
@@ -419,5 +418,3 @@
   dollar-gesture
   dollar-record
   ) ;; end of define-on-global-event-macros
-
-

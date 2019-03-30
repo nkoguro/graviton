@@ -37,6 +37,7 @@
   (use file.util)
   (use gauche.collection)
   (use gauche.generator)
+  (use gauche.hook)
   (use gauche.interactive)
   (use gauche.parameter)
   (use gauche.partcont)
@@ -291,6 +292,7 @@
             "gauche.h"
             "gauche/number.h"
             "gauche/vector.h"
+            "graviton.h"
             "stdbool.h"
             "stdio.h"
             "string.h")
@@ -469,7 +471,6 @@ typedef struct GrvSoundletRec {
  (define-cvar event-loop-status::EventLoopStatus)
  (define-cvar frame-per-second::int :static 30)
  (define-cvar global-handler-table :static)
- (define-cvar graviton-event-type::Uint32 :static)
  (define-cvar graviton-module :static)
  (define-cvar mml-music-context-queue::GrvMMLMusicContextQueue :static)
  (define-cvar mml-paused?::bool :static)
@@ -510,12 +511,6 @@ typedef struct GrvSoundletRec {
  (define-cptr <graviton-sound> :private
    "GrvSound*" "GravitonSoundClass" "GRV_SOUND_P" "MAKE_GRV_SOUND" "GRV_SOUND_PTR")
 
- (.define GRAVITON_EXCEPTION_CODE 1)
- (.define GRAVITON_UNCAUGHT_EXCEPTION_CODE 2)
- (.define GRAVITON_MML_FINISH_CODE 3)
- (.define GRAVITON_APPLY_CODE 5)
- (.define GRAVITON_UPDATE_WINDOWS 6)
-
  (.define MML_MUSIC_CONTEXT_INITIAL_LENGTH 16)
  (.define NOISE_TABLE_SIZE 32768)
  (.define CHANNEL_SIZE 16)
@@ -540,8 +535,8 @@ typedef struct GrvSoundletRec {
 
    (Scm_AddCleanupHandler teardown-libs NULL)
 
-   (set! graviton-event-type (SDL_RegisterEvents 1))
-   (when (== graviton-event-type #xffffffff)
+   (set! Grv_CustomEventType (SDL_RegisterEvents 1))
+   (when (== Grv_CustomEventType #xffffffff)
      (Scm_Error "SDL_RegisterEvents failed: %s" (SDL_GetError)))
 
    (set! main-thread-id (SDL_ThreadID)
@@ -592,12 +587,7 @@ typedef struct GrvSoundletRec {
 
  (define-cfn main-loop-apply (proc args)
    ::void
-   (let* ((event::SDL_Event))
-     (set! (ref event type) graviton-event-type
-           (ref event user code) GRAVITON_APPLY_CODE
-           (ref event user data1) proc
-           (ref event user data2) args)
-     (SDL_PushEvent (& event))))
+   (GRV_SEND_EVENT GRV_EVENT_APPLY proc args))
  ) ;; end of inline-stub
 
 ;;;

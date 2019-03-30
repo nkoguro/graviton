@@ -67,7 +67,7 @@ graviton-png.$(SOEXT): graviton-png.c png-lib.c
 graviton.sci graviton.c: $(graviton_SRCS)
 	$(PRECOMP) -e $<
 
-graviton.$(SOEXT): graviton.c
+graviton.$(SOEXT): graviton.c graviton.h
 	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton $<
 
 enum2sym.scm:

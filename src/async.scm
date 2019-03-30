@@ -33,11 +33,7 @@
 (inline-stub
  (define-cfn notify-uncaught-exception (msg)
    ::void
-   (let* ((event::SDL_Event))
-     (set! (ref event type) graviton-event-type
-           (ref event user code) GRAVITON_UNCAUGHT_EXCEPTION_CODE
-           (ref event user data1) msg)
-     (SDL_PushEvent (& event))))
+   (GRV_SEND_EVENT GRV_EVENT_EXCEPTION msg NULL))
 
  (define-cfn finalize-future (z data::void*)
    ::void
@@ -83,7 +79,7 @@
           (set! (-> gfuture consumed?) true)
           (SDL_UnlockMutex (-> gfuture lock))
           (for-each (lambda (cont)
-                      (main-loop-apply cont (SCM_LIST2 result SCM_FALSE)))
+                      (GRV_APPLY cont (SCM_LIST2 result SCM_FALSE)))
                     conts)))
        (report-error?
         (Scm_Error "result has been already set in <graviton-future>")))))
@@ -91,7 +87,7 @@
  (define-cfn await-callback (interval::Uint32 param::void*)
    ::Uint32
    (let* ((cont (cast ScmObj param)))
-     (main-loop-apply cont SCM_NIL))
+     (GRV_APPLY cont SCM_NIL))
    (return 0))
 
  (.define MAX_MESSAGE_LENGTH 1024)
@@ -129,7 +125,7 @@
       (set! (-> gfuture consumed?) true)
       (SDL_UnlockMutex (-> gfuture lock))
       (for-each (lambda (cont)
-                  (main-loop-apply cont (SCM_LIST2 SCM_FALSE exception)))
+                  (GRV_APPLY cont (SCM_LIST2 SCM_FALSE exception)))
                 conts))))
 
 (define-cproc future-result&exception (gfuture::<graviton-future>)
@@ -166,7 +162,7 @@
             (-> gfuture continuations) SCM_NIL)
       (SDL_UnlockMutex (-> gfuture lock))
       (for-each (lambda (cont)
-                  (main-loop-apply cont (SCM_LIST2 result exception)))
+                  (GRV_APPLY cont (SCM_LIST2 result exception)))
                 conts))))
 
 (define-cproc on-main-thread? ()
@@ -175,7 +171,7 @@
 
 (define-cproc submit/main (thunk::<procedure>)
   ::<void>
-  (main-loop-apply (SCM_OBJ thunk) SCM_NIL))
+  (GRV_APPLY (SCM_OBJ thunk) SCM_NIL))
 
 (define-cproc add-cont-timer! (sec::<double> cont::<procedure>)
   ::<void>

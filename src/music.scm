@@ -345,10 +345,7 @@
                     (-> gcontext num-soundlet-contexts) (-> next-gcontext num-soundlet-contexts)
                     (-> gcontext future) (-> next-gcontext future)))
              (else
-              (let* ((event::SDL_Event))
-                (set! (ref event type) graviton-event-type
-                      (ref event user code) GRAVITON_MML_FINISH_CODE)
-                (SDL_PushEvent (& event))))))))))
+              (GRV_SEND_EVENT GRV_EVENT_MML_FINISH NULL NULL))))))))
 
  (define-cfn stop-mml ()
    ::void
