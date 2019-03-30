@@ -88,6 +88,12 @@
        (report-error?
         (Scm_Error "result has been already set in <graviton-future>")))))
 
+ (define-cfn await-callback (interval::Uint32 param::void*)
+   ::Uint32
+   (let* ((cont (cast ScmObj param)))
+     (main-loop-apply cont SCM_NIL))
+   (return 0))
+
  (.define MAX_MESSAGE_LENGTH 1024)
  ) ;; end of inline-stub
 
@@ -171,6 +177,11 @@
   ::<void>
   (main-loop-apply (SCM_OBJ thunk) SCM_NIL))
 
+(define-cproc add-cont-timer! (sec::<double> cont::<procedure>)
+  ::<void>
+  (let* ((interval::Uint32 (cast Uint32 (* sec 1000))))
+    (SDL_AddTimer interval await-callback cont)))
+
 (define (submit/thread thunk)
   (thread-start! (make-thread
                    (lambda ()
@@ -242,8 +253,8 @@
   (unless (on-main-thread?)
     (error "await-sleep is unavailable on non-main thread."))
   (shift cont
-    (add-timer! sec (lambda ()
-                      (submit/main cont)))))
+    (add-cont-timer! sec (lambda ()
+                           (submit/main cont)))))
 
 (define (report-uncaught-future-exceptions messages)
   (for-each (lambda (msg)

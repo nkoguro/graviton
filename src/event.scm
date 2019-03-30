@@ -283,7 +283,7 @@
 
    (return (/ 1000 frame-per-second)))
 
- (.define MUSIC_FINISHED_GRACE_PERIOD 100)
+ (.define MUSIC_FINISHED_GRACE_PERIOD 200)
  )  ;; end of inline-stub
 
 (define-cproc notify-exception (exception)

@@ -605,7 +605,6 @@ typedef struct GrvSoundletRec {
 ;;;
 
 (include "enum2sym.scm")
-(include "scheduler.scm")
 (include "async.scm")
 (include "image.scm")
 (include "sprite.scm")
@@ -651,15 +650,12 @@ typedef struct GrvSoundletRec {
      (thunk))
     (else
      (guard (e (else (destroy-all-windows)
-                     (kill-scheduler)
                      (raise e)))
-       (run-scheduler)
        (set-main-thunk-finished? #f)
        (start-global-event-loop (lambda ()
                                   (unwind-protect
                                       (thunk)
-                                    (set-main-thunk-finished? #t))))
-       (shutdown-scheduler)))))
+                                    (set-main-thunk-finished? #t))))))))
 
 (define-syntax grv-begin
   (syntax-rules ()

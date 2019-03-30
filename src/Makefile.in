@@ -49,7 +49,6 @@ graviton_SRCS = graviton.scm \
 	messagebox.scm \
 	music.scm \
 	repl.scm \
-	scheduler.scm \
 	sound.scm \
 	sprite.scm \
 	tilemap.scm \
