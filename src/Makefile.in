@@ -88,7 +88,7 @@ uninstall :
 
 clean :
 	$(GAUCHE_PACKAGE) compile --clean graviton graviton.c
-	rm -rf core $(TARGET) $(GENERATED) *~ test.log so_locations
+	rm -rf core $(TARGET) $(GENERATED) *.o *~ test.log so_locations
 
 distclean : clean
 	rm -rf $(CONFIG_GENERATED)
