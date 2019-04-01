@@ -279,7 +279,7 @@
    (for-each (lambda (win)
                (let* ((proc (window-handler win 'update)))
                  (when (SCM_PROCEDUREP proc)
-                   (main-loop-apply proc (SCM_LIST1 win)))))
+                   (GRV_APPLY proc (SCM_LIST1 win)))))
              grv-windows)
 
    (GRV_SEND_EVENT GRV_EVENT_WINDOW_UPDATE NULL NULL)
@@ -315,7 +315,7 @@
   (set-event-loop-status true)
   (SDL_StartTextInput)
 
-  (main-loop-apply thunk SCM_NIL)
+  (GRV_APPLY thunk SCM_NIL)
 
   (let* ((callback-id::SDL_TimerID (SDL_AddTimer 0 update-windows-callback NULL)))
     (while (logior (SDL_PollEvent NULL)

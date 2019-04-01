@@ -1,5 +1,5 @@
 /**
- *  graviton.h - Graphics and sound module
+ *  graviton-async.c - Async
  *
  *   Copyright (c) 2019 KOGURO, Naoki (naoki@koguro.net)
  *   All rights reserved.
@@ -31,62 +31,19 @@
  *
  */
 
-#ifndef GRAVITON_H
-#define GRAVITON_H
+#include <gauche.h>
+#include <gauche/extend.h>
+#include "graviton.h"
 
-#include <stdbool.h>
-#include "SDL.h"
-#include "gauche.h"
+extern void Scm_Init_async_lib(ScmModule *mod);
 
-/*
- * Common utilities
- */
-extern Uint32 Grv_CustomEventType;
+ScmClass *GrvFutureClass;
 
-extern void Grv_LockGlobal();
-extern void Grv_UnlockGlobal();
-
-/*
- * Custom Event
- */
-#define GRV_EVENT_EXCEPTION 1
-#define GRV_EVENT_MML_FINISH 2
-#define GRV_EVENT_APPLY 3
-#define GRV_EVENT_WINDOW_UPDATE 4
-
-#define GRV_SEND_EVENT(event_code, arg0, arg1) \
-  do { \
-    SDL_Event event; \
-    event.type = Grv_CustomEventType; \
-    event.user.code = event_code; \
-    event.user.data1 = arg0; \
-    event.user.data2 = arg1; \
-    SDL_PushEvent(&event); \
-  } while (0);
-
-#define GRV_APPLY(proc, args) GRV_SEND_EVENT(GRV_EVENT_APPLY, proc, args)
-#define GRV_NOTIFY_STACKTRACE(stacktrace) GRV_SEND_EVENT(GRV_EVENT_EXCEPTION, stacktrace, NULL)
-
-/*
- * Async
- */
-
-typedef struct GrvFutureRec {
-  SDL_mutex *lock;
-  SDL_cond *cond;
-  ScmObj result;
-  ScmObj exception;
-  char *message;
-  ScmObj continuations;
-  bool consumed;
-} GrvFuture;
-
-extern ScmClass *GrvFutureClass;
-#define GRV_FUTURE_PTR(obj) SCM_FOREIGN_POINTER_REF(GrvFuture*, obj)
-#define GRV_FUTUREP(obj) SCM_XTYPEP(obj, GrvFutureClass)
-#define GRV_FUTURE_BOX(ptr) Scm_MakeForeignPointer(GrvFutureClass, ptr)
-
-ScmObj Grv_MakeFuture();
-void Grv_SetFutureResult(GrvFuture* gfuture, ScmObj result, bool report_error);
-
-#endif /* GRAVITON_H */
+void Scm_Init_graviton_async(void)
+{
+  ScmModule *mod;
+  SCM_INIT_EXTENSION(graviton_async);
+  mod = SCM_MODULE(SCM_FIND_MODULE("graviton.async", TRUE));
+  Scm_Init_async_lib(mod);
+  GrvFutureClass = Scm_MakeForeignPointerClass(mod, "<graviton-future>", NULL, NULL, 0);
+}

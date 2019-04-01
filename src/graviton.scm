@@ -46,6 +46,7 @@
   (use gauche.threads)
   (use gauche.uvector)
   (use gauche.vport)
+  (use graviton.async)
   (use graviton.color)
   (use graviton.png)
   (use math.const)
@@ -377,15 +378,6 @@
   (define-ctype EventLoopStatus::(.struct
                                   (lock::SDL_SpinLock
                                    running?::bool)))
-
-  (define-ctype GrvFuture::(.struct
-                            (lock::SDL_mutex*
-                             cond::SDL_cond*
-                             result
-                             exception
-                             message::char*
-                             continuations
-                             consumed?::bool)))
   "
 typedef enum {
     SOUNDLET_TONE = 1,
@@ -466,7 +458,6 @@ typedef struct GrvSoundletRec {
 
   ) ;; end of declcode
 
- (define-cvar main-thread-id::SDL_threadID :static)
  (define-cvar grv-windows :static SCM_NIL)
  (define-cvar event-loop-status::EventLoopStatus)
  (define-cvar frame-per-second::int :static 30)
@@ -478,7 +469,6 @@ typedef struct GrvSoundletRec {
  (define-cvar noise-table::double* :static)
  (define-cvar music-last-finished-tick::Uint32 :static)
  (define-cvar playing-sound-contexts::GrvSoundContext** :static)
- (define-cvar global-lock::SDL_SpinLock :static)
  (define-cvar main-thunk-finished?::bool :static)
 
  (define-cptr <graviton-window> :private
@@ -499,9 +489,6 @@ typedef struct GrvSoundletRec {
  (define-cptr <graviton-tile-map> :private
    "GrvTileMap*" "GravitonTileMapClass" "GRV_TILE_MAP_P" "MAKE_GRV_TILE_MAP" "GRV_TILE_MAP_PTR")
 
- (define-cptr <graviton-future> :private
-   "GrvFuture*" "GravitonFutureClass" "GRV_FUTURE_P" "MAKE_GRV_FUTURE" "GRV_FUTURE_PTR")
-
  (define-cptr <graviton-soundlet> :private
    "GrvSoundlet*" "GravitonSoundletClass" "GRV_SOUNDLET_P" "MAKE_GRV_SOUNDLET" "GRV_SOUNDLET_PTR")
 
@@ -516,6 +503,8 @@ typedef struct GrvSoundletRec {
  (.define CHANNEL_SIZE 16)
 
  )  ;; end of inline-stub
+
+(include "types.scm")
 
 (inline-stub
  (define-cfn teardown-libs (data::|void*|)
@@ -535,12 +524,7 @@ typedef struct GrvSoundletRec {
 
    (Scm_AddCleanupHandler teardown-libs NULL)
 
-   (set! Grv_CustomEventType (SDL_RegisterEvents 1))
-   (when (== Grv_CustomEventType #xffffffff)
-     (Scm_Error "SDL_RegisterEvents failed: %s" (SDL_GetError)))
-
-   (set! main-thread-id (SDL_ThreadID)
-         global-handler-table (Scm_MakeHashTableSimple SCM_HASH_EQ 16)
+   (set! global-handler-table (Scm_MakeHashTableSimple SCM_HASH_EQ 16)
          graviton-module (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
    (set! (ref event-loop-status lock) 0
          (ref event-loop-status running?) false)
@@ -565,7 +549,6 @@ typedef struct GrvSoundletRec {
    (set! playing-sound-contexts (SCM_NEW_ARRAY (.type GrvSoundContext*) CHANNEL_SIZE))
    (Mix_ChannelFinished finish-sound)
 
-   (set! global-lock 0)
    ) ;; end of initialize-libs
 
  (initcode
@@ -573,29 +556,10 @@ typedef struct GrvSoundletRec {
  ) ;; end of inline-stub
 
 ;;;
-;;; Common utilities
-;;;
-
-(inline-stub
- (define-cfn lock-global-var ()
-   ::void
-   (SDL_AtomicLock (& global-lock)))
-
- (define-cfn unlock-global-var ()
-   ::void
-   (SDL_AtomicUnlock (& global-lock)))
-
- (define-cfn main-loop-apply (proc args)
-   ::void
-   (GRV_SEND_EVENT GRV_EVENT_APPLY proc args))
- ) ;; end of inline-stub
-
-;;;
 ;;;
 ;;;
 
 (include "enum2sym.scm")
-(include "async.scm")
 (include "image.scm")
 (include "sprite.scm")
 (include "tilemap.scm")

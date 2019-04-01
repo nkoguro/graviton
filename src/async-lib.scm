@@ -30,35 +30,51 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
+(select-module graviton.async)
+
+(include "types.scm")
+
 (inline-stub
- (define-cfn notify-uncaught-exception (msg)
-   ::void
-   (GRV_SEND_EVENT GRV_EVENT_EXCEPTION msg NULL))
+ (declcode
+  (.include "SDL.h"
+            "gauche.h"
+            "graviton.h"
+            "stdbool.h"
+            "strings.h")
+
+  (.define MAX_MESSAGE_LENGTH 1024)
+  )
+
+ (define-cvar main-thread-id::SDL_threadID :static)
+
+ (initcode
+  (set! main-thread-id (SDL_ThreadID))
+  )
 
  (define-cfn finalize-future (z data::void*)
-   ::void
-   (when (GRV_FUTURE_P z)
+   ::void :static
+   (when (GRV_FUTUREP z)
      (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR z)))
        (SDL_DestroyCond (-> gfuture cond))
        (SDL_DestroyMutex (-> gfuture lock))
-       (when (and (not (-> gfuture consumed?)) (-> gfuture message))
-         (notify-uncaught-exception (SCM_MAKE_STR_COPYING (-> gfuture message)))
+       (when (and (not (-> gfuture consumed)) (-> gfuture message))
+         (GRV_NOTIFY_STACKTRACE (SCM_MAKE_STR_COPYING (-> gfuture message)))
          (free (-> gfuture message))))))
 
- (define-cfn make-future ()
+ (define-cfn Grv_MakeFuture ()
    (let* ((gfuture::GrvFuture* (SCM_NEW GrvFuture))
-          (obj (MAKE_GRV_FUTURE gfuture)))
+          (obj (GRV_FUTURE_BOX gfuture)))
      (set! (-> gfuture lock) (SDL_CreateMutex)
            (-> gfuture cond) (SDL_CreateCond)
            (-> gfuture result) SCM_FALSE
            (-> gfuture exception) SCM_FALSE
            (-> gfuture message) NULL
            (-> gfuture continuations) SCM_NIL
-           (-> gfuture consumed?) false)
+           (-> gfuture consumed) false)
      (Scm_RegisterFinalizer obj finalize-future NULL)
      (return obj)))
 
- (define-cfn set-future-result! (gfuture::GrvFuture* result report-error?::bool)
+ (define-cfn Grv_SetFutureResult (gfuture::GrvFuture* result report-error?::bool)
    ::void
    (let* ((conts SCM_NIL)
           (err?::bool false))
@@ -76,7 +92,7 @@
        ((not err?)
         (unless (SCM_NULLP conts)
           (SDL_LockMutex (-> gfuture lock))
-          (set! (-> gfuture consumed?) true)
+          (set! (-> gfuture consumed) true)
           (SDL_UnlockMutex (-> gfuture lock))
           (for-each (lambda (cont)
                       (GRV_APPLY cont (SCM_LIST2 result SCM_FALSE)))
@@ -85,20 +101,19 @@
         (Scm_Error "result has been already set in <graviton-future>")))))
 
  (define-cfn await-callback (interval::Uint32 param::void*)
-   ::Uint32
+   ::Uint32 :static
    (let* ((cont (cast ScmObj param)))
      (GRV_APPLY cont SCM_NIL))
    (return 0))
 
- (.define MAX_MESSAGE_LENGTH 1024)
  ) ;; end of inline-stub
 
 (define-cproc make-future ()
-  (return (make-future)))
+  (return (Grv_MakeFuture)))
 
 (define-cproc set-future-result! (gfuture::<graviton-future> result)
   ::<void>
-  (set-future-result! gfuture result true))
+  (Grv_SetFutureResult gfuture result true))
 
 (define-cproc set-future-exception! (gfuture::<graviton-future> exception error-message::<const-cstring>)
   ::<void>
@@ -122,7 +137,7 @@
       (Scm_Error "result has been already set in <graviton-future>"))
     (unless (SCM_NULLP conts)
       (SDL_LockMutex (-> gfuture lock))
-      (set! (-> gfuture consumed?) true)
+      (set! (-> gfuture consumed) true)
       (SDL_UnlockMutex (-> gfuture lock))
       (for-each (lambda (cont)
                   (GRV_APPLY cont (SCM_LIST2 SCM_FALSE exception)))
@@ -141,7 +156,7 @@
         (SDL_CondWait (-> gfuture cond) (-> gfuture lock)))
        (else
         (break))))
-    (set! (-> gfuture consumed?) true)
+    (set! (-> gfuture consumed) true)
     (SDL_UnlockMutex (-> gfuture lock))
     (return result exception)))
 
@@ -158,7 +173,7 @@
     (SDL_UnlockMutex (-> gfuture lock))
     (unless (and (SCM_FALSEP result) (SCM_FALSEP exception))
       (SDL_LockMutex (-> gfuture lock))
-      (set! (-> gfuture consumed?) true
+      (set! (-> gfuture consumed) true
             (-> gfuture continuations) SCM_NIL)
       (SDL_UnlockMutex (-> gfuture lock))
       (for-each (lambda (cont)
@@ -177,90 +192,3 @@
   ::<void>
   (let* ((interval::Uint32 (cast Uint32 (* sec 1000))))
     (SDL_AddTimer interval await-callback cont)))
-
-(define (submit/thread thunk)
-  (thread-start! (make-thread
-                   (lambda ()
-                     (thunk)))))
-
-(define (submit thunk type)
-  (let1 %submit (case type
-                  ((main) submit/main)
-                  ((thread) submit/thread)
-                  (else
-                   (errorf "type must be 'main or 'thread, but got ~s" thread)))
-    (%submit thunk)))
-
-(define (force-future future)
-  (receive (result exception) (future-result&exception future)
-    (cond
-      (result
-       (apply values result))
-      (exception
-       (raise exception))
-      (else
-       (errorf "[BUG] result or exception must have a value.")))))
-
-(define (%async-apply type proc args)
-  (let ((args (apply list args))
-        (future (make-future)))
-    (submit (lambda ()
-              (reset
-                (guard (e (else (set-future-exception! future e (report-error e #f))))
-                  (receive result (apply proc args)
-                    (set-future-result! future result)))))
-            type)
-    future))
-
-(define (async-apply proc :rest args)
-  (%async-apply 'main proc args))
-
-(define (async/thread-apply proc :rest args)
-  (%async-apply 'thread proc args))
-
-(define-syntax async
-  (syntax-rules ()
-    ((_ expr ...)
-     (async-apply (lambda () expr ...)))))
-
-(define-syntax async/thread
-  (syntax-rules ()
-    ((_ expr ...)
-     (async/thread-apply (lambda () expr ...)))))
-
-(define (await future)
-  (unless (on-main-thread?)
-    (error "await is unavailable on non-main thread."))
-  (cond
-    ((is-a? future <graviton-future>)
-     (receive (result exception) (shift cont
-                                   (add-future-continuation! future cont))
-       (cond
-         (result
-          (apply values result))
-         (exception
-          (raise exception))
-         (else
-          (error "[BUG] result and exception aren't specified.")))))
-    (else
-     future)))
-
-(define (await-sleep sec)
-  (unless (on-main-thread?)
-    (error "await-sleep is unavailable on non-main thread."))
-  (shift cont
-    (add-cont-timer! sec (lambda ()
-                           (submit/main cont)))))
-
-(define (report-uncaught-future-exceptions messages)
-  (for-each (lambda (msg)
-              (display msg (current-error-port))
-              (newline (current-error-port)))
-            messages)
-  (error "async failed, but the exception wasn't caught."))
-
-(define (yield)
-  (unless (on-main-thread?)
-    (error "yield is unavailable on non-main thread."))
-  (shift cont (submit/main cont)))
-

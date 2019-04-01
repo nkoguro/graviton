@@ -42,7 +42,7 @@
 
  (define-cfn enqueue-mml-music-context! (gcontext::GrvMMLMusicContext*)
    ::void :static
-   (lock-global-var)
+   (Grv_LockGlobal)
    (set! (aref (ref mml-music-context-queue buf) (ref mml-music-context-queue end)) gcontext
          (ref mml-music-context-queue end) (% (+ (ref mml-music-context-queue end) 1)
                                               (ref mml-music-context-queue length)))
@@ -56,17 +56,17 @@
              (ref mml-music-context-queue end) (ref mml-music-context-queue length)
              (ref mml-music-context-queue buf) newbuf
              (ref mml-music-context-queue length) newlen)))
-   (unlock-global-var))
+   (Grv_UnlockGlobal))
 
  (define-cfn dequeue-mml-music-context! ()
    ::GrvMMLMusicContext* :static
    (let* ((gcontext::GrvMMLMusicContext* NULL))
-     (lock-global-var)
+     (Grv_LockGlobal)
      (unless (== (ref mml-music-context-queue start) (ref mml-music-context-queue end))
        (set! gcontext (aref (ref mml-music-context-queue buf) (ref mml-music-context-queue start))
              (ref mml-music-context-queue start) (% (+ (ref mml-music-context-queue start) 1)
                                                     (ref mml-music-context-queue length))))
-     (unlock-global-var)
+     (Grv_UnlockGlobal)
      (return gcontext)))
 
  (define-cfn retain-soundlet! (gcontext::GrvMMLMusicContext* gsoundlet::GrvSoundlet* pos::int)
@@ -320,7 +320,7 @@
           (pos-end::int (+ pos (/ buf-length 2)))
           (i::int 0))
      (when (and mml-paused?
-                (GRV_FUTURE_P (-> gcontext future)))
+                (GRV_FUTUREP (-> gcontext future)))
      (return))
 
      (while (< i buf-length)
@@ -333,9 +333,9 @@
          (unless (== (aref (-> gcontext soundlet-contexts) i) NULL)
            (inc! num)))
        (when (and (== num 0)
-                  (GRV_FUTURE_P (-> gcontext future)))
+                  (GRV_FUTUREP (-> gcontext future)))
          (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> gcontext future))))
-           (set-future-result! gfuture (SCM_LIST1 'finished) false))
+           (Grv_SetFutureResult gfuture (SCM_LIST1 'finished) false))
 
          (let* ((next-gcontext::GrvMMLMusicContext* (dequeue-mml-music-context!)))
            (cond
@@ -352,31 +352,31 @@
    (let* ((gcontext::GrvMMLMusicContext* (Mix_GetMusicHookData)))
      (when gcontext
        (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> gcontext future))))
-         (set-future-result! gfuture (SCM_LIST1 'stopped) false))))
+         (Grv_SetFutureResult gfuture (SCM_LIST1 'stopped) false))))
    (Mix_HookMusic NULL NULL)
 
    (let* ((gcontext::GrvMMLMusicContext* NULL))
      (while (= gcontext (dequeue-mml-music-context!))
        (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> gcontext future))))
-         (set-future-result! gfuture (SCM_LIST1 'cancelled) false)))))
+         (Grv_SetFutureResult gfuture (SCM_LIST1 'cancelled) false)))))
 
  (define-cfn pause-mml ()
    ::void
-   (lock-global-var)
+   (Grv_LockGlobal)
    (set! mml-paused? true)
-   (unlock-global-var))
+   (Grv_UnlockGlobal))
 
  (define-cfn resume-mml ()
    ::void
-   (lock-global-var)
+   (Grv_LockGlobal)
    (set! mml-paused? false)
-   (unlock-global-var))
+   (Grv_UnlockGlobal))
 
  (define-cfn paused-mml? ()
    ::bool
-   (lock-global-var)
+   (Grv_LockGlobal)
    (let* ((paused?::bool mml-paused?))
-     (unlock-global-var)
+     (Grv_UnlockGlobal)
      (return paused?)))
 
  (define-cfn compute-total-length (gsoundlet::GrvSoundlet*)
@@ -483,7 +483,7 @@
   (Mix_HaltMusic)
 
   (let* ((gcontext::GrvMMLMusicContext* (SCM_NEW (.type GrvMMLMusicContext)))
-         (future (make-future)))
+         (future (Grv_MakeFuture)))
     (set! (-> gcontext position) 0
           (-> gcontext num-soundlet-contexts) 16
           (-> gcontext soundlet-contexts) (SCM_NEW_ARRAY (.type GrvSoundletContext*) (-> gcontext num-soundlet-contexts))
@@ -810,10 +810,10 @@
 
  (define-cfn set-playing-music-context! (music-context::GrvMusicContext*)
    ::GrvMusicContext*
-   (lock-global-var)
+   (Grv_LockGlobal)
    (let* ((prev::GrvMusicContext* playing-music-context))
      (set! playing-music-context music-context)
-     (unlock-global-var)
+     (Grv_UnlockGlobal)
      (return prev)))
 
  (define-cfn finish-music ()
@@ -821,7 +821,7 @@
    (let* ((music-context::GrvMusicContext* (set-playing-music-context! NULL)))
      (when music-context
        (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> music-context future))))
-         (set-future-result! gfuture (SCM_LIST1 'finished) false)
+         (Grv_SetFutureResult gfuture (SCM_LIST1 'finished) false)
          (set! music-last-finished-tick (SDL_GetTicks))))))
 
  (define-cfn stop-music ()
@@ -829,7 +829,7 @@
    (let* ((music-context::GrvMusicContext* (set-playing-music-context! NULL)))
      (when music-context
        (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> music-context future))))
-         (set-future-result! gfuture (SCM_LIST1 'stopped) false)
+         (Grv_SetFutureResult gfuture (SCM_LIST1 'stopped) false)
          (set! music-last-finished-tick (SDL_GetTicks)))))
    (Mix_HaltMusic))
  ) ;; end of inline-stub
@@ -853,7 +853,7 @@
 
   (let* ((music-context::GrvMusicContext* (SCM_NEW (.type GrvMusicContext))))
     (set! (-> music-context music) music
-          (-> music-context future) (make-future))
+          (-> music-context future) (Grv_MakeFuture))
     (set-playing-music-context! music-context)
     (when (< (Mix_PlayMusic (-> (GRV_MUSIC_PTR music) music) 0) 0)
       (set-playing-music-context! NULL)

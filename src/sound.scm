@@ -38,20 +38,20 @@
 
  (define-cfn set-playing-sound-context! (channel::int sound-context::GrvSoundContext*)
    ::GrvSoundContext*
-   (lock-global-var)
+   (Grv_LockGlobal)
    (let* ((prev::GrvSoundContext* (aref playing-sound-contexts channel)))
      (set! (aref playing-sound-contexts channel) sound-context)
-     (unlock-global-var)
+     (Grv_UnlockGlobal)
      (return prev)))
 
  (define-cfn find-available-channel ()
    ::int
    (let* ((i::int))
-     (lock-global-var)
+     (Grv_LockGlobal)
      (for ((set! i 0) (< i CHANNEL_SIZE) (inc! i))
        (when (== (aref playing-sound-contexts i) NULL)
          (break)))
-     (unlock-global-var)
+     (Grv_UnlockGlobal)
 
      (cond
        ((== i CHANNEL_SIZE)
@@ -63,14 +63,14 @@
    ::void
    (let* ((sound-context::GrvSoundContext* (set-playing-sound-context! channel NULL)))
      (when sound-context
-       (set-future-result! (GRV_FUTURE_PTR (-> sound-context future)) 'stopped false))
+       (Grv_SetFutureResult (GRV_FUTURE_PTR (-> sound-context future)) 'stopped false))
      (Mix_HaltChannel channel)))
 
  (define-cfn finish-sound (channel::int)
    ::void :static
    (let* ((sound-context::GrvSoundContext* (set-playing-sound-context! channel NULL)))
      (when sound-context
-       (set-future-result! (GRV_FUTURE_PTR (-> sound-context future)) 'finished false))))
+       (Grv_SetFutureResult (GRV_FUTURE_PTR (-> sound-context future)) 'finished false))))
  ) ;; end of inline-stub
 
 (define-cproc load-sound (filename::<const-cstring>)
@@ -104,7 +104,7 @@
     (stop-sound which)
     (let* ((sound-context::GrvSoundContext* (SCM_NEW (.type GrvSoundContext))))
       (set! (-> sound-context sound) sound
-            (-> sound-context future) (make-future))
+            (-> sound-context future) (Grv_MakeFuture))
       (set-playing-sound-context! which sound-context)
       (when (< (Mix_PlayChannel which (-> (GRV_SOUND_PTR sound) chunk) 0) 0)
         (set-playing-sound-context! which NULL)
