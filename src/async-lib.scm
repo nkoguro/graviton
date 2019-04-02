@@ -32,8 +32,6 @@
 
 (select-module graviton.async)
 
-(include "types.scm")
-
 (inline-stub
  (declcode
   (.include "SDL.h"
@@ -107,6 +105,8 @@
    (return 0))
 
  ) ;; end of inline-stub
+
+(include "types.scm")
 
 (define-cproc make-future ()
   (return (Grv_MakeFuture)))

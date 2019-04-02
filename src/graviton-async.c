@@ -35,7 +35,7 @@
 #include <gauche/extend.h>
 #include "graviton.h"
 
-extern void Scm_Init_async_lib(ScmModule *mod);
+extern void Scm_Init_async_lib();
 
 ScmClass *GrvFutureClass;
 
@@ -44,6 +44,6 @@ void Scm_Init_graviton_async(void)
   ScmModule *mod;
   SCM_INIT_EXTENSION(graviton_async);
   mod = SCM_MODULE(SCM_FIND_MODULE("graviton.async", TRUE));
-  Scm_Init_async_lib(mod);
   GrvFutureClass = Scm_MakeForeignPointerClass(mod, "<graviton-future>", NULL, NULL, 0);
+  Scm_Init_async_lib();
 }

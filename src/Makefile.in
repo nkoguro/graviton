@@ -58,22 +58,22 @@ graviton_SRCS = graviton.scm \
 all : $(TARGET)
 
 png-lib.c: png-lib.scm
-	$(PRECOMP) png-lib.scm
+	$(PRECOMP) $<
 
-graviton-png.$(SOEXT): graviton-png.c png-lib.c
-	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton-png $^
+graviton-png.$(SOEXT): graviton-png.c png-lib.c graviton.h
+	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton-png graviton-png.c png-lib.c
 
 common-lib.c: common-lib.scm
-	$(PRECOMP) common-lib.scm
+	$(PRECOMP) $<
 
-graviton-common.$(SOEXT): graviton-common.c common-lib.c
-	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton-common $^
+graviton-common.$(SOEXT): graviton-common.c common-lib.c graviton.h
+	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton-common graviton-common.c common-lib.c
 
-async-lib.c: async-lib.scm
-	$(PRECOMP) async-lib.scm
+async-lib.c: async-lib.scm types.scm
+	$(PRECOMP) $<
 
-graviton-async.$(SOEXT): graviton-async.c async-lib.c
-	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton-async $^
+graviton-async.$(SOEXT): graviton-async.c async-lib.c graviton.h
+	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton-async graviton-async.c async-lib.c
 
 graviton.sci graviton.c: $(graviton_SRCS)
 	$(PRECOMP) -e $<

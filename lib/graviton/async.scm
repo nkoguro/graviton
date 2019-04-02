@@ -31,6 +31,7 @@
 ;;;
 
 (define-module graviton.async
+  (use gauche.partcont)
   (use gauche.threads)
   (use graviton.common)
 

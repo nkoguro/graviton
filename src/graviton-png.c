@@ -34,13 +34,13 @@
 #include <gauche.h>
 #include <gauche/extend.h>
 
-extern void Scm_Init_png_lib(ScmModule *mod);
+extern void Scm_Init_png_lib();
 
 void Scm_Init_graviton_png(void)
 {
   ScmModule *mod;
   SCM_INIT_EXTENSION(graviton_png);
   mod = SCM_MODULE(SCM_FIND_MODULE("graviton.png", TRUE));
-  Scm_Init_png_lib(mod);
+  Scm_Init_png_lib();
 }
 

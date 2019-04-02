@@ -35,12 +35,12 @@
 #include <gauche/extend.h>
 #include "graviton.h"
 
-extern void Scm_Init_common_lib(ScmModule *mod);
+extern void Scm_Init_common_lib();
 
 void Scm_Init_graviton_common(void)
 {
   ScmModule *mod;
   SCM_INIT_EXTENSION(graviton_common);
   mod = SCM_MODULE(SCM_FIND_MODULE("graviton.common", TRUE));
-  Scm_Init_common_lib(mod);
+  Scm_Init_common_lib();
 }
