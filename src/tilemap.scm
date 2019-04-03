@@ -31,78 +31,78 @@
 ;;;
 
 (inline-stub
-  (define-cfn tile-map-offset-index (gtilemap::GrvTileMap* x::int y::int)
-    ::int
-    (unless (and (<= 0 x) (< x (-> gtilemap columns)))
-      (Scm_Error "x is out of range: %d" x))
-    (unless (and (<= 0 y) (< y (-> gtilemap rows)))
-      (Scm_Error "y is out of range: %d" y))
-    (return (% (+ (-> gtilemap offset) (* y (-> gtilemap columns)) x)
-               (* (-> gtilemap columns) (-> gtilemap rows)))))
+ (define-cfn tile-map-offset-index (gtilemap::GrvTileMap* x::int y::int)
+   ::int
+   (unless (and (<= 0 x) (< x (-> gtilemap columns)))
+     (Scm_Error "x is out of range: %d" x))
+   (unless (and (<= 0 y) (< y (-> gtilemap rows)))
+     (Scm_Error "y is out of range: %d" y))
+   (return (% (+ (-> gtilemap offset) (* y (-> gtilemap columns)) x)
+              (* (-> gtilemap columns) (-> gtilemap rows)))))
 
-  (define-cfn tile-map-pos-index (gtilemap::GrvTileMap* x::int y::int)
-    ::int
-    (unless (and (<= 0 x) (< x (-> gtilemap columns)))
-      (Scm_Error "x is out of range: %d" x))
-    (unless (and (<= 0 y) (< y (-> gtilemap rows)))
-      (Scm_Error "y is out of range: %d" y))
-    (return (% (+ (* y (-> gtilemap columns)) x)
-               (* (-> gtilemap columns) (-> gtilemap rows)))))
+ (define-cfn tile-map-pos-index (gtilemap::GrvTileMap* x::int y::int)
+   ::int
+   (unless (and (<= 0 x) (< x (-> gtilemap columns)))
+     (Scm_Error "x is out of range: %d" x))
+   (unless (and (<= 0 y) (< y (-> gtilemap rows)))
+     (Scm_Error "y is out of range: %d" y))
+   (return (% (+ (* y (-> gtilemap columns)) x)
+              (* (-> gtilemap columns) (-> gtilemap rows)))))
 
-  (define-cfn equal-attr? (attr1::GrvAttribute* attr2::GrvAttribute*)
-    ::bool
-    (cond
-      ((and (== attr1 NULL)
-            (== attr2 NULL))
-       (return true))
-      ((== attr1 NULL)
-       (return (and (== (-> attr2 foreground-color) #xffffffff)
-                    (== (-> attr2 background-color) 0))))
-      ((== attr2 NULL)
-       (return (and (== (-> attr1 foreground-color) #xffffffff)
-                    (== (-> attr1 background-color) 0))))
-      (else
-       (return (and (== (-> attr1 foreground-color) (-> attr2 foreground-color))
-                    (== (-> attr1 background-color) (-> attr2 background-color)))))))
+ (define-cfn equal-attr? (attr1::GrvAttribute* attr2::GrvAttribute*)
+   ::bool
+   (cond
+     ((and (== attr1 NULL)
+           (== attr2 NULL))
+      (return true))
+     ((== attr1 NULL)
+      (return (and (== (-> attr2 foreground-color) #xffffffff)
+                   (== (-> attr2 background-color) 0))))
+     ((== attr2 NULL)
+      (return (and (== (-> attr1 foreground-color) #xffffffff)
+                   (== (-> attr1 background-color) 0))))
+     (else
+      (return (and (== (-> attr1 foreground-color) (-> attr2 foreground-color))
+                   (== (-> attr1 background-color) (-> attr2 background-color)))))))
 
-  (define-cfn update-tile-map (gtilemap::GrvTileMap* x::int y::int)
-    ::void
-    (let* ((pos-index::int (tile-map-pos-index gtilemap x y))
-           (offset-index::int (tile-map-offset-index gtilemap x y))
-           (tile-index::Uint32 (aref (-> gtilemap tiles) offset-index))
-           (attr::GrvAttribute* (aref (-> gtilemap attrs) offset-index))
-           (buf-tile-index::Uint32 (aref (-> gtilemap buf-tiles) pos-index))
-           (buf-attr::GrvAttribute* (aref (-> gtilemap buf-attrs) pos-index)))
-      (unless (and (== tile-index buf-tile-index)
-                   (equal-attr? attr buf-attr))
-        (let* ((dstrect::SDL_Rect)
-               (fg-color::Uint32 #xffffffff)
-               (gimage::GrvImage* (GRV_IMAGE_PTR (-> gtilemap image))))
-          (set! (aref (-> gtilemap buf-tiles) pos-index) tile-index
-                (aref (-> gtilemap buf-attrs) pos-index) attr
-                (ref dstrect x) (* (-> gtilemap tile-width) x)
-                (ref dstrect y) (* (-> gtilemap tile-height) y)
-                (ref dstrect w) (-> gtilemap tile-width)
-                (ref dstrect h) (-> gtilemap tile-height))
-          (cond
-            (attr
-             (when (< (SDL_FillRect (-> gimage surface) (& dstrect) (-> attr background-color)) 0)
-               (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))
-             (set! fg-color (-> attr foreground-color)))
-            (else
-             (when (< (SDL_FillRect (-> gimage surface) (& dstrect) 0) 0)
-               (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))))
-          (let* ((tile (Scm_VectorRef (SCM_VECTOR (-> gtilemap tile-images)) tile-index SCM_UNBOUND))
-                 (gtile::GrvTileImage*))
-            (unless (GRV_TILE_IMAGE_P tile)
-              (Scm_Error "<graviton-tile-image> required, but got %S" tile))
-            (set! gtile (GRV_TILE_IMAGE_PTR tile))
-            (bitblt (GRV_IMAGE_PTR (-> gtile image))
-                    (& (-> gtile rect))
-                    gimage
-                    (& dstrect)
-                    fg-color))))))
-  ) ;; end of inline-stub
+ (define-cfn update-tile-map (gtilemap::GrvTileMap* x::int y::int)
+   ::void
+   (let* ((pos-index::int (tile-map-pos-index gtilemap x y))
+          (offset-index::int (tile-map-offset-index gtilemap x y))
+          (tile-index::Uint32 (aref (-> gtilemap tiles) offset-index))
+          (attr::GrvAttribute* (aref (-> gtilemap attrs) offset-index))
+          (buf-tile-index::Uint32 (aref (-> gtilemap buf-tiles) pos-index))
+          (buf-attr::GrvAttribute* (aref (-> gtilemap buf-attrs) pos-index)))
+     (unless (and (== tile-index buf-tile-index)
+                  (equal-attr? attr buf-attr))
+       (let* ((dstrect::SDL_Rect)
+              (fg-color::Uint32 #xffffffff)
+              (gimage::GrvImage* (GRV_IMAGE_PTR (-> gtilemap image))))
+         (set! (aref (-> gtilemap buf-tiles) pos-index) tile-index
+               (aref (-> gtilemap buf-attrs) pos-index) attr
+               (ref dstrect x) (* (-> gtilemap tile-width) x)
+               (ref dstrect y) (* (-> gtilemap tile-height) y)
+               (ref dstrect w) (-> gtilemap tile-width)
+               (ref dstrect h) (-> gtilemap tile-height))
+         (cond
+           (attr
+            (when (< (SDL_FillRect (-> gimage surface) (& dstrect) (-> attr background-color)) 0)
+              (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))
+            (set! fg-color (-> attr foreground-color)))
+           (else
+            (when (< (SDL_FillRect (-> gimage surface) (& dstrect) 0) 0)
+              (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))))
+         (let* ((tile (Scm_VectorRef (SCM_VECTOR (-> gtilemap tile-images)) tile-index SCM_UNBOUND))
+                (gtile::GrvTileImage*))
+           (unless (GRV_TILE_IMAGEP tile)
+             (Scm_Error "<graviton-tile-image> required, but got %S" tile))
+           (set! gtile (GRV_TILE_IMAGE_PTR tile))
+           (Grv_Bitblt (GRV_IMAGE_PTR (-> gtile image))
+                       (& (-> gtile rect))
+                       gimage
+                       (& dstrect)
+                       fg-color))))))
+ ) ;; end of inline-stub
 
 (define-cproc make-tile-map (window tile-images::<vector> columns::<int> rows::<int> x::<double> y::<double> :key (z::<double> 0) (fill::<uint32> 0))
   ::<graviton-tile-map>
@@ -114,7 +114,7 @@
     (when (== (SCM_VECTOR_SIZE tile-images) 0)
       (Scm_Error "tile-images must have at least one element"))
     (dotimes (i (SCM_VECTOR_SIZE tile-images))
-      (unless (GRV_TILE_IMAGE_P (Scm_VectorRef tile-images i SCM_UNBOUND))
+      (unless (GRV_TILE_IMAGEP (Scm_VectorRef tile-images i SCM_UNBOUND))
         (Scm_Error "<graviton-tile-image> required, but got %S" (Scm_VectorRef tile-images i SCM_UNBOUND))))
     (let* ((tile-image (Scm_VectorRef tile-images 0 SCM_UNBOUND)))
       (set! tile-width (ref (-> (GRV_TILE_IMAGE_PTR tile-image) rect) w)

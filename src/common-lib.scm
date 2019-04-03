@@ -49,6 +49,20 @@
    ::void
    (SDL_AtomicUnlock (& global-lock)))
 
+ (define-cfn Grv_DecomposeRGBA (color::Uint32 r::Uint8* g::Uint8* b::Uint8* a::Uint8*)
+   ::void
+   (cond
+     ((== SDL_BYTEORDER SDL_LIL_ENDIAN)
+      (set! (* r) (logand color #xff)
+            (* g) (logand (>> color 8) #xff)
+            (* b) (logand (>> color 16) #xff)
+            (* a) (logand (>> color 24) #xff)))
+     (else
+      (set! (* r) (logand (>> color 24) #xff)
+            (* g) (logand (>> color 16) #xff)
+            (* b) (logand (>> color 8) #xff)
+            (* a) (logand color #xff)))))
+
  (initcode
   (set! Grv_CustomEventType (SDL_RegisterEvents 1))
   (when (== Grv_CustomEventType #xffffffff)

@@ -30,8 +30,19 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
+(select-module graviton.video)
+
 (inline-stub
- (define-cfn convert-coordinate (param::TransformParam* x::double y::double ox::int* oy::int*)
+ (declcode
+  (.include "SDL.h"
+            "SDL_image.h"
+            "gauche.h"
+            "gauche/extend.h"
+            "graviton.h"
+            "stdbool.h"
+            ))
+
+ (define-cfn convert-coordinate (param::GrvTransformParam* x::double y::double ox::int* oy::int*)
    ::void
    (let* ((m00::double (-> param m00))
           (m10::double (-> param m10))
@@ -42,7 +53,7 @@
      (set! (* ox) (cast int (round (+ (* m00 x) (* m01 y) x0)))
            (* oy) (cast int (round (+ (* m10 x) (* m11 y) y0))))))
 
- (define-cfn compute-transform-param (param::TransformParam*
+ (define-cfn compute-transform-param (param::GrvTransformParam*
                                       width::int
                                       height::int
                                       x0::double
@@ -78,20 +89,20 @@
            (-> param bottom) (?: clip? y1 ey))))
 
  (define-cfn get-transform-param (gimage::GrvImage*)
-   ::TransformParam*
+   ::GrvTransformParam*
    (return (& (-> gimage param))))
 
  (define-cfn finalize-image (z data::void*)
    ::void
-   (when (GRV_IMAGE_P z)
+   (when (GRV_IMAGEP z)
      (let* ((gimage::GrvImage* (GRV_IMAGE_PTR z)))
        (unless (SCM_NULLP (-> gimage texture-alist))
-         (fprintf stderr "[BUG] texture_alist in <graviton-image> must be nil in finalizer. forgot to call release-texture?\n"))
+         (fprintf stderr "[BUG] texture_alist in <graviton-image> must be nil in finalizer. forgot to call Grv_ReleaseTexture?\n"))
        (SDL_FreeSurface (-> gimage surface))
        (set! (-> gimage surface) NULL
              (-> gimage texture-alist) SCM_NIL))))
 
- (define-cfn update-rect (gimage::GrvImage* x::int y::int w::int h::int)
+ (define-cfn Grv_SetNeedsRefreshImage (gimage::GrvImage* x::int y::int w::int h::int)
    ::void
    (when (SCM_NULLP (-> gimage texture-alist))
      (return))
@@ -167,9 +178,9 @@
      (SDL_UnlockTexture texture)
      (SDL_UnlockSurface surface)))
 
- (define-cfn retain-texture (win gimage::GrvImage*)
+ (define-cfn Grv_RetainTexture (win gimage::GrvImage*)
    ::void
-   (unless (GRV_WINDOW_P win)
+   (unless (GRV_WINDOWP win)
      (Scm_Error "<graviton-window> required, but got %S" win))
 
    (let* ((texture SCM_FALSE))
@@ -188,15 +199,15 @@
           (SDL_SetTextureBlendMode stexture SDL_BLENDMODE_BLEND)
           (set! (-> gtexture texture) stexture
                 (-> gtexture ref_count) 1
-                texture (MAKE_GRV_TEXTURE gtexture)
+                texture (GRV_TEXTURE_BOX gtexture)
                 (-> gimage texture-alist) (Scm_Cons (Scm_Cons win texture) (-> gimage texture-alist) ))))
        (else
         (let* ((gtexture::GrvTexture* (GRV_TEXTURE_PTR texture)))
           (pre++ (-> gtexture ref_count)))))))
 
- (define-cfn release-texture (win gimage::GrvImage*)
+ (define-cfn Grv_ReleaseTexture (win gimage::GrvImage*)
    ::void
-   (unless (GRV_WINDOW_P win)
+   (unless (GRV_WINDOWP win)
      (Scm_Error "<graviton-window> required, but got %S" win))
 
    (let* ((texture SCM_FALSE))
@@ -225,7 +236,7 @@
            (ref (-> gimage update_rect) w) 0
            (ref (-> gimage update_rect) h) 0)))
 
- (define-cfn refresh-textures (gimage::GrvImage*)
+ (define-cfn Grv_RefreshTextures (gimage::GrvImage*)
    ::void
    (when (SDL_RectEmpty (& (-> gimage update_rect)))
      (return))
@@ -251,7 +262,7 @@
          (ref (-> gimage update_rect) w) 0
          (ref (-> gimage update_rect) h) 0))
 
- (define-cfn get-texture (win gimage::GrvImage*)
+ (define-cfn Grv_RetrieveTexture (win gimage::GrvImage*)
    ::SDL_Texture*
    (let* ((texture SCM_FALSE))
      (for-each (lambda (pair)
@@ -259,8 +270,8 @@
                    (set! texture (SCM_CDR pair))
                    (break)))
                (-> gimage texture-alist))
-     (unless (GRV_TEXTURE_P texture)
-       (Scm_Error "<graviton-texture> not found for %S (got %S), forgot retain-texture?" win texture))
+     (unless (GRV_TEXTUREP texture)
+       (Scm_Error "<graviton-texture> not found for %S (got %S), forgot Grv_RetainTexture?" win texture))
 
      (return (-> (GRV_TEXTURE_PTR texture) texture))))
 
@@ -272,31 +283,17 @@
    ::double
    (return (/ 1.0 (fabs (ref (-> gimage param) m11)))))
 
- (define-cfn image-coordinate (gimage::GrvImage* x::double y::double ox::int* oy::int*)
+ (define-cfn Grv_ComputeImageCoordinate (gimage::GrvImage* x::double y::double ox::int* oy::int*)
    ::void
    (convert-coordinate (& (-> gimage param)) x y ox oy))
 
- (define-cfn decompose-rgba (color::Uint32 r::Uint8* g::Uint8* b::Uint8* a::Uint8*)
-   ::void
-   (cond
-     ((== SDL_BYTEORDER SDL_LIL_ENDIAN)
-      (set! (* r) (logand color #xff)
-            (* g) (logand (>> color 8) #xff)
-            (* b) (logand (>> color 16) #xff)
-            (* a) (logand (>> color 24) #xff)))
-     (else
-      (set! (* r) (logand (>> color 24) #xff)
-            (* g) (logand (>> color 16) #xff)
-            (* b) (logand (>> color 8) #xff)
-            (* a) (logand color #xff)))))
-
- (define-cfn bitblt (src-gimage::GrvImage* src-rect::SDL_Rect* dst-gimage::GrvImage* dst-rect::SDL_Rect* color::Uint32)
+ (define-cfn Grv_Bitblt (src-gimage::GrvImage* src-rect::SDL_Rect* dst-gimage::GrvImage* dst-rect::SDL_Rect* color::Uint32)
    ::void
    (let* ((r::Uint8)
           (g::Uint8)
           (b::Uint8)
           (a::Uint8))
-     (decompose-rgba color (& r) (& g) (& b) (& a))
+     (Grv_DecomposeRGBA color (& r) (& g) (& b) (& a))
      (when (< (SDL_SetSurfaceAlphaMod (-> src-gimage surface) a) 0)
        (Scm_Error "SDL_SetSurfaceAlphaMod failed: %s" (SDL_GetError)))
      (when (< (SDL_SetSurfaceColorMod (-> src-gimage surface) r g b) 0)
@@ -311,14 +308,15 @@
        (else
         (when (< (SDL_BlitScaled (-> src-gimage surface) src-rect (-> dst-gimage surface) dst-rect) 0)
           (Scm_Error "SDL_BlitScaled failed: %s" (SDL_GetError)))))
-     (update-rect dst-gimage (-> dst-rect x) (-> dst-rect y) (-> dst-rect w) (-> dst-rect h))))
-
+     (Grv_SetNeedsRefreshImage dst-gimage (-> dst-rect x) (-> dst-rect y) (-> dst-rect w) (-> dst-rect h))))
  ) ;; end of inline-stub
+
+(include "types.scm")
 
 (define-cproc make-image (w::<int> h::<int>)
   (let* ((surface::SDL_Surface* (SDL_CreateRGBSurfaceWithFormat 0 w h 32 SDL_PIXELFORMAT_RGBA32))
          (gimage::GrvImage* (SCM_NEW (.type GrvImage)))
-         (obj (MAKE_GRV_IMAGE gimage)))
+         (obj (GRV_IMAGE_BOX gimage)))
     (when (== surface NULL)
       (Scm_Error "SDL_CreateRGBSurfaceWithFormat failed: %s" (SDL_GetError)))
     (SDL_SetSurfaceBlendMode surface SDL_BLENDMODE_BLEND)
@@ -351,16 +349,6 @@
             (ref (-> image update_rect) h) 0)
       (return image))))
 
-(define (save-image image filename :key (format 'png))
-  (unless (eq? format 'png)
-    (errorf "Unsupported format: ~s" format))
-  (call-with-output-file filename
-    (lambda (out)
-      (let ((width (image-width image))
-            (height (image-height image))
-            (image-buffer (uvector-alias <u8vector> (image-rgba-pixels image))))
-        (write-png-image width height image-buffer out)))))
-
 (define-cproc set-image-border! (gimage::<graviton-image> top::<double> right::<double> bottom::<double> left::<double>)
   ::<void>
   (compute-transform-param (& (-> gimage param)) (-> gimage surface w) (-> gimage surface h) left top right bottom false))
@@ -368,20 +356,14 @@
 (define-cproc image-size (image)
   ::<list>
   (cond
-    ((GRV_IMAGE_P image)
+    ((GRV_IMAGEP image)
      (let* ((gimage::GrvImage* (GRV_IMAGE_PTR image)))
        (return (SCM_LIST2 (SCM_MAKE_INT (-> gimage surface w)) (SCM_MAKE_INT (-> gimage surface h))))))
-    ((GRV_TILE_IMAGE_P image)
+    ((GRV_TILE_IMAGEP image)
      (let* ((gtile::GrvTileImage* (GRV_TILE_IMAGE_PTR image)))
        (return (SCM_LIST2 (SCM_MAKE_INT (ref (-> gtile rect) w)) (SCM_MAKE_INT (ref (-> gtile rect) h))))))
     (else
      (Scm_Error "<graviton-image> or <graviton-tile-image> required, but got %S" image))))
-
-(define (image-width image)
-  (list-ref (image-size image) 0))
-
-(define (image-height image)
-  (list-ref (image-size image) 1))
 
 (define-cproc set-image-rgba-pixels! (image::<graviton-image> pixels::<u32vector>)
   ::<void>
@@ -401,7 +383,7 @@
   ::<int32>
   (let* ((ox::int)
          (oy::int))
-    (image-coordinate image x y (& ox) (& oy))
+    (Grv_ComputeImageCoordinate image x y (& ox) (& oy))
     (unless (and (<= 0 ox) (< ox (-> image surface w))
                  (<= 0 oy) (< oy (-> image surface h)))
       (Scm_Error "(%f, %f) is out of image" x y))
@@ -420,9 +402,6 @@
     (SDL_UnlockSurface surface)
     (return vec)))
 
-(define (image? obj)
-  (is-a? obj <graviton-image>))
-
 (define-cproc bitblt (src-image dst-gimage::<graviton-image> dst-position::<list>
                                 :key (src-position #f) (src-size #f) (dst-size #f) (color::<uint32> #xffffffff))
   ::<void>
@@ -430,14 +409,14 @@
          (src-rect::SDL_Rect*)
          (dst-rect::SDL_Rect))
     (cond
-      ((GRV_TILE_IMAGE_P src-image)
+      ((GRV_TILE_IMAGEP src-image)
        (unless (SCM_FALSEP src-position)
          (Scm_Error "src-position can't be specified when src-image is <graviton-tile-image>"))
        (unless (SCM_FALSEP src-size)
          (Scm_Error "src-size can't be specified when src-image is <graviton-tile-image>"))
        (set! src-gimage (GRV_IMAGE_PTR (-> (GRV_TILE_IMAGE_PTR src-image) image))
              src-rect (& (-> (GRV_TILE_IMAGE_PTR src-image) rect))))
-      ((GRV_IMAGE_P src-image)
+      ((GRV_IMAGEP src-image)
        (set! src-gimage (GRV_IMAGE_PTR src-image)
              src-rect (SCM_NEW SDL_Rect))
        (cond
@@ -452,11 +431,11 @@
                (SCM_LISTP src-size)
                (SCM_INTP (Scm_ListRef src-size 0 SCM_UNBOUND))
                (SCM_INTP (Scm_ListRef src-size 1 SCM_UNBOUND)))
-          (image-coordinate src-gimage
-                            (Scm_GetDouble (Scm_ListRef src-position 0 SCM_UNBOUND))
-                            (Scm_GetDouble (Scm_ListRef src-position 1 SCM_UNBOUND))
-                            (& (-> src-rect x))
-                            (& (-> src-rect y)))
+          (Grv_ComputeImageCoordinate src-gimage
+                                      (Scm_GetDouble (Scm_ListRef src-position 0 SCM_UNBOUND))
+                                      (Scm_GetDouble (Scm_ListRef src-position 1 SCM_UNBOUND))
+                                      (& (-> src-rect x))
+                                      (& (-> src-rect y)))
           (set! (-> src-rect w) (SCM_INT_VALUE (Scm_ListRef src-size 0 SCM_UNBOUND))
                 (-> src-rect h) (SCM_INT_VALUE (Scm_ListRef src-size 1 SCM_UNBOUND))))
          (else
@@ -468,11 +447,11 @@
     (unless (and (SCM_REALP (Scm_ListRef dst-position 0 SCM_UNBOUND))
                  (SCM_REALP (Scm_ListRef dst-position 1 SCM_UNBOUND)))
       (Scm_Error "(<real> <real>) required, but got %S" dst-position))
-    (image-coordinate dst-gimage
-                      (Scm_GetDouble (Scm_ListRef dst-position 0 SCM_UNBOUND))
-                      (Scm_GetDouble (Scm_ListRef dst-position 1 SCM_UNBOUND))
-                      (& (ref dst-rect x))
-                      (& (ref dst-rect y)))
+    (Grv_ComputeImageCoordinate dst-gimage
+                                (Scm_GetDouble (Scm_ListRef dst-position 0 SCM_UNBOUND))
+                                (Scm_GetDouble (Scm_ListRef dst-position 1 SCM_UNBOUND))
+                                (& (ref dst-rect x))
+                                (& (ref dst-rect y)))
     (cond
       ((SCM_FALSEP dst-size)
        (set! (ref dst-rect w) (-> src-rect w)
@@ -484,18 +463,12 @@
              (ref dst-rect h) (SCM_INT_VALUE (Scm_ListRef dst-size 1 SCM_UNBOUND))))
       (else
        (Scm_Error "(<integer> <integer>) required, but got %S" dst-size)))
-    (bitblt src-gimage src-rect dst-gimage (& dst-rect) color)))
+    (Grv_Bitblt src-gimage src-rect dst-gimage (& dst-rect) color)))
 
 (define-cproc pixel-size (gimage::<graviton-image>)
   ::(<double> <double>)
   (return (image-pixel-width gimage)
           (image-pixel-height gimage)))
-
-(define (pixel-width image)
-  (values-ref (pixel-size image) 0))
-
-(define (pixel-height image)
-  (values-ref (pixel-size image) 1))
 
 (define-cproc border-left (gimage::<graviton-image>)
   ::<double>
@@ -515,49 +488,9 @@
 
 (define-cproc image-center-point (gimage::<graviton-image>)
   ::<list>
-  (let* ((param::TransformParam* (& (-> gimage param))))
+  (let* ((param::GrvTransformParam* (& (-> gimage param))))
     (return (SCM_LIST2 (Scm_MakeFlonum (/ (+ (-> param left) (-> param right)) 2.0))
                        (Scm_MakeFlonum (/ (+ (-> param top) (-> param bottom)) 2.0))))))
-
-(define (set-border! image v0 :optional (v1 #f) (v2 #f) (v3 #f))
-  (let ((top #f)
-        (bottom #f)
-        (left #f)
-        (right #f))
-    (cond
-      ((not v1)                         ; # of args = 1
-       (set! top v0)
-       (set! right v0)
-       (set! bottom (- v0))
-       (set! left (- v0)))
-      ((not v2)                         ; # of args = 2
-       (set! top v0)
-       (set! right v1)
-       (set! bottom (- v0))
-       (set! left (- v1)))
-      ((not v3)                         ; # of args = 3
-       (set! top v0)
-       (set! right v1)
-       (set! bottom v2)
-       (set! left (- v1)))
-      (else                             ; # of args = 4
-       (set! top v0)
-       (set! right v1)
-       (set! bottom v2)
-       (set! left v3)))
-    (set-image-border! image top right bottom left)))
-
-(define (border-min-x image)
-  (min (border-left image) (border-right image)))
-
-(define (border-max-x image)
-  (max (border-left image) (border-right image)))
-
-(define (border-min-y image)
-  (min (border-top image) (border-bottom image)))
-
-(define (border-max-y image)
-  (max (border-top image) (border-bottom image)))
 
 
 ;;;
@@ -567,7 +500,7 @@
 (define-cproc make-tile-image (image x::<int> y::<int> w::<int> h::<int>)
   ::<graviton-tile-image>
   (let* ((gtile::GrvTileImage* (SCM_NEW (.type GrvTileImage))))
-    (unless (GRV_IMAGE_P image)
+    (unless (GRV_IMAGEP image)
       (Scm_Error "<graviton-image> required, but got %S" image))
     (set! (-> gtile image) image
           (ref (-> gtile rect) x) x
@@ -575,21 +508,3 @@
           (ref (-> gtile rect) w) w
           (ref (-> gtile rect) h) h)
     (return gtile)))
-
-(define (divide-image image width height)
-  (let* ((img-w (image-width image))
-         (img-h (image-height image))
-         (nx (ceiling->exact (/ img-w width)))
-         (ny (ceiling->exact (/ img-h height)))
-         (len (* nx ny))
-         (vec (make-vector len)))
-    (dotimes (y ny)
-      (dotimes (x nx)
-        (vector-set! vec
-                     (+ (* y nx) x)
-                     (make-tile-image image
-                                      (* x width)
-                                      (* y height)
-                                      (min width (- img-w (* x width)))
-                                      (min height (- img-h (* y height)))))))
-    vec))

@@ -48,7 +48,7 @@
   (use gauche.vport)
   (use graviton.async)
   (use graviton.color)
-  (use graviton.png)
+  (use graviton.video)
   (use math.const)
   (use parser.peg)
   (use rfc.zlib)
@@ -298,58 +298,6 @@
             "stdio.h"
             "string.h")
 
-  (define-ctype TransformParam::(.struct
-                                 (m00::double
-                                  m01::double
-                                  m10::double
-                                  m11::double
-                                  x0::double
-                                  y0::double
-                                  left::double
-                                  top::double
-                                  right::double
-                                  bottom::double)))
-
-  (define-ctype GrvTexture::(.struct
-                             (texture::SDL_Texture*
-                              ref_count::int)))
-
-  (define-ctype GrvImage::(.struct
-                           (surface::SDL_Surface*
-                            update_rect::SDL_Rect
-                            param::TransformParam
-                            texture_alist)))
-
-  (define-ctype GrvTileImage::(.struct
-                               (image
-                                rect::SDL_Rect)))
-
-  (define-ctype GrvSprite::(.struct
-                            (window
-                             image
-                             srcrect::SDL_Rect*
-                             center-x::double
-                             center-y::double
-                             z::double
-                             angle::double
-                             zoom-x::double
-                             zoom-y::double
-                             visible::bool
-                             color::Uint32
-                             clip::SDL_Rect*)))
-
-  (define-ctype GrvWindow::(.struct
-                            (window::SDL_Window*
-                             renderer::SDL_Renderer*
-                             sprites
-                             icon
-                             logical-width::int
-                             logical-height::int
-                             offset-x::int
-                             offset-y::int
-                             handler-table
-                             clip::SDL_Rect*)))
-
   (define-ctype ScratchArea::(.struct
                               (x::int
                                y::int
@@ -458,11 +406,8 @@ typedef struct GrvSoundletRec {
 
   ) ;; end of declcode
 
- (define-cvar grv-windows :static SCM_NIL)
- (define-cvar event-loop-status::EventLoopStatus)
- (define-cvar frame-per-second::int :static 30)
- (define-cvar global-handler-table :static)
  (define-cvar graviton-module :static)
+ (define-cvar event-loop-status::EventLoopStatus)
  (define-cvar mml-music-context-queue::GrvMMLMusicContextQueue :static)
  (define-cvar mml-paused?::bool :static)
  (define-cvar playing-music-context::GrvMusicContext* :static)
@@ -470,21 +415,7 @@ typedef struct GrvSoundletRec {
  (define-cvar music-last-finished-tick::Uint32 :static)
  (define-cvar playing-sound-contexts::GrvSoundContext** :static)
  (define-cvar main-thunk-finished?::bool :static)
-
- (define-cptr <graviton-window> :private
-   "GrvWindow*" "GravitonWindowClass" "GRV_WINDOW_P" "MAKE_GRV_WINDOW" "GRV_WINDOW_PTR")
-
- (define-cptr <graviton-image> :private
-   "GrvImage*" "GravitonImageClass" "GRV_IMAGE_P" "MAKE_GRV_IMAGE" "GRV_IMAGE_PTR")
-
- (define-cptr <graviton-tile-image> :private
-   "GrvTileImage*" "GravitonTileImageClass" "GRV_TILE_IMAGE_P" "MAKE_GRV_TILE_IMAGE" "GRV_TILE_IMAGE_PTR")
-
- (define-cptr <graviton-texture> :private
-   "GrvTexture*" "GravitonTextureClass" "GRV_TEXTURE_P" "MAKE_GRV_TEXTURE" "GRV_TEXTURE_PTR")
-
- (define-cptr <graviton-sprite> :private
-   "GrvSprite*" "GravitonSpriteClass" "GRV_SPRITE_P" "MAKE_GRV_SPRITE" "GRV_SPRITE_PTR")
+ (define-cvar Grv_GlobalHandlerTable)
 
  (define-cptr <graviton-tile-map> :private
    "GrvTileMap*" "GravitonTileMapClass" "GRV_TILE_MAP_P" "MAKE_GRV_TILE_MAP" "GRV_TILE_MAP_PTR")
@@ -524,8 +455,8 @@ typedef struct GrvSoundletRec {
 
    (Scm_AddCleanupHandler teardown-libs NULL)
 
-   (set! global-handler-table (Scm_MakeHashTableSimple SCM_HASH_EQ 16)
-         graviton-module (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
+   (set! graviton-module (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
+   (set! Grv_GlobalHandlerTable (Scm_MakeHashTableSimple SCM_HASH_EQ 16))
    (set! (ref event-loop-status lock) 0
          (ref event-loop-status running?) false)
 
@@ -560,10 +491,7 @@ typedef struct GrvSoundletRec {
 ;;;
 
 (include "enum2sym.scm")
-(include "image.scm")
-(include "sprite.scm")
 (include "tilemap.scm")
-(include "window.scm")
 (include "event.scm")
 (include "messagebox.scm")
 (include "draw.scm")
@@ -574,14 +502,6 @@ typedef struct GrvSoundletRec {
 ;;;
 ;;; setter
 ;;;
-
-(set! (setter window-fullscreen?) set-window-fullscreen!)
-(set! (setter window-position) set-window-position!)
-(set! (setter window-title) set-window-title!)
-(set! (setter window-resizable?) set-window-resizable!)
-(set! (setter window-icon) set-window-icon!)
-(set! (setter window-maximized?) set-window-maximized!)
-(set! (setter window-minimized?) set-window-minimized!)
 
 (set! (setter sprite-image) set-sprite-image!)
 (set! (setter sprite-x) set-sprite-x!)

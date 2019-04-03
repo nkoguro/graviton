@@ -143,7 +143,7 @@ typedef enum {
                   (ref rect h) 1)
             (when (!= (SDL_FillRect (-> gimage surface) (& rect) color) 0)
               (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))))))
-    (update-rect gimage (-> area x) (-> area y) (-> area w) (-> area h)))
+    (Grv_SetNeedsRefreshImage gimage (-> area x) (-> area y) (-> area w) (-> area h)))
 
   (define-cfn fill-rect (gimage::GrvImage* x0::int y0::int x1::int y1::int color::Uint32)
     ::void
@@ -154,7 +154,7 @@ typedef enum {
             (ref rect h) (+ (abs (- y0 y1)) 1))
       (when (!= (SDL_FillRect (-> gimage surface) (& rect) color) 0)
         (Scm_Error "SDL_FillRect failed: %s" (SDL_GetError)))
-      (update-rect gimage (ref rect x) (ref rect y) (ref rect w) (ref rect h))))
+      (Grv_SetNeedsRefreshImage gimage (ref rect x) (ref rect y) (ref rect w) (ref rect h))))
 
   (define-cfn %%draw-line (gimage::GrvImage* x0::int y0::int x1::int y1::int color::Uint32 area::ScratchArea*)
     ::void
@@ -216,7 +216,7 @@ typedef enum {
               (set! x (+ x (ref rect w))
                     y (+ y dy)
                     ax (+ ax dx))))))))
-    (update-rect gimage (?: (< x0 x1) x0 x1) (?: (< y0 y1) y0 y1) (+ (abs (- x0 x1)) 1) (+ (abs (- y0 y1)) 1)))
+    (Grv_SetNeedsRefreshImage gimage (?: (< x0 x1) x0 x1) (?: (< y0 y1) y0 y1) (+ (abs (- x0 x1)) 1) (+ (abs (- y0 y1)) 1)))
   )  ;; end of inline-stub
 
 (define-cproc %draw-rect (gimage::<graviton-image> x::<double> y::<double> w::<double> h::<double> color::<int> fill?::<boolean>)
@@ -229,8 +229,8 @@ typedef enum {
          (iy0::int)
          (ix1::int)
          (iy1::int))
-    (image-coordinate gimage x0 y0 (& ix0) (& iy0))
-    (image-coordinate gimage x1 y1 (& ix1) (& iy1))
+    (Grv_ComputeImageCoordinate gimage x0 y0 (& ix0) (& iy0))
+    (Grv_ComputeImageCoordinate gimage x1 y1 (& ix1) (& iy1))
     (set! ix1 (- ix1 1)
           iy1 (- iy1 1))
     (cond
@@ -252,20 +252,20 @@ typedef enum {
             (y::double (Scm_GetDouble (Scm_ListRef (SCM_CAR points) 1 SCM_UNBOUND)))
             (ix::int)
             (iy::int))
-       (image-coordinate gimage x y (& ix) (& iy))
+       (Grv_ComputeImageCoordinate gimage x y (& ix) (& iy))
        (%%draw-line gimage ix iy ix iy color NULL)))
     (else
      (let* ((x0::double (Scm_GetDouble (Scm_ListRef (SCM_CAR points) 0 SCM_UNBOUND)))
             (y0::double (Scm_GetDouble (Scm_ListRef (SCM_CAR points) 1 SCM_UNBOUND)))
             (ix0::int)
             (iy0::int))
-       (image-coordinate gimage x0 y0 (& ix0) (& iy0))
+       (Grv_ComputeImageCoordinate gimage x0 y0 (& ix0) (& iy0))
        (for-each (lambda (point)
                    (let* ((x1::double (Scm_GetDouble (Scm_ListRef point 0 SCM_UNBOUND)))
                           (y1::double (Scm_GetDouble (Scm_ListRef point 1 SCM_UNBOUND)))
                           (ix1::int)
                           (iy1::int))
-                     (image-coordinate gimage x1 y1 (& ix1) (& iy1))
+                     (Grv_ComputeImageCoordinate gimage x1 y1 (& ix1) (& iy1))
                      (%%draw-line gimage ix0 iy0 ix1 iy1 color NULL)
                      (set! ix0 ix1
                            iy0 iy1)))
@@ -282,7 +282,7 @@ typedef enum {
               (y::double (Scm_GetDouble (Scm_ListRef (Scm_ListRef points 0 SCM_UNBOUND) 1 SCM_UNBOUND)))
               (ix::int)
               (iy::int))
-         (image-coordinate gimage x y (& ix) (& iy))
+         (Grv_ComputeImageCoordinate gimage x y (& ix) (& iy))
          (%%draw-line gimage ix iy ix iy color NULL)))
       ((2)
        (let* ((x0::double (Scm_GetDouble (Scm_ListRef (Scm_ListRef points 0 SCM_UNBOUND) 0 SCM_UNBOUND)))
@@ -293,8 +293,8 @@ typedef enum {
               (iy0::int)
               (ix1::int)
               (iy1::int))
-         (image-coordinate gimage x0 y0 (& ix0) (& iy0))
-         (image-coordinate gimage x1 y1 (& ix1) (& iy1))
+         (Grv_ComputeImageCoordinate gimage x0 y0 (& ix0) (& iy0))
+         (Grv_ComputeImageCoordinate gimage x1 y1 (& ix1) (& iy1))
          (%%draw-line gimage ix0 iy0 ix1 iy1 color NULL)))
       (else
        (let* ((x0::double (Scm_GetDouble (Scm_ListRef (SCM_CAR points) 0 SCM_UNBOUND)))
@@ -307,7 +307,7 @@ typedef enum {
               (ey::int)
               (area::ScratchArea* NULL)
               (nodes SCM_NIL))
-         (image-coordinate gimage x0 y0 (& ix0) (& iy0))
+         (Grv_ComputeImageCoordinate gimage x0 y0 (& ix0) (& iy0))
          (set! nodes (SCM_LIST1 (Scm_Cons (SCM_MAKE_INT ix0) (SCM_MAKE_INT iy0))))
          (set! sx ix0
                sy iy0
@@ -318,7 +318,7 @@ typedef enum {
                             (y::double (Scm_GetDouble (Scm_ListRef point 1 SCM_UNBOUND)))
                             (ix::int)
                             (iy::int))
-                       (image-coordinate gimage x y (& ix) (& iy))
+                       (Grv_ComputeImageCoordinate gimage x y (& ix) (& iy))
                        (set! nodes (Scm_Cons (Scm_Cons (SCM_MAKE_INT ix) (SCM_MAKE_INT iy)) nodes))
                        (when (< ix sx)
                          (set! sx ix))

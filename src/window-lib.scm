@@ -30,69 +30,83 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
+(select-module graviton.video)
+
 (inline-stub
-  (define-cfn remove-destroyed-windows ()
-    ::void
-    (let* ((prev SCM_NIL)
-           (wins SCM_NIL))
-      (for-each (lambda (win)
-                  (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
-                    (when (-> gwin window)
-                      (set! wins (Scm_Cons win wins)))))
-                grv-windows)
-      (set! grv-windows wins)))
+ (declcode
+  (.include "SDL.h"
+            "gauche.h"
+            "gauche/extend.h"
+            "graviton.h"
+            "stdbool.h"
+            ))
+ (define-cvar Grv_Windows SCM_NIL)
+ (define-cvar Grv_FramePerSecond::int 30)
 
-  (define-cfn destroy-window (gwin::GrvWindow*)
-    ::void
-    (for-each (lambda (sprite)
-                (invalidate-sprite (GRV_SPRITE_PTR sprite)))
-              (-> gwin sprites))
-    (set! (-> gwin sprites) SCM_NIL)
+ (define-cfn remove-destroyed-windows ()
+   ::void
+   (let* ((prev SCM_NIL)
+          (wins SCM_NIL))
+     (for-each (lambda (win)
+                 (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
+                   (when (-> gwin window)
+                     (set! wins (Scm_Cons win wins)))))
+               Grv_Windows)
+     (set! Grv_Windows wins)))
 
-    (SDL_DestroyRenderer (-> gwin renderer))
-    (SDL_DestroyWindow (-> gwin window))
-    (set! (-> gwin window) NULL
-          (-> gwin renderer) NULL))
+ (define-cfn Grv_DestroyWindow (gwin::GrvWindow*)
+   ::void
+   (for-each (lambda (sprite)
+               (Grv_InvalidateSprite (GRV_SPRITE_PTR sprite)))
+             (-> gwin sprites))
+   (set! (-> gwin sprites) SCM_NIL)
 
-  (define-cfn update-window-contents ()
-    ::void
-    (for-each (lambda (win)
-                (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win))
-                       (renderer::SDL_Renderer* (-> gwin renderer)))
-                  (SDL_SetRenderDrawBlendMode renderer SDL_BLENDMODE_BLEND)
-                  (SDL_SetRenderDrawColor renderer 0 0 0 255)
-                  (SDL_RenderClear renderer)
+   (SDL_DestroyRenderer (-> gwin renderer))
+   (SDL_DestroyWindow (-> gwin window))
+   (set! (-> gwin window) NULL
+         (-> gwin renderer) NULL))
 
-                  (for-each (lambda (sprite)
-                              (render-sprite (GRV_SPRITE_PTR sprite)))
-                            (-> gwin sprites))
-                  (SDL_RenderPresent renderer)))
-              grv-windows))
+ (define-cfn Grv_UpdateWindowContents ()
+   ::void
+   (for-each (lambda (win)
+               (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win))
+                      (renderer::SDL_Renderer* (-> gwin renderer)))
+                 (SDL_SetRenderDrawBlendMode renderer SDL_BLENDMODE_BLEND)
+                 (SDL_SetRenderDrawColor renderer 0 0 0 255)
+                 (SDL_RenderClear renderer)
 
-  (define-cfn set-window-logical-size! (gwin::GrvWindow* physical-width::int physical-height::int logical-width::int logical-height::int)
-    ::void
-    (let* ((zoom-w::double)
-           (zoom-h::double)
-           (zoom::double)
-           (renderer-logical-width::int)
-           (renderer-logical-height::int))
-      (set! zoom-w (/ (cast double physical-width) (cast double logical-width))
-            zoom-h (/ (cast double physical-height) (cast double logical-height))
-            zoom (?: (< zoom-w zoom-h) zoom-w zoom-h)
-            (-> gwin logical-width) logical-width
-            (-> gwin logical-height) logical-height
-            renderer-logical-width (cast int (round (/ physical-width zoom)))
-            renderer-logical-height (cast int (round (/ physical-height zoom)))
-            (-> gwin offset-x) (cast int (round (/ (- renderer-logical-width logical-width) 2.0)))
-            (-> gwin offset-y) (cast int (round (/ (- renderer-logical-height logical-height) 2.0)))
-            (-> gwin clip) (SCM_NEW SDL_Rect)
-            (-> gwin clip w) logical-width
-            (-> gwin clip h) logical-height
-            (-> gwin clip x) (-> gwin offset-x)
-            (-> gwin clip y) (-> gwin offset-y))
-      (when (< (SDL_RenderSetLogicalSize (-> gwin renderer) renderer-logical-width renderer-logical-height) 0)
-        (Scm_Error "SDL_RenderSetLogicalSize failed: %s" (SDL_GetError)))))
-  ) ;; end of inline-stub
+                 (for-each (lambda (sprite)
+                             (Grv_RenderSprite (GRV_SPRITE_PTR sprite)))
+                           (-> gwin sprites))
+                 (SDL_RenderPresent renderer)))
+             Grv_Windows))
+
+ (define-cfn set-window-logical-size! (gwin::GrvWindow* physical-width::int physical-height::int logical-width::int logical-height::int)
+   ::void
+   (let* ((zoom-w::double)
+          (zoom-h::double)
+          (zoom::double)
+          (renderer-logical-width::int)
+          (renderer-logical-height::int))
+     (set! zoom-w (/ (cast double physical-width) (cast double logical-width))
+           zoom-h (/ (cast double physical-height) (cast double logical-height))
+           zoom (?: (< zoom-w zoom-h) zoom-w zoom-h)
+           (-> gwin logical-width) logical-width
+           (-> gwin logical-height) logical-height
+           renderer-logical-width (cast int (round (/ physical-width zoom)))
+           renderer-logical-height (cast int (round (/ physical-height zoom)))
+           (-> gwin offset-x) (cast int (round (/ (- renderer-logical-width logical-width) 2.0)))
+           (-> gwin offset-y) (cast int (round (/ (- renderer-logical-height logical-height) 2.0)))
+           (-> gwin clip) (SCM_NEW SDL_Rect)
+           (-> gwin clip w) logical-width
+           (-> gwin clip h) logical-height
+           (-> gwin clip x) (-> gwin offset-x)
+           (-> gwin clip y) (-> gwin offset-y))
+     (when (< (SDL_RenderSetLogicalSize (-> gwin renderer) renderer-logical-width renderer-logical-height) 0)
+       (Scm_Error "SDL_RenderSetLogicalSize failed: %s" (SDL_GetError)))))
+ ) ;; end of inline-stub
+
+(include "types.scm")
 
 (define-cproc make-window (title::<const-cstring> logical-width::<int> logical-height::<int> :key (resizable?::<boolean> #f) (icon #f) (shown?::<boolean> #t) (maximized?::<boolean> #f) (minimized?::<boolean> #f) (fullscreen?::<boolean> #f))
   (let* ((flags::Uint32 0))
@@ -109,7 +123,7 @@
        (set! flags (logior flags SDL_WINDOW_SHOWN)))
       (else
        (set! flags (logior flags SDL_WINDOW_HIDDEN))))
-    (unless (or (SCM_FALSEP icon) (GRV_IMAGE_P icon))
+    (unless (or (SCM_FALSEP icon) (GRV_IMAGEP icon))
       (Scm_Error "icon must be <graviton-image> or #f, but got %S" icon))
 
     (let* ((gwin::GrvWindow* (SCM_NEW (.type GrvWindow))))
@@ -128,7 +142,7 @@
       (unless (-> gwin window)
         (Scm_Error "SDL_CreateWindow failed: %s" (SDL_GetError)))
 
-      (when (GRV_IMAGE_P icon)
+      (when (GRV_IMAGEP icon)
         (SDL_SetWindowIcon (-> gwin window) (-> (GRV_IMAGE_PTR icon) surface)))
 
       (set! (-> gwin renderer) (SDL_CreateRenderer (-> gwin window) -1 0))
@@ -151,29 +165,29 @@
                                      (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
                         0)
 
-      (let* ((win (MAKE_GRV_WINDOW gwin)))
-        (set! grv-windows (Scm_Cons win grv-windows))
+      (let* ((win (GRV_WINDOW_BOX gwin)))
+        (set! Grv_Windows (Scm_Cons win Grv_Windows))
         (return win)))))
 
 (define-cproc clear-window-sprites! (gwin::<graviton-window>)
   ::<void>
   (for-each (lambda (sprite)
               (let* ((gsprite::GrvSprite* (GRV_SPRITE_PTR gsprite)))
-                (invalidate-sprite gsprite)))
+                (Grv_InvalidateSprite gsprite)))
             (-> gwin sprites))
   (set! (-> gwin sprites) SCM_NIL))
 
 (define-cproc destroy-window (gwin::<graviton-window>)
   ::<void>
-  (destroy-window gwin)
+  (Grv_DestroyWindow gwin)
   (remove-destroyed-windows))
 
 (define-cproc destroy-all-windows ()
   ::<void>
   (for-each (lambda (obj)
               (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR obj)))
-                (destroy-window gwin)))
-            grv-windows)
+                (Grv_DestroyWindow gwin)))
+            Grv_Windows)
   (remove-destroyed-windows))
 
 (define-cproc send-close-window-event (gwin::<graviton-window>)
@@ -193,12 +207,6 @@
     (SDL_GetWindowSize (-> gwin window) (& w) (& h))
     (return w h)))
 
-(define (window-physical-width window)
-  (values-ref (window-physical-size window) 0))
-
-(define (window-physical-height window)
-  (values-ref (window-physical-size window) 1))
-
 (define-cproc set-window-physical-size! (gwin::<graviton-window> physical-width::<int> physical-height::<int>)
   ::<void>
   (SDL_SetWindowSize (-> gwin window) physical-width physical-height)
@@ -207,12 +215,6 @@
 (define-cproc window-logical-size (gwin::<graviton-window>)
   ::(<int> <int>)
   (return (-> gwin logical-width) (-> gwin logical-height)))
-
-(define (window-logical-width window)
-  (values-ref (window-logical-size window) 0))
-
-(define (window-logical-height window)
-  (values-ref (window-logical-size window) 1))
 
 (define-cproc set-window-logical-size! (gwin::<graviton-window> logical-width::<int> logical-height::<int>)
   ::<void>
@@ -240,11 +242,6 @@
   ::<void>
   (SDL_MaximizeWindow (-> gwin window)))
 
-(define (set-window-maximized! window maximized?)
-  (if maximized?
-      (maximize-window window)
-      (restore-window window)))
-
 (define-cproc window-minimized? (gwin::<graviton-window>)
   ::<boolean>
   (let* ((flags::Uint32 (SDL_GetWindowFlags (-> gwin window))))
@@ -253,11 +250,6 @@
 (define-cproc minimize-window (gwin::<graviton-window>)
   ::<void>
   (SDL_MinimizeWindow (-> gwin window)))
-
-(define (set-window-minimized! window minimized?)
-  (if minimized?
-      (minimize-window window)
-      (restore-window window)))
 
 (define-cproc window-position (gwin::<graviton-window>)
   ::<list>
@@ -324,7 +316,7 @@
 (define-cproc set-window-icon! (gwin::<graviton-window> icon)
   ::<void>
   (cond
-    ((GRV_IMAGE_P icon)
+    ((GRV_IMAGEP icon)
      (SDL_SetWindowIcon (-> gwin window) (-> (GRV_IMAGE_PTR icon) surface))
      (set! (-> gwin icon) icon))
     (else
@@ -337,25 +329,19 @@
 (define-cproc window-handler-table (gwin::<graviton-window>)
   (return (-> gwin handler-table)))
 
-(define (set-window-handler! window event proc)
-  (hash-table-set! (window-handler-table window) event proc))
-
 (define-cproc all-windows ()
-  (return grv-windows))
-
-(define (last-window)
-  (let1 wins (all-windows)
-    (cond
-      ((null? wins)
-       #f)
-      (else
-       (car wins)))))
-
-(define (window? obj)
-  (is-a? obj <graviton-window>))
+  (return Grv_Windows))
 
 (define-cproc window-center-point (gwin::<graviton-window>)
   ::<list>
   (return (SCM_LIST2 (Scm_MakeFlonum (/ (-> gwin logical-width) 2.0))
                      (Scm_MakeFlonum (/ (-> gwin logical-height) 2.0)))))
 
+(define-cproc frame-per-second ()
+  ::<int>
+  (return Grv_FramePerSecond))
+
+(define-cproc set-frame-per-second! (fps::<int>)
+  ::<void>
+  (let* ((t::Uint32 (cast Uint32 (floor (/ 1000.0 fps)))))
+    (set! Grv_FramePerSecond fps)))

@@ -31,15 +31,13 @@
 ;;;
 
 (inline-stub
- "Uint32 Grv_CustomEventType;"
-
  (define-cfn id->window (window-id::Uint32)
    ::ScmObj
    (for-each (lambda (win)
                (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
                  (when (== (SDL_GetWindowID (-> gwin window)) window-id)
                    (return win))))
-             grv-windows)
+             Grv_Windows)
    (return SCM_FALSE))
 
  (define-cfn window-handler (win event)
@@ -57,7 +55,7 @@
 
  (define-cfn global-handler (event)
    ::ScmObj
-   (let* ((handler (Scm_HashTableRef (SCM_HASH_TABLE global-handler-table) event SCM_FALSE)))
+   (let* ((handler (Scm_HashTableRef (SCM_HASH_TABLE Grv_GlobalHandlerTable) event SCM_FALSE)))
      (cond
        ((SCM_PROCEDUREP handler)
         (return handler))
@@ -251,7 +249,7 @@
               (set! proc (ref (-> sdl-event user) data1)
                     args (ref (-> sdl-event user) data2)))
              ((GRV_EVENT_WINDOW_UPDATE)
-              (update-window-contents))
+              (Grv_UpdateWindowContents))
              ) ;; end of case (for Grv_CustomEventType)
            ))  ;; end of cond
         ))     ;; end of case
@@ -280,11 +278,11 @@
                (let* ((proc (window-handler win 'update)))
                  (when (SCM_PROCEDUREP proc)
                    (GRV_APPLY proc (SCM_LIST1 win)))))
-             grv-windows)
+             Grv_Windows)
 
    (GRV_SEND_EVENT GRV_EVENT_WINDOW_UPDATE NULL NULL)
 
-   (return (/ 1000 frame-per-second)))
+   (return (/ 1000 Grv_FramePerSecond)))
 
  (.define MUSIC_FINISHED_GRACE_PERIOD 200)
  )  ;; end of inline-stub
@@ -296,15 +294,6 @@
 (define-cproc event-loop-running? ()
   ::<boolean>
   (return (event-loop-running?)))
-
-(define-cproc frame-per-second ()
-  ::<int>
-  (return frame-per-second))
-
-(define-cproc set-frame-per-second! (fps::<int>)
-  ::<void>
-  (let* ((t::Uint32 (cast Uint32 (floor (/ 1000.0 fps)))))
-    (set! frame-per-second fps)))
 
 (define-cproc set-main-thunk-finished? (flag::<boolean>)
   ::<void>
@@ -320,7 +309,7 @@
   (let* ((callback-id::SDL_TimerID (SDL_AddTimer 0 update-windows-callback NULL)))
     (while (logior (SDL_PollEvent NULL)
                    (not main-thunk-finished?)
-                   (not (SCM_NULLP grv-windows))
+                   (not (SCM_NULLP Grv_Windows))
                    (or (playing-mml?)
                        (Mix_PlayingMusic)
                        (Mix_Playing -1)
@@ -333,10 +322,10 @@
   (set-event-loop-status false))
 
 (define-cproc global-handler-table ()
-  (return global-handler-table))
+  (return Grv_GlobalHandlerTable))
 
 (define (set-global-handler! event proc)
-  (hash-table-set! (global-handler-table) event proc))
+  (hash-table-set! (Grv_GlobalHandlerTable) event proc))
 
 (define-macro (define-on-window-event-macros :rest events)
   `(begin
