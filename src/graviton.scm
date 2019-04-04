@@ -305,24 +305,6 @@
                                h::int
                                data::char*)))
 
-  (define-ctype GrvAttribute::(.struct
-                               (foreground-color::Uint32
-                                background-color::Uint32)))
-
-  (define-ctype GrvTileMap::(.struct
-                             (tiles::Uint32*
-                              attrs::GrvAttribute**
-                              buf-tiles::Uint32*
-                              buf-attrs::GrvAttribute**
-                              columns::int
-                              rows::int
-                              offset::int
-                              image
-                              tile-images
-                              tile-width::int
-                              tile-height::int
-                              sprite)))
-
   (define-ctype EventLoopStatus::(.struct
                                   (lock::SDL_SpinLock
                                    running?::bool)))
@@ -406,7 +388,6 @@ typedef struct GrvSoundletRec {
 
   ) ;; end of declcode
 
- (define-cvar graviton-module :static)
  (define-cvar event-loop-status::EventLoopStatus)
  (define-cvar mml-music-context-queue::GrvMMLMusicContextQueue :static)
  (define-cvar mml-paused?::bool :static)
@@ -416,9 +397,6 @@ typedef struct GrvSoundletRec {
  (define-cvar playing-sound-contexts::GrvSoundContext** :static)
  (define-cvar main-thunk-finished?::bool :static)
  (define-cvar Grv_GlobalHandlerTable)
-
- (define-cptr <graviton-tile-map> :private
-   "GrvTileMap*" "GravitonTileMapClass" "GRV_TILE_MAP_P" "MAKE_GRV_TILE_MAP" "GRV_TILE_MAP_PTR")
 
  (define-cptr <graviton-soundlet> :private
    "GrvSoundlet*" "GravitonSoundletClass" "GRV_SOUNDLET_P" "MAKE_GRV_SOUNDLET" "GRV_SOUNDLET_PTR")
@@ -455,7 +433,6 @@ typedef struct GrvSoundletRec {
 
    (Scm_AddCleanupHandler teardown-libs NULL)
 
-   (set! graviton-module (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
    (set! Grv_GlobalHandlerTable (Scm_MakeHashTableSimple SCM_HASH_EQ 16))
    (set! (ref event-loop-status lock) 0
          (ref event-loop-status running?) false)
@@ -491,7 +468,6 @@ typedef struct GrvSoundletRec {
 ;;;
 
 (include "enum2sym.scm")
-(include "tilemap.scm")
 (include "event.scm")
 (include "messagebox.scm")
 (include "draw.scm")

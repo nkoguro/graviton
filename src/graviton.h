@@ -93,6 +93,10 @@ extern ScmClass *GrvFutureClass;
 ScmObj Grv_MakeFuture();
 void Grv_SetFutureResult(GrvFuture *gfuture, ScmObj result, bool report_error);
 
+
+/** graviton.video */
+extern ScmObj Grv_GravitonVideoModule;
+
 /*
  * Image & Texture
  */
@@ -209,5 +213,36 @@ extern ScmClass *GrvSpriteClass;
 
 extern void Grv_InvalidateSprite(GrvSprite *gsprite);
 extern void Grv_RenderSprite(GrvSprite *gsprite);
+
+
+/*
+ * Tilemap
+ */
+
+typedef struct GrvAttributeRec {
+  Uint32 foreground_color;
+  Uint32 background_color;
+} GrvAttribute;
+
+typedef struct GrvTileMapRec {
+  Uint32 *tiles;
+  GrvAttribute **attrs;
+  Uint32 *buf_tiles;
+  GrvAttribute **buf_attrs;
+  int columns;
+  int rows;
+  int offset;
+  ScmObj image;
+  ScmObj tile_images;
+  int tile_width;
+  int tile_height;
+  ScmObj sprite;
+} GrvTileMap;
+
+extern ScmClass *GrvTileMapClass;
+#define GRV_TILE_MAP_PTR(obj) SCM_FOREIGN_POINTER_REF(GrvTileMap*, obj)
+#define GRV_TILE_MAPP(obj) SCM_XTYPEP(obj, GrvTileMapClass)
+#define GRV_TILE_MAP_BOX(ptr) Scm_MakeForeignPointer(GrvTileMapClass, ptr)
+
 
 #endif /* GRAVITON_H */

@@ -52,8 +52,7 @@ graviton_SRCS = graviton.scm \
 	messagebox.scm \
 	music.scm \
 	repl.scm \
-	sound.scm \
-	tilemap.scm
+	sound.scm
 
 .PHONY: all check install uninstall clean distclean maintainer-clean
 
@@ -86,8 +85,11 @@ window-lib.c: window-lib.scm types.scm
 sprite-lib.c: sprite-lib.scm types.scm
 	$(PRECOMP) $<
 
-graviton-video.$(SOEXT): graviton-video.c image-lib.c window-lib.c sprite-lib.c graviton.h
-	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton-video graviton-video.c image-lib.c window-lib.c sprite-lib.c
+tilemap-lib.c: tilemap-lib.scm types.scm
+	$(PRECOMP) $<
+
+graviton-video.$(SOEXT): graviton-video.c image-lib.c window-lib.c sprite-lib.c tilemap-lib.c graviton.h
+	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton-video graviton-video.c image-lib.c window-lib.c sprite-lib.c tilemap-lib.c
 
 graviton.sci graviton.c: $(graviton_SRCS)
 	$(PRECOMP) -e $<

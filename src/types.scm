@@ -16,5 +16,8 @@
 
  (define-type <graviton-sprite>
    "GrvSprite*" "<graviton-sprite>" "GRV_SPRITEP" "GRV_SPRITE_PTR" "GRV_SPRITE_BOX")
+
+ (define-type <graviton-tile-map>
+   "GrvTileMap*" "<graviton-tile-map>" "GRV_TILE_MAPP" "GRV_TILE_MAP_PTR" "GRV_TILE_MAP_BOX")
  )
 

@@ -38,25 +38,32 @@
 extern void Scm_Init_image_lib();
 extern void Scm_Init_window_lib();
 extern void Scm_Init_sprite_lib();
+extern void Scm_Init_tilemap_lib();
+
+ScmObj Grv_GravitonVideoModule;
 
 ScmClass *GrvTextureClass;
 ScmClass *GrvImageClass;
 ScmClass *GrvTileImageClass;
 ScmClass *GrvWindowClass;
 ScmClass *GrvSpriteClass;
+ScmClass *GrvTileMapClass;
 
 void Scm_Init_graviton_video(void)
 {
   ScmModule *mod;
   SCM_INIT_EXTENSION(graviton_video);
   mod = SCM_MODULE(SCM_FIND_MODULE("graviton.video", TRUE));
+  Grv_GravitonVideoModule = SCM_OBJ(mod);
   GrvTextureClass = Scm_MakeForeignPointerClass(mod, "<graviton-texture>", NULL, NULL, 0);
   GrvImageClass = Scm_MakeForeignPointerClass(mod, "<graviton-image>", NULL, NULL, 0);
   GrvTileImageClass = Scm_MakeForeignPointerClass(mod, "<graviton-tile-image>", NULL, NULL, 0);
   GrvWindowClass = Scm_MakeForeignPointerClass(mod, "<graviton-window>", NULL, NULL, 0);
   GrvSpriteClass = Scm_MakeForeignPointerClass(mod, "<graviton-sprite>", NULL, NULL, 0);
+  GrvTileMapClass = Scm_MakeForeignPointerClass(mod, "<graviton-tile-map>", NULL, NULL, 0);
   Scm_Init_image_lib();
   Scm_Init_window_lib();
   Scm_Init_sprite_lib();
+  Scm_Init_tilemap_lib();
 }
 
