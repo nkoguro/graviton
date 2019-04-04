@@ -31,11 +31,13 @@
 ;;;
 
 (define-module graviton.video
+  (use gauche.record)
   (use gauche.regexp)
   (use gauche.uvector)
   (use gauche.vport)
   (use graviton.color)
   (use graviton.png)
+  (use math.const)
   (use srfi-14)
   (use srfi-42)
   (use util.match)
@@ -173,6 +175,19 @@
 (define (window? obj)
   (is-a? obj <graviton-window>))
 
+(define-method center-point ((window <graviton-window>))
+  (window-center-point window))
+
+(define-method center-point ((image <graviton-image>))
+  (image-center-point image))
+
+(define (center-x window-or-image)
+  (list-ref (center-point window-or-image) 0))
+
+(define (center-y window-or-image)
+  (list-ref (center-point window-or-image) 1))
+
+
 (set! (setter window-fullscreen?) set-window-fullscreen!)
 (set! (setter window-position) set-window-position!)
 (set! (setter window-title) set-window-title!)
@@ -180,6 +195,27 @@
 (set! (setter window-icon) set-window-icon!)
 (set! (setter window-maximized?) set-window-maximized!)
 (set! (setter window-minimized?) set-window-minimized!)
+
+
+;;;
+;;; Sprite
+;;;
+
+(set! (setter sprite-image) set-sprite-image!)
+(set! (setter sprite-x) set-sprite-x!)
+(set! (setter sprite-y) set-sprite-y!)
+(set! (setter sprite-z) set-sprite-z!)
+(set! (setter sprite-angle) set-sprite-angle!)
+(set! (setter sprite-zoom) set-sprite-zoom!)
+(set! (setter sprite-visible?) set-sprite-visible!)
+(set! (setter sprite-color) set-sprite-color!)
+
+
+;;;
+;;; TileMap
+;;;
+
+(set! (setter tile-map-offset) set-tile-map-offset!)
 
 
 ;;;
@@ -484,3 +520,177 @@
     (slot-set! out 'putb (lambda (b)
                            (driver (ucs->char b))))
     out))
+
+;;;
+;;; Draw
+;;;
+
+(define-record-type (<point> (pseudo-rtd <list>))
+  make-point point?
+  (x point-x)
+  (y point-y))
+
+(define (draw-point image x y color :key (thickness 0))
+  (cond
+    ((= thickness 0)
+     (draw-rect image x y (pixel-width image) (pixel-height image) color))
+    (else
+     (draw-circle image x y (/. thickness 2) color :fill? #t))))
+
+(define (draw-rect image x y w h color :key (fill? #f) (thickness 0))
+  (cond
+    ((= thickness 0)
+     (%draw-rect image x y w h color fill?))
+    (else
+     (let ((x0 x)
+           (y0 y)
+           (x1 (+ x w))
+           (y1 (+ x h)))
+       (draw-polygon image
+                     (list (make-point x0 y0)
+                           (make-point x0 y1)
+                           (make-point x1 y1)
+                           (make-point x1 y0))
+                     color
+                     :fill? fill?
+                     :thinkness thickness)))))
+
+(define (draw-line image points color :key (thickness 0))
+  (cond
+    ((= thickness 0)
+     (%draw-line image points color))
+    ((null? points)
+     #f)
+    (else
+     (draw-point image (point-x (car points)) (point-y (car points)) color :thickness thickness)
+     (let loop ((point0 (car points))
+                (points (cdr points)))
+       (cond
+         ((null? points)
+          #f)
+         ((< (abs (- (point-y point0) (point-y (car points)))) (pixel-height image))
+          (let* ((x0 (point-x point0))
+                 (y0 (point-y point0))
+                 (x1 (point-x (car points)))
+                 (y1 (point-y (car points)))
+                 (x00 x0)
+                 (x01 x0)
+                 (x10 x1)
+                 (x11 x1)
+                 (d (/. thickness 2))
+                 (y00 (- y0 d))
+                 (y01 (+ y0 d))
+                 (y10 (- y1 d))
+                 (y11 (+ y1 d)))
+            (draw-polygon image
+                          (list (make-point x00 y00)
+                                (make-point x01 y01)
+                                (make-point x11 y11)
+                                (make-point x10 y10))
+                          color
+                          :fill? #t)
+            (draw-point image x1 y1 color :thickness thickness)
+            (loop (car points) (cdr points))))
+         ((< (abs (- (point-x point0) (point-x (car points)))) (pixel-width image))
+          (let* ((x0 (point-x point0))
+                 (y0 (point-y point0))
+                 (x1 (point-x (car points)))
+                 (y1 (point-y (car points)))
+                 (d (/. thickness 2))
+                 (x00 (- x0 d))
+                 (x01 (+ x0 d))
+                 (x10 (- x1 d))
+                 (x11 (+ x1 d))
+                 (y00 y0)
+                 (y01 y0)
+                 (y10 y1)
+                 (y11 y1))
+            (draw-polygon image
+                          (list (make-point x00 y00)
+                                (make-point x01 y01)
+                                (make-point x11 y11)
+                                (make-point x10 y10))
+                          color
+                          :fill? #t)
+            (draw-point image x1 y1 color :thickness thickness)
+            (loop (car points) (cdr points))))
+         (else
+          (let* ((x0 (point-x point0))
+                 (y0 (point-y point0))
+                 (x1 (point-x (car points)))
+                 (y1 (point-y (car points)))
+                 (a (/. (- y0 y1) (- x0 x1)))
+                 (c (* thickness (sqrt (/. (* a a) (+ (* a a) 1))) 0.5))
+                 (x00 (- x0 c))
+                 (x01 (+ x0 c))
+                 (x10 (- x1 c))
+                 (x11 (+ x1 c))
+                 (y00 (+ (* (/. -1 a) (- x00 x0)) y0))
+                 (y01 (+ (* (/. -1 a) (- x01 x0)) y0))
+                 (y10 (+ (* (/. -1 a) (- x10 x1)) y1))
+                 (y11 (+ (* (/. -1 a) (- x11 x1)) y1)))
+            (draw-polygon image
+                          (list (make-point x00 y00)
+                                (make-point x01 y01)
+                                (make-point x11 y11)
+                                (make-point x10 y10))
+                          color
+                          :fill? #t)
+            (draw-point image x1 y1 color :thickness thickness)
+            (loop (car points) (cdr points)))))))))
+
+(define (draw-polygon image points color :key (fill? #f) (thickness 0))
+  (cond
+    ((= thickness 0)
+     (%draw-polygon image points color fill?))
+    ((null? points)
+     #f)
+    (else
+     (draw-line image (cons (last points) points) color :thickness thickness)
+     (when fill?
+       (%draw-polygon image points color #t)))))
+
+(define (draw-circle image
+                     center-x
+                     center-y
+                     radius
+                     color
+                     :key
+                     (start 0)
+                     (angle #f)
+                     (radius-ratio 1.0)
+                     (rotate 0)
+                     (fill? #f)
+                     (draw-radius? (if angle #t #f))
+                     (thickness 0))
+  (define rotate-point
+    (let ((m00 (cos rotate))
+          (m01 (- (sin rotate)))
+          (m10 (sin rotate))
+          (m11 (cos rotate)))
+      (lambda (x y)
+        (let ((x1 (- x center-x))
+              (y1 (- y center-y)))
+          (make-point (+ (* m00 x1) (* m01 y1) center-x)
+                      (+ (* m10 x1) (* m11 y1) center-y))))))
+
+  (let ((dt (/ pi/2 (/ radius (receive (w h) (pixel-size image)
+                                (min w h)))))
+        (et (+ start (or angle (* 2 pi)))))
+    (let loop ((t start)
+               (points (if (or draw-radius?
+                               (and angle fill?))
+                           (list center-point)
+                           '())))
+      (cond
+        ((<= et t)
+         (let ((x (+ center-x (* radius (cos et))))
+               (y (+ center-y (* (* radius radius-ratio) (sin et)))))
+           (if (or draw-radius? fill?)
+               (draw-polygon image (cons (rotate-point x y) points) color :fill? fill? :thickness thickness)
+               (draw-line image (cons (rotate-point x y) points) color :thickness thickness))))
+        (else
+         (let ((x (+ center-x (* radius (cos t))))
+               (y (+ center-y (* (* radius radius-ratio) (sin t)))))
+           (loop (+ t dt) (cons (rotate-point x y) points))))))))
+

@@ -279,11 +279,6 @@
 
 (select-module graviton)
 
-(define-record-type (<point> (pseudo-rtd <list>))
-  make-point point?
-  (x point-x)
-  (y point-y))
-
 (inline-stub
  (declcode
   (.include "SDL.h"
@@ -297,13 +292,6 @@
             "stdbool.h"
             "stdio.h"
             "string.h")
-
-  (define-ctype ScratchArea::(.struct
-                              (x::int
-                               y::int
-                               w::int
-                               h::int
-                               data::char*)))
 
   (define-ctype EventLoopStatus::(.struct
                                   (lock::SDL_SpinLock
@@ -470,25 +458,9 @@ typedef struct GrvSoundletRec {
 (include "enum2sym.scm")
 (include "event.scm")
 (include "messagebox.scm")
-(include "draw.scm")
 (include "music.scm")
 (include "sound.scm")
 (include "repl.scm")
-
-;;;
-;;; setter
-;;;
-
-(set! (setter sprite-image) set-sprite-image!)
-(set! (setter sprite-x) set-sprite-x!)
-(set! (setter sprite-y) set-sprite-y!)
-(set! (setter sprite-z) set-sprite-z!)
-(set! (setter sprite-angle) set-sprite-angle!)
-(set! (setter sprite-zoom) set-sprite-zoom!)
-(set! (setter sprite-visible?) set-sprite-visible!)
-(set! (setter sprite-color) set-sprite-color!)
-
-(set! (setter tile-map-offset) set-tile-map-offset!)
 
 ;;;
 ;;; Misc
@@ -551,16 +523,3 @@ typedef struct GrvSoundletRec {
                  (h (/ (window-physical-height win) 2)))
              (when (and (<= (image-width image) w) (<= (image-height image) h))
                (set-window-physical-size! win w h)))))))))
-
-(define-method center-point ((window <graviton-window>))
-  (window-center-point window))
-
-(define-method center-point ((image <graviton-image>))
-  (image-center-point image))
-
-(define (center-x window-or-image)
-  (list-ref (center-point window-or-image) 0))
-
-(define (center-y window-or-image)
-  (list-ref (center-point window-or-image) 1))
-

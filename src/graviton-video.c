@@ -39,6 +39,7 @@ extern void Scm_Init_image_lib();
 extern void Scm_Init_window_lib();
 extern void Scm_Init_sprite_lib();
 extern void Scm_Init_tilemap_lib();
+extern void Scm_Init_draw_lib();
 
 ScmObj Grv_GravitonVideoModule;
 
@@ -65,5 +66,6 @@ void Scm_Init_graviton_video(void)
   Scm_Init_window_lib();
   Scm_Init_sprite_lib();
   Scm_Init_tilemap_lib();
+  Scm_Init_draw_lib();
 }
 
