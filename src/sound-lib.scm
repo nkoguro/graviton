@@ -30,10 +30,25 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
+(select-module graviton.audio)
+
 (inline-stub
+ (declcode
+  (.include "SDL.h"
+            "SDL_mixer.h"
+            "gauche.h"
+            "graviton.h"
+            "stdbool.h"
+            "string.h"))
+
+ (define-cvar playing-sound-contexts::GrvSoundContext** :static)
+
+ (initcode
+  (set! playing-sound-contexts (SCM_NEW_ARRAY (.type GrvSoundContext*) GRV_CHANNEL_SIZE)))
+
  (define-cfn finalize-sound (z data::void*)
    ::void
-   (when (GRV_SOUND_P z)
+   (when (GRV_SOUNDP z)
      (Mix_FreeChunk (-> (GRV_SOUND_PTR z) chunk))))
 
  (define-cfn set-playing-sound-context! (channel::int sound-context::GrvSoundContext*)
@@ -48,13 +63,13 @@
    ::int
    (let* ((i::int))
      (Grv_LockGlobal)
-     (for ((set! i 0) (< i CHANNEL_SIZE) (inc! i))
+     (for ((set! i 0) (< i GRV_CHANNEL_SIZE) (inc! i))
        (when (== (aref playing-sound-contexts i) NULL)
          (break)))
      (Grv_UnlockGlobal)
 
      (cond
-       ((== i CHANNEL_SIZE)
+       ((== i GRV_CHANNEL_SIZE)
         (return -1))
        (else
         (return i)))))
@@ -73,26 +88,28 @@
        (Grv_SetFutureResult (GRV_FUTURE_PTR (-> sound-context future)) 'finished false))))
  ) ;; end of inline-stub
 
+(include "types.scm")
+
 (define-cproc load-sound (filename::<const-cstring>)
   (let* ((chunk::Mix_Chunk* (Mix_LoadWAV filename)))
     (unless chunk
       (Scm_Error "Mix_LoadWAV failed: %s" (Mix_GetError)))
     (let* ((gsound::GrvSound* (SCM_NEW (.type GrvSound)))
-           (sound (MAKE_GRV_SOUND gsound)))
+           (sound (GRV_SOUND_BOX gsound)))
       (set! (-> gsound chunk) chunk)
       (Scm_RegisterFinalizer sound finalize-sound NULL)
       (return sound))))
 
 (define-cproc play-sound (sound :key (channel #f))
   ::(<top> <int>)
-  (unless (GRV_SOUND_P sound)
+  (unless (GRV_SOUNDP sound)
     (Scm_Error "<graviton-sound> required, but got %S" sound))
 
   (let* ((which::int))
     (cond
       ((SCM_INTP channel)
        (set! which (SCM_INT_VALUE channel))
-       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+       (unless (and (<= 0 which) (< which GRV_CHANNEL_SIZE))
          (Scm_Error "channel out of range: %d" which)))
       ((SCM_FALSEP channel)
        (set! which (find-available-channel))
@@ -100,6 +117,8 @@
          (Scm_Error "no available channels")))
       (else
        (Scm_Error "<integer> or #f required, but got %S" channel)))
+
+    (Mix_ChannelFinished finish-sound)
 
     (stop-sound which)
     (let* ((sound-context::GrvSoundContext* (SCM_NEW (.type GrvSoundContext))))
@@ -116,11 +135,11 @@
   (cond
     ((SCM_FALSEP channel)
      (let* ((i::int))
-       (for ((set! i 0) (< i CHANNEL_SIZE) (inc! i))
+       (for ((set! i 0) (< i GRV_CHANNEL_SIZE) (inc! i))
          (stop-sound i))))
     ((SCM_INTP channel)
      (let* ((which::int (SCM_INT_VALUE channel)))
-       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+       (unless (and (<= 0 which) (< which GRV_CHANNEL_SIZE))
          (Scm_Error "channel out of range: %d" which))
        (stop-sound which)))
     (else
@@ -133,7 +152,7 @@
      (return (Mix_Playing -1)))
     ((SCM_INTP channel)
      (let* ((which::int (SCM_INT_VALUE channel)))
-       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+       (unless (and (<= 0 which) (< which GRV_CHANNEL_SIZE))
          (Scm_Error "channel out of range: %d" which))
        (return (Mix_Playing which))))
     (else
@@ -146,7 +165,7 @@
      (Mix_Pause -1))
     ((SCM_INTP channel)
      (let* ((which::int (SCM_INT_VALUE channel)))
-       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+       (unless (and (<= 0 which) (< which GRV_CHANNEL_SIZE))
          (Scm_Error "channel out of range: %d" which))
        (Mix_Pause which)))
     (else
@@ -159,7 +178,7 @@
      (Mix_Resume -1))
     ((SCM_INTP channel)
      (let* ((which::int (SCM_INT_VALUE channel)))
-       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+       (unless (and (<= 0 which) (< which GRV_CHANNEL_SIZE))
          (Scm_Error "channel out of range: %d" which))
        (Mix_Resume which)))
     (else
@@ -172,7 +191,7 @@
      (return (Mix_Paused -1)))
     ((SCM_INTP channel)
      (let* ((which::int (SCM_INT_VALUE channel)))
-       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+       (unless (and (<= 0 which) (< which GRV_CHANNEL_SIZE))
          (Scm_Error "channel out of range: %d" which))
        (return (Mix_Paused which))))
     (else
@@ -193,7 +212,7 @@
           (SCM_INTP arg1))
      ;; arg0: channel, arg1: volume
      (let* ((which::int (SCM_INT_VALUE arg0)))
-       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+       (unless (and (<= 0 which) (< which GRV_CHANNEL_SIZE))
          (Scm_Error "channel out of range: %d" which))
        (Mix_Volume which (SCM_INT_VALUE arg1))))
     ((SCM_UNBOUNDP arg1)
@@ -208,10 +227,8 @@
      (return (Mix_Volume -1 -1)))
     ((SCM_INTP channel)
      (let* ((which::int (SCM_INT_VALUE channel)))
-       (unless (and (<= 0 which) (< which CHANNEL_SIZE))
+       (unless (and (<= 0 which) (< which GRV_CHANNEL_SIZE))
          (Scm_Error "channel out of range: %d" which))
        (return (Mix_Volume which -1))))
     (else
      (Scm_Error "<integer> or #f required, but got %S" channel))))
-
-(set! (setter sound-volume) set-sound-volume!)

@@ -36,6 +36,7 @@
 
 #include <stdbool.h>
 #include "SDL.h"
+#include "SDL_mixer.h"
 #include "gauche.h"
 
 /*
@@ -58,14 +59,14 @@ extern void Grv_DecomposeRGBA(Uint32 color, Uint8 *r, Uint8 *g, Uint8 *b, Uint8 
 #define GRV_EVENT_APPLY 3
 #define GRV_EVENT_WINDOW_UPDATE 4
 
-#define GRV_SEND_EVENT(event_code, arg0, arg1) \
-  do { \
-    SDL_Event event; \
-    event.type = Grv_CustomEventType; \
-    event.user.code = event_code; \
-    event.user.data1 = arg0; \
-    event.user.data2 = arg1; \
-    SDL_PushEvent(&event); \
+#define GRV_SEND_EVENT(event_code, arg0, arg1)  \
+  do {                                          \
+    SDL_Event event;                            \
+    event.type = Grv_CustomEventType;           \
+    event.user.code = event_code;               \
+    event.user.data1 = arg0;                    \
+    event.user.data2 = arg1;                    \
+    SDL_PushEvent(&event);                      \
   } while (0);
 
 #define GRV_APPLY(proc, args) GRV_SEND_EVENT(GRV_EVENT_APPLY, proc, args)
@@ -183,7 +184,6 @@ extern ScmClass *GrvWindowClass;
 
 extern ScmObj Grv_Windows;
 extern int Grv_FramePerSecond;
-extern ScmObj Grv_GlobalHandlerTable;
 extern void Grv_DestroyWindow(GrvWindow *gwin);
 extern void Grv_UpdateWindowContents();
 
@@ -243,6 +243,127 @@ extern ScmClass *GrvTileMapClass;
 #define GRV_TILE_MAP_PTR(obj) SCM_FOREIGN_POINTER_REF(GrvTileMap*, obj)
 #define GRV_TILE_MAPP(obj) SCM_XTYPEP(obj, GrvTileMapClass)
 #define GRV_TILE_MAP_BOX(ptr) Scm_MakeForeignPointer(GrvTileMapClass, ptr)
+
+
+/*
+ * Event
+ */
+
+extern ScmObj Grv_GlobalHandlerTable;
+
+
+/*
+ * Music
+ */
+
+typedef enum {
+              SOUNDLET_TONE = 1,
+              SOUNDLET_COMPOSITE = 2,
+} GrvSoundletType;
+
+typedef enum {
+              TONE_SILENT = 0,
+              TONE_SINE = 1,
+              TONE_SQUARE50 = 2,
+              TONE_SQUARE12 = 3,
+              TONE_SQUARE25 = 4,
+              TONE_TRIANGLE = 5,
+              TONE_SAWTOOTH = 6,
+              TONE_LONG_NOISE = 7,
+              TONE_SHORT_NOISE = 8,
+} GrvToneType;
+
+struct GrvSoundletRec;
+
+typedef struct GrvToneSoundletRec {
+  GrvToneType type;
+  double *freqs;
+  double *amps;
+  int num_freqs;
+  double left_volume;
+  double right_volume;
+  int attack_time;   // sec * 44100
+  int decay_time;    // sec * 44100
+  double sustain_level;
+  int release_time;  // sec * 44100
+} GrvToneSoundlet;
+
+typedef struct GrvCompositeSoundletRec {
+  struct GrvSoundletRec **children;
+  int num_children;
+} GrvCompositeSoundlet;
+
+typedef struct GrvSoundletRec {
+  struct GrvSoundletRec *next;
+  GrvSoundletType type;
+  int length;
+  union {
+    GrvToneSoundlet* tone;
+    GrvCompositeSoundlet* composite;
+  } data;
+} GrvSoundlet;
+
+extern ScmClass *GrvSoundletClass;
+#define GRV_SOUNDLET_PTR(obj) SCM_FOREIGN_POINTER_REF(GrvSoundlet*, obj)
+#define GRV_SOUNDLETP(obj) SCM_XTYPEP(obj, GrvSoundletClass)
+#define GRV_SOUNDLET_BOX(ptr) Scm_MakeForeignPointer(GrvSoundletClass, ptr)
+
+typedef struct GrvSoundletContextRec {
+  int start_position;
+  GrvSoundlet *soundlet;
+} GrvSoundletContext;
+
+typedef struct GrvMMLMusicContextRec {
+  int position;
+  GrvSoundletContext **soundlet_contexts;
+  int num_soundlet_contexts;
+  ScmObj future;
+} GrvMMLMusicContext;
+
+typedef struct GrvMMLMusicContextQueueRec {
+  GrvMMLMusicContext **buf;
+  int length;
+  int start;
+  int end;
+} GrvMMLMusicContextQueue;
+
+typedef struct GrvMusicRec {
+  Mix_Music *music;
+} GrvMusic;
+
+extern ScmClass *GrvMusicClass;
+#define GRV_MUSIC_PTR(obj) SCM_FOREIGN_POINTER_REF(GrvMusic*, obj)
+#define GRV_MUSICP(obj) SCM_XTYPEP(obj, GrvMusicClass)
+#define GRV_MUSIC_BOX(ptr) Scm_MakeForeignPointer(GrvMusicClass, ptr)
+
+typedef struct GrvMusicContextRec {
+  ScmObj music;
+  ScmObj future;
+} GrvMusicContext;
+
+extern Uint32 Grv_MusicLastFinishedTick;
+extern bool Grv_IsPlayingMML();
+
+
+/*
+ * Sound
+ */
+
+typedef struct GrvSoundRec {
+  Mix_Chunk *chunk;
+} GrvSound;
+
+extern ScmClass *GrvSoundClass;
+#define GRV_SOUND_PTR(obj) SCM_FOREIGN_POINTER_REF(GrvSound*, obj)
+#define GRV_SOUNDP(obj) SCM_XTYPEP(obj, GrvSoundClass)
+#define GRV_SOUND_BOX(ptr) Scm_MakeForeignPointer(GrvSoundClass, ptr)
+
+typedef struct GrvSoundContextRec {
+  ScmObj sound;
+  ScmObj future;
+} GrvSoundContext;
+
+#define GRV_CHANNEL_SIZE 16
 
 
 #endif /* GRAVITON_H */

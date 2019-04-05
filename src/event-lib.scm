@@ -30,7 +30,30 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
+(select-module graviton.event)
+
 (inline-stub
+ (declcode
+  (.include "SDL.h"
+            "SDL_mixer.h"
+            "gauche.h"
+            "graviton.h"
+            "stdbool.h")
+
+  (define-ctype EventLoopStatus::(.struct
+                                  (lock::SDL_SpinLock
+                                   running?::bool))))
+
+ (define-cvar Grv_GlobalHandlerTable)
+ (define-cvar event-loop-status::EventLoopStatus :static)
+ (define-cvar main-thunk-finished?::bool :static)
+
+ (initcode
+  (set! Grv_GlobalHandlerTable (Scm_MakeHashTableSimple SCM_HASH_EQ 16)
+        Grv_MusicLastFinishedTick 0
+        (ref event-loop-status lock) 0
+        (ref event-loop-status running?) false))
+
  (define-cfn id->window (window-id::Uint32)
    ::ScmObj
    (for-each (lambda (win)
@@ -244,7 +267,7 @@
                    (Scm_Error "uncaught exception: %S" exception)))))
              ((GRV_EVENT_MML_FINISH)
               (Mix_HookMusic NULL NULL)
-              (set! music-last-finished-tick (SDL_GetTicks)))
+              (set! Grv_MusicLastFinishedTick (SDL_GetTicks)))
              ((GRV_EVENT_APPLY)
               (set! proc (ref (-> sdl-event user) data1)
                     args (ref (-> sdl-event user) data2)))
@@ -287,6 +310,8 @@
  (.define MUSIC_FINISHED_GRACE_PERIOD 200)
  )  ;; end of inline-stub
 
+(include "enum2sym.scm")
+
 (define-cproc notify-exception (exception)
   ::<void>
   (GRV_SEND_EVENT GRV_EVENT_EXCEPTION exception NULL))
@@ -310,10 +335,10 @@
     (while (logior (SDL_PollEvent NULL)
                    (not main-thunk-finished?)
                    (not (SCM_NULLP Grv_Windows))
-                   (or (playing-mml?)
+                   (or (Grv_IsPlayingMML)
                        (Mix_PlayingMusic)
                        (Mix_Playing -1)
-                       (< (SDL_GetTicks) (+ music-last-finished-tick MUSIC_FINISHED_GRACE_PERIOD))))
+                       (< (SDL_GetTicks) (+ Grv_MusicLastFinishedTick MUSIC_FINISHED_GRACE_PERIOD))))
       (let* ((event::SDL_Event))
         (when (SDL_WaitEvent (& event))
           (process-event (& event)))))
@@ -327,83 +352,3 @@
 (define (set-global-handler! event proc)
   (hash-table-set! (Grv_GlobalHandlerTable) event proc))
 
-(define-macro (define-on-window-event-macros :rest events)
-  `(begin
-     ,@(map (lambda (event)
-              (let1  on-event (string->symbol (format "on-~a" event))
-                `(define-syntax ,on-event
-                   (syntax-rules ()
-                     ((_ window (arg ...) body ...)
-                      (set-window-handler! window ',event
-                        (lambda (window arg ...)
-                          body ...)))))))
-            events)))
-
-(define-macro (define-on-global-event-macros :rest events)
-  `(begin
-     ,@(map (lambda (event)
-              (let1  on-event (string->symbol (format "on-~a" event))
-                `(define-syntax ,on-event
-                   (syntax-rules ()
-                     ((_ (arg ...) body ...)
-                      (set-global-handler! ',event
-                        (lambda (arg ...)
-                          body ...)))))))
-            events)))
-
-(define-on-window-event-macros
-  window-shown
-  window-hidden
-  window-exposed
-  window-moved
-  window-resized
-  window-size-changed
-  window-minimized
-  window-maximized
-  window-restored
-  window-enter
-  window-leave
-  window-focus-gained
-  window-focus-lost
-  window-close
-  window-take-focus
-  window-hit-test
-  key-down
-  key-up
-  text-editing
-  text-input
-  mouse-motion
-  mouse-button-down
-  mouse-button-up
-  mouse-wheel
-  drop-file
-  drop-text
-  drop-begin
-  drop-complete
-  update
-  ) ;; end of define-on-window-event-macros
-
-(define-on-global-event-macros
-  joystick-axis-motion
-  joystick-ball-motion
-  joystick-hat-motion
-  joystick-button-down
-  joystick-button-up
-  joystick-device-added
-  joystick-device-removed
-  controller-axis-motion
-  controller-button-down
-  controller-button-up
-  controller-device-added
-  controller-device-removed
-  controller-device-remapped
-  audio-device-added
-  audio-device-removed
-  quit
-  finger-motion
-  finger-down
-  finger-up
-  multi-gesture
-  dollar-gesture
-  dollar-record
-  ) ;; end of define-on-global-event-macros

@@ -30,14 +30,47 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
+(select-module graviton.audio)
 
 ;;;
 ;;; MML
 ;;;
 
 (inline-stub
- (define-cfn playing-mml? ()
-   ::bool :static
+ (declcode
+  (.include "SDL.h"
+            "SDL_mixer.h"
+            "gauche.h"
+            "graviton.h"
+            "stdbool.h"
+            "string.h"))
+
+ (.define MML_MUSIC_CONTEXT_INITIAL_LENGTH 16)
+ (.define NOISE_TABLE_SIZE 32768)
+
+ (define-cvar Grv_MusicLastFinishedTick::Uint32)
+ (define-cvar mml-music-context-queue::GrvMMLMusicContextQueue :static)
+ (define-cvar mml-paused?::bool :static)
+ (define-cvar playing-music-context::GrvMusicContext* :static)
+ (define-cvar noise-table::double* :static)
+
+ (initcode
+  (set! (ref mml-music-context-queue buf) (SCM_NEW_ARRAY (.type GrvMMLMusicContext*) MML_MUSIC_CONTEXT_INITIAL_LENGTH)
+        (ref mml-music-context-queue length) MML_MUSIC_CONTEXT_INITIAL_LENGTH
+        (ref mml-music-context-queue start) 0
+        (ref mml-music-context-queue end) 0
+        mml-paused? false)
+  (dotimes (i (ref mml-music-context-queue length))
+    (set! (aref (ref mml-music-context-queue buf) i) NULL))
+
+  (set! noise-table (SCM_NEW_ATOMIC_ARRAY (.type double) NOISE_TABLE_SIZE))
+  (dotimes (i NOISE_TABLE_SIZE)
+    (set! (aref noise-table i) (* (- (/ (cast double (random)) RAND_MAX) 0.5) 2.0)))
+
+  (set! playing-music-context NULL))
+
+ (define-cfn Grv_IsPlayingMML ()
+   ::bool
    (return (!= (Mix_GetMusicHookData) NULL)))
 
  (define-cfn enqueue-mml-music-context! (gcontext::GrvMMLMusicContext*)
@@ -321,7 +354,7 @@
           (i::int 0))
      (when (and mml-paused?
                 (GRV_FUTUREP (-> gcontext future)))
-     (return))
+       (return))
 
      (while (< i buf-length)
        (render-context buf i gcontext)
@@ -389,6 +422,8 @@
      (return len)))
  ) ;; end of inline-stub
 
+(include "types.scm")
+
 (define-cproc make-soundlet (type
                              freqs::<f64vector>
                              amps::<f64vector>
@@ -405,7 +440,7 @@
   (let* ((length::int (cast int (round (* 44100 sec))))
          (gtone::GrvToneSoundlet* (SCM_NEW GrvToneSoundlet))
          (gsoundlet::GrvSoundlet* (SCM_NEW GrvSoundlet))
-         (tone-type::ToneType))
+         (tone-type::GrvToneType))
     (cond
       ((SCM_EQ type 'silent)
        (set! tone-type TONE_SILENT))
@@ -459,7 +494,7 @@
     (let* ((i::int 0)
            (max-len::int 0))
       (for-each (lambda (child)
-                  (unless (GRV_SOUNDLET_P child)
+                  (unless (GRV_SOUNDLETP child)
                     (Scm_Error "<graviton-soundlet> required, but got %S" child))
                   (let* ((child-gsoundlet::GrvSoundlet* (GRV_SOUNDLET_PTR child))
                          (len::int 0))
@@ -492,7 +527,7 @@
       (set! (aref (-> gcontext soundlet-contexts) i) NULL))
     (retain-soundlet! gcontext gsoundlet 0)
     (cond
-      ((playing-mml?)
+      ((Grv_IsPlayingMML)
        (enqueue-mml-music-context! gcontext))
       (else
        (Mix_HookMusic fill-audio-stream gcontext)))
@@ -513,287 +548,6 @@
     (fill-audio-stream gcontext (cast Uint8* (SCM_S16VECTOR_ELEMENTS buf)) (* len 2 (sizeof int16_t)))
     (return buf)))
 
-(define (pitch n)
-  (* 440 (expt 2 (/. (- n 69) 12))))
-
-(define-record-type (<envelope> (pseudo-rtd <list>))
-  make-envelope envelope?
-  (attack-time envelope-attack-time)
-  (decay-time envelope-decay-time)
-  (sustain-level envelope-sustain-level)
-  (release-time envelope-release-time))
-
-(define (generate-make-simple-tone type)
-  (lambda (freq amp-factor vols sec envelope)
-    (make-soundlet type
-                   (make-f64vector 1 freq)
-                   (make-f64vector 1 amp-factor)
-                   (list-ref vols 0)
-                   (list-ref vols 1)
-                   sec
-                   (envelope-attack-time envelope)
-                   (envelope-decay-time envelope)
-                   (envelope-sustain-level envelope)
-                   (envelope-release-time envelope))))
-
-(define make-default-tone (generate-make-simple-tone 'sine))
-(define (make-silent sec)
-  (make-soundlet 'silent #f64() #f64() 0 0 sec 0 0 0 0))
-(define default-envelope (make-envelope 0 0 1.0 0))
-
-(define (merge-soundlet seq)
-  (fold (lambda (former latter)
-          (when latter
-            (append-soundlet! former latter))
-          former)
-        #f
-        seq))
-
-(define (stereo-volumes panning)
-  (list (cos (* pi/4 (+ panning 1)))
-        (sin (* pi/4 (+ panning 1)))))
-
-(define (compile-mml context seq mml cont)
-  (match mml
-    (()
-     (cont context seq))
-    ((('wave type freq vel sec) rest ...)
-     (let ((make-tone (generate-make-simple-tone type))
-           (vols (stereo-volumes (assoc-ref context 'panning 0)))
-           (envelope (assoc-ref context 'envelope default-envelope)))
-       (compile-mml
-         context
-         (cons (make-tone freq vel vols sec envelope) seq)
-         rest
-         cont)))
-    ((('note n v sec) rest ...)
-     (let ((make-tone (assoc-ref context 'make-tone make-default-tone))
-           (vols (stereo-volumes (assoc-ref context 'panning 0)))
-           (envelope (assoc-ref context 'envelope default-envelope)))
-       (compile-mml
-         context
-         (cons (make-tone (pitch n) v vols sec envelope) seq)
-         rest
-         cont)))
-    ((('rest sec) rest ...)
-     (compile-mml
-       context
-       (cons (make-silent sec) seq)
-       rest
-       cont))
-    ((('compose mmls ...) rest ...)
-     (compile-mml
-       context
-       (cons (compose-soundlets (filter values (map (lambda (mml)
-                                                      (compile-mml context '() mml (lambda (_ seq)
-                                                                                     (merge-soundlet seq))))
-                                                    mmls)))
-             seq)
-       rest
-       cont))
-    ((('begin mml ...) rest ...)
-     (let1 current-context (map (lambda (pair)
-                                  (list-copy pair))
-                                context)
-       (compile-mml context seq mml (lambda (context seq)
-                                      (compile-mml current-context seq rest cont)))))
-    ((('pan v) rest ...)
-     (compile-mml
-       (assoc-set! context 'panning v)
-       seq
-       rest
-       cont))
-    ((('tone (? symbol? type)) rest ...)
-     (compile-mml
-       (assoc-set! context 'make-tone (generate-make-simple-tone type))
-       seq
-       rest
-       cont))
-    ((('tone (freq-coff amp) ...) rest ...)
-     (compile-mml
-       (assoc-set! context 'make-tone (lambda (freq amp-factor vols sec envelope)
-                                        (make-soundlet type
-                                                       (list->f64vector (map (cut (* freq <>)) freq-coff))
-                                                       (list->f64vector (map (^x (* amp amp-factor)) amp))
-                                                       (list-ref vols 0)
-                                                       (list-ref vols 1)
-                                                       sec
-                                                       (envelope-attack-time envelope)
-                                                       (envelope-decay-time envelope)
-                                                       (envelope-sustain-level envelope)
-                                                       (envelope-release-time envelope))))
-       seq
-       rest
-       cont))
-    ((('envelope attack-time decay-time sustain-level release-time) rest ...)
-     (compile-mml
-       (assoc-set! context 'envelope (make-envelope attack-time decay-time sustain-level release-time))
-       seq
-       rest
-       cont))
-    ((('length n) rest ...)
-     (compile-mml
-       (assoc-set! context 'length (/ 1 n))
-       seq
-       rest
-       cont))
-    ((('velocity v) rest ...)
-     (compile-mml
-       (assoc-set! context 'amp-factor v)
-       seq
-       rest
-       cont))
-    ((('tempo n) rest ...)
-     (compile-mml
-       (assoc-set! context 'tempo-factor (* (/ 60 n) 4))
-       seq
-       rest
-       cont))
-    ((('tempo n m) rest ...)
-     (compile-mml
-       (assoc-set! context 'tempo-factor (* (/ 60 n) m))
-       seq
-       rest
-       cont))
-    ((('octave n) rest ...)
-     (compile-mml
-       (assoc-set! context 'octave n)
-       seq
-       rest
-       cont))
-    (((? symbol? note-spec) rest ...)
-     (compile-mml
-       context
-       (cons (note-spec->soundlet context (symbol->string note-spec)) seq)
-       rest
-       cont))
-    (((? string? note-spec) rest ...)
-     (compile-mml
-       context
-       (cons (note-spec->soundlet context note-spec) seq)
-       rest
-       cont))
-    (else
-     (errorf "Invalied mml: ~s" mml))))
-
-(define parse-note
-  (let* ((basic-note ($or ($string "c")
-                          ($string "d")
-                          ($string "e")
-                          ($string "f")
-                          ($string "g")
-                          ($string "a")
-                          ($string "b")
-                          ($string "r")))
-         (note ($do (bn basic-note)
-                    (qual ($optional ($or ($string "+") ($string "-"))))
-                    ($return (string-append (rope->string bn) (or (rope->string qual) "")))))
-         (chord ($many note))
-         (len ($do (digits ($many ($one-of #[\d])))
-                   (qual ($many ($string "+")))
-                   ($return (cond
-                              ((null? digits)
-                               #f)
-                              (else
-                               digits (let1 basic-len (/ 1 (string->number (apply string digits)))
-                                        (* basic-len (sum-ec (: i (+ (length qual) 1))
-                                                             (/ 1 (expt 2 i))))))))))
-         (chord+len ($do (ns chord)
-                         (l ($optional len))
-                         ($return (list ns l)))))
-    (lambda (str)
-      (call-with-input-string str
-        (lambda (in)
-          (begin0
-            (peg-parse-port chord+len in)
-            (unless (eof-object? (read-char in))
-              (errorf "Invalid note: ~s" str))))))))
-
-(define note->pitch
-  (let1 table '(("c-" . -1)
-                ("c" . 0)
-                ("c+" . 1)
-                ("d-" . 1)
-                ("d" . 2)
-                ("d+" . 3)
-                ("e-" . 3)
-                ("e" . 4)
-                ("e+" . 5)
-                ("f-" . 4)
-                ("f" . 5)
-                ("f+" . 6)
-                ("g-" . 6)
-                ("g" . 7)
-                ("g+" . 8)
-                ("a-" . 8)
-                ("a" . 9)
-                ("a+" . 10)
-                ("b-" . 10)
-                ("b" . 11)
-                ("b+" . 12))
-    (lambda (octave note)
-      (if (equal? note "r")
-          #f
-          (+ (* 12 (+ octave 1)) (assoc-ref table note))))))
-
-(define (note-spec->soundlet context str)
-  (match-let1 ((notes ...) len) (parse-note str)
-    (let ((sec (* (assoc-ref context 'tempo-factor 4)
-                  (or len (assoc-ref context 'length (/ 1 4)))))
-          (octave (assoc-ref context 'octave 4))
-          (make-tone (assoc-ref context 'make-tone make-default-tone))
-          (vols (stereo-volumes (assoc-ref context 'panning 0)))
-          (amp-factor (assoc-ref context 'amp-factor 1.0))
-          (envelope (assoc-ref context 'envelope default-envelope)))
-      (receive (pitches _) (fold2 (lambda (note pitches prev-pitch)
-                                    (let1 pitch-num (let1 p (note->pitch octave note)
-                                                      (cond
-                                                        ((not p)
-                                                         #f)
-                                                        ((<= prev-pitch p)
-                                                         p)
-                                                        (else
-                                                         (+ p 12))))
-                                      (values (cons pitch-num pitches)
-                                              (or pitch-num prev-pitch))))
-                                  '()
-                                  (least-fixnum)
-                                  notes)
-        (compose-soundlets (map (lambda (pitch-num)
-                                  (if pitch-num
-                                      (make-tone (pitch pitch-num) amp-factor vols sec envelope)
-                                      (make-silent sec)))
-                                pitches))))))
-
-(define (play-mml mml)
-  (play-soundlet (compile-mml '() '() mml (lambda (context seq)
-                                            (merge-soundlet seq)))))
-
-(define (beep :optional (freq 2000) (velocity 1.0) (len 0.1))
-  (play-mml `((wave square ,freq ,velocity ,len))))
-
-(define (save-mml filename mml)
-  (let* ((soundlet (compile-mml '() '() mml (lambda (context seq)
-                                              (merge-soundlet seq))))
-         (wave-data (soundlet->wave-data soundlet)))
-    (call-with-output-file filename
-      (lambda (out)
-        (pack "A4LA4A4LSSLLSSA4L"
-              `("RIFF"                                             ;; RIFF header
-                ,(+ 4 4 16 4 4 (* (s16vector-length wave-data) 2)) ;; filesize - 8
-                "WAVE"                                             ;; WAVE header
-                "fmt "                                             ;; fmt chunk
-                16                                                 ;; chunk size
-                1                                                  ;; PCM
-                2                                                  ;; num of channel
-                44100                                              ;; sampling rate
-                ,(* 44100 2 2)                                     ;; byte rate
-                4                                                  ;; block align
-                16                                                 ;; bits per sample
-                "data"                                             ;; data chunk
-                ,(* (s16vector-length wave-data) 2))
-              :output out)
-        (write-uvector wave-data out)))))
 
 
 ;;;
@@ -803,7 +557,7 @@
 (inline-stub
  (define-cfn finalize-music (z data::void*)
    ::void
-   (when (GRV_MUSIC_P z)
+   (when (GRV_MUSICP z)
      (let* ((gmusic::GrvMusic* (GRV_MUSIC_PTR z)))
        (Mix_FreeMusic (-> gmusic music))
        (set! (-> gmusic music) NULL))))
@@ -822,7 +576,7 @@
      (when music-context
        (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> music-context future))))
          (Grv_SetFutureResult gfuture (SCM_LIST1 'finished) false)
-         (set! music-last-finished-tick (SDL_GetTicks))))))
+         (set! Grv_MusicLastFinishedTick (SDL_GetTicks))))))
 
  (define-cfn stop-music ()
    ::void
@@ -830,7 +584,7 @@
      (when music-context
        (let* ((gfuture::GrvFuture* (GRV_FUTURE_PTR (-> music-context future))))
          (Grv_SetFutureResult gfuture (SCM_LIST1 'stopped) false)
-         (set! music-last-finished-tick (SDL_GetTicks)))))
+         (set! Grv_MusicLastFinishedTick (SDL_GetTicks)))))
    (Mix_HaltMusic))
  ) ;; end of inline-stub
 
@@ -839,14 +593,16 @@
     (unless mmusic
       (Scm_Error "Mix_LoadMUS failed: %s" (Mix_GetError)))
     (let* ((gmusic::GrvMusic* (SCM_NEW (.type GrvMusic)))
-           (music (MAKE_GRV_MUSIC gmusic)))
+           (music (GRV_MUSIC_BOX gmusic)))
       (set! (-> gmusic music) mmusic)
       (Scm_RegisterFinalizer music finalize-music NULL)
       (return music))))
 
 (define-cproc play-music (music)
-  (unless (GRV_MUSIC_P music)
+  (unless (GRV_MUSICP music)
     (Scm_Error "<graviton-music> required, but got %S" music))
+
+  (Mix_HookMusicFinished finish-music)
 
   (stop-mml)
   (stop-music)
@@ -863,7 +619,7 @@
 (define-cproc stop-music ()
   ::<void>
   (cond
-    ((playing-mml?)
+    ((Grv_IsPlayingMML)
      (stop-mml))
     (else
      (stop-music))))
@@ -871,7 +627,7 @@
 (define-cproc pause-music ()
   ::<void>
   (cond
-    ((playing-mml?)
+    ((Grv_IsPlayingMML)
      (pause-mml))
     (else
      (Mix_PauseMusic))))
@@ -879,7 +635,7 @@
 (define-cproc resume-music ()
   ::<void>
   (cond
-    ((playing-mml?)
+    ((Grv_IsPlayingMML)
      (resume-mml))
     (else
      (Mix_ResumeMusic))))
@@ -887,7 +643,7 @@
 (define-cproc playing-music? ()
   ::<boolean>
   (cond
-    ((playing-mml?)
+    ((Grv_IsPlayingMML)
      (return true))
     (else
      (return (Mix_PlayingMusic)))))
@@ -895,7 +651,7 @@
 (define-cproc paused-music? ()
   ::<boolean>
   (cond
-    ((playing-mml?)
+    ((Grv_IsPlayingMML)
      (return (paused-mml?)))
     (else
      (return (Mix_PausedMusic)))))
@@ -908,4 +664,3 @@
   ::<int>
   (return (Mix_VolumeMusic -1)))
 
-(set! (setter music-volume) set-music-volume!)

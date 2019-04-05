@@ -47,7 +47,9 @@
   (use gauche.uvector)
   (use gauche.vport)
   (use graviton.async)
+  (use graviton.audio)
   (use graviton.color)
+  (use graviton.event)
   (use graviton.video)
   (use math.const)
   (use parser.peg)
@@ -292,113 +294,7 @@
             "stdbool.h"
             "stdio.h"
             "string.h")
-
-  (define-ctype EventLoopStatus::(.struct
-                                  (lock::SDL_SpinLock
-                                   running?::bool)))
-  "
-typedef enum {
-    SOUNDLET_TONE = 1,
-    SOUNDLET_COMPOSITE = 2,
-} SoundletType;
-
-typedef enum {
-    TONE_SILENT = 0,
-    TONE_SINE = 1,
-    TONE_SQUARE50 = 2,
-    TONE_SQUARE12 = 3,
-    TONE_SQUARE25 = 4,
-    TONE_TRIANGLE = 5,
-    TONE_SAWTOOTH = 6,
-    TONE_LONG_NOISE = 7,
-    TONE_SHORT_NOISE = 8,
-} ToneType;
-
-struct GrvSoundletRec;
-
-typedef struct {
-    ToneType type;
-    double *freqs;
-    double *amps;
-    int num_freqs;
-    double left_volume;
-    double right_volume;
-    int attack_time;   // sec * 44100
-    int decay_time;    // sec * 44100
-    double sustain_level;
-    int release_time;  // sec * 44100
-} GrvToneSoundlet;
-
-typedef struct {
-    struct GrvSoundletRec **children;
-    int num_children;
-} GrvCompositeSoundlet;
-
-typedef struct GrvSoundletRec {
-    struct GrvSoundletRec *next;
-    SoundletType type;
-    int length;
-    union {
-        GrvToneSoundlet* tone;
-        GrvCompositeSoundlet* composite;
-    } data;
-} GrvSoundlet;
-"
-  (define-ctype GrvSoundletContext::(.struct
-                                     (start-position::int
-                                      soundlet::GrvSoundlet*)))
-
-  (define-ctype GrvMMLMusicContext::(.struct
-                                     (position::int
-                                      soundlet-contexts::GrvSoundletContext**
-                                      num-soundlet-contexts::int
-                                      future)))
-
-  (define-ctype GrvMMLMusicContextQueue::(.struct
-                                          (buf::GrvMMLMusicContext**
-                                           length::int
-                                           start::int
-                                           end::int)))
-
-  (define-ctype GrvMusic::(.struct
-                           (music::Mix_Music*)))
-
-  (define-ctype GrvMusicContext::(.struct
-                                  (music
-                                   future)))
-
-  (define-ctype GrvSound::(.struct
-                           (chunk::Mix_Chunk*)))
-
-  (define-ctype GrvSoundContext::(.struct
-                                  (sound
-                                   future)))
-
   ) ;; end of declcode
-
- (define-cvar event-loop-status::EventLoopStatus)
- (define-cvar mml-music-context-queue::GrvMMLMusicContextQueue :static)
- (define-cvar mml-paused?::bool :static)
- (define-cvar playing-music-context::GrvMusicContext* :static)
- (define-cvar noise-table::double* :static)
- (define-cvar music-last-finished-tick::Uint32 :static)
- (define-cvar playing-sound-contexts::GrvSoundContext** :static)
- (define-cvar main-thunk-finished?::bool :static)
- (define-cvar Grv_GlobalHandlerTable)
-
- (define-cptr <graviton-soundlet> :private
-   "GrvSoundlet*" "GravitonSoundletClass" "GRV_SOUNDLET_P" "MAKE_GRV_SOUNDLET" "GRV_SOUNDLET_PTR")
-
- (define-cptr <graviton-music> :private
-   "GrvMusic*" "GravitonMusicClass" "GRV_MUSIC_P" "MAKE_GRV_MUSIC" "GRV_MUSIC_PTR")
-
- (define-cptr <graviton-sound> :private
-   "GrvSound*" "GravitonSoundClass" "GRV_SOUND_P" "MAKE_GRV_SOUND" "GRV_SOUND_PTR")
-
- (.define MML_MUSIC_CONTEXT_INITIAL_LENGTH 16)
- (.define NOISE_TABLE_SIZE 32768)
- (.define CHANNEL_SIZE 16)
-
  )  ;; end of inline-stub
 
 (include "types.scm")
@@ -421,29 +317,7 @@ typedef struct GrvSoundletRec {
 
    (Scm_AddCleanupHandler teardown-libs NULL)
 
-   (set! Grv_GlobalHandlerTable (Scm_MakeHashTableSimple SCM_HASH_EQ 16))
-   (set! (ref event-loop-status lock) 0
-         (ref event-loop-status running?) false)
-
-   (set! (ref mml-music-context-queue buf) (SCM_NEW_ARRAY (.type GrvMMLMusicContext*) MML_MUSIC_CONTEXT_INITIAL_LENGTH)
-         (ref mml-music-context-queue length) MML_MUSIC_CONTEXT_INITIAL_LENGTH
-         (ref mml-music-context-queue start) 0
-         (ref mml-music-context-queue end) 0
-         mml-paused? false)
-   (dotimes (i (ref mml-music-context-queue length))
-     (set! (aref (ref mml-music-context-queue buf) i) NULL))
-
-   (set! noise-table (SCM_NEW_ATOMIC_ARRAY (.type double) NOISE_TABLE_SIZE))
-   (dotimes (i NOISE_TABLE_SIZE)
-     (set! (aref noise-table i) (* (- (/ (cast double (random)) RAND_MAX) 0.5) 2.0)))
-
-   (set! music-last-finished-tick 0
-         playing-music-context NULL)
-   (Mix_HookMusicFinished finish-music)
-
-   (Mix_AllocateChannels CHANNEL_SIZE)
-   (set! playing-sound-contexts (SCM_NEW_ARRAY (.type GrvSoundContext*) CHANNEL_SIZE))
-   (Mix_ChannelFinished finish-sound)
+   (Mix_AllocateChannels GRV_CHANNEL_SIZE)
 
    ) ;; end of initialize-libs
 
@@ -455,11 +329,7 @@ typedef struct GrvSoundletRec {
 ;;;
 ;;;
 
-(include "enum2sym.scm")
-(include "event.scm")
 (include "messagebox.scm")
-(include "music.scm")
-(include "sound.scm")
 (include "repl.scm")
 
 ;;;
