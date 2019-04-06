@@ -247,8 +247,6 @@
           draw-polygon
           draw-circle
 
-          message-box
-
           play-mml
           beep
           save-mml
@@ -326,13 +324,6 @@
  ) ;; end of inline-stub
 
 ;;;
-;;;
-;;;
-
-(include "messagebox.scm")
-(include "repl.scm")
-
-;;;
 ;;; Misc
 ;;;
 
@@ -393,3 +384,51 @@
                  (h (/ (window-physical-height win) 2)))
              (when (and (<= (image-width image) w) (<= (image-height image) h))
                (set-window-physical-size! win w h)))))))))
+
+
+;;;
+;;; REPL
+;;;
+
+(define %evaluator
+  (let ((%set-history-exception! (with-module gauche.interactive %set-history-exception!))
+        (%set-history-expr! (with-module gauche.interactive %set-history-expr!)))
+    (lambda (sexpr mod)
+      (guard (e (else (%set-history-exception! e)
+                      (raise e)))
+        (receive r (eval sexpr mod)
+          (%set-history-expr! r)
+          (apply values r))))))
+
+(define %prompter
+  (let1 user-module (find-module 'user)
+    (lambda ()
+      (let1 m ((with-module gauche.internal vm-current-module))
+        (if (eq? m user-module)
+            (display "graviton> ")
+            (format #t "graviton[~a]> " (module-name m)))
+        (flush)))))
+
+(define %printer
+  (with-module gauche.interactive
+    %printer))
+
+(define (%reader)
+  (cond
+    ((event-loop-running?)
+     (await (async/thread
+              (match (read)
+                (('unquote command)
+                 (with-module gauche.interactive
+                   (handle-toplevel-command command (read-line))))
+                (expr
+                 (unless (eof-object? expr)
+                   (consume-trailing-whitespaces))
+                 expr)))))
+    (else
+     (eof-object))))
+
+(define (grv-repl)
+  (grv-main
+    (lambda ()
+      (read-eval-print-loop %reader %evaluator %printer %prompter))))
