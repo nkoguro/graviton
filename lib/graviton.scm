@@ -343,31 +343,31 @@
 ;;; REPL
 ;;;
 
-(define %prompter
-  (let1 user-module (find-module 'user)
-    (lambda ()
-      (let1 m ((with-module gauche.internal vm-current-module))
-        (if (eq? m user-module)
-            (display "graviton> ")
-            (format #t "graviton[~a]> " (module-name m)))
-        (flush)))))
-
-(define (%reader)
-  (cond
-    ((event-loop-running?)
-     (await (async/thread
-              (with-module gauche.interactive
-                (%reader)))))
-    (else
-     (eof-object))))
-
 (define (grv-repl)
+  (define prompter
+    (let1 user-module (find-module 'user)
+      (lambda ()
+        (let1 m ((with-module gauche.internal vm-current-module))
+          (if (eq? m user-module)
+              (display "graviton> ")
+              (format #t "graviton[~a]> " (module-name m)))
+          (flush)))))
+
+  (define (reader)
+    (cond
+      ((event-loop-running?)
+       (await (async/thread
+                (with-module gauche.interactive
+                  (%reader)))))
+      (else
+       (eof-object))))
+
   (grv-main
     (lambda ()
       (read-eval-print-loop
-        %reader
+        reader
         (with-module gauche.interactive
           %evaluator)
         (with-module gauche.interactive
           %printer)
-        %prompter))))
+        prompter))))
