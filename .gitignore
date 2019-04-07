@@ -6,5 +6,4 @@ src/*.o
 src/*.sci
 src/*.so
 src/Makefile
-src/graviton.c
 src/*-lib.c

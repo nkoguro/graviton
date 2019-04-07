@@ -278,54 +278,7 @@
   ) ;; end of define-module
 
 (select-module graviton)
-
-(inline-stub
- (declcode
-  (.include "SDL.h"
-            "SDL_image.h"
-            "SDL_mixer.h"
-            "float.h"
-            "gauche.h"
-            "gauche/number.h"
-            "gauche/vector.h"
-            "graviton.h"
-            "stdbool.h"
-            "stdio.h"
-            "string.h")
-  ) ;; end of declcode
- )  ;; end of inline-stub
-
-(include "types.scm")
-
-(inline-stub
- (define-cfn teardown-libs (data::|void*|)
-   ::void
-   (Mix_CloseAudio)
-   (Mix_Quit)
-
-   (SDL_Quit))
-
- (define-cfn initialize-libs ()
-   ::void
-   (SDL_Init (logior SDL_INIT_VIDEO SDL_INIT_AUDIO))
-   (Mix_Init (logior MIX_INIT_FLAC MIX_INIT_MOD MIX_INIT_MP3 MIX_INIT_OGG))
-   (when (Mix_OpenAudio 44100 MIX_DEFAULT_FORMAT 2 2048)
-     (Scm_Error "Mix_OpenAudio failed: %s" (Mix_GetError)))
-   (IMG_Init (logior IMG_INIT_JPG IMG_INIT_PNG IMG_INIT_TIF))
-
-   (Scm_AddCleanupHandler teardown-libs NULL)
-
-   (Mix_AllocateChannels GRV_CHANNEL_SIZE)
-
-   ) ;; end of initialize-libs
-
- (initcode
-  (initialize-libs))
- ) ;; end of inline-stub
-
-;;;
-;;; Misc
-;;;
+(dynamic-load "graviton")
 
 (define (grv-main thunk)
   (cond

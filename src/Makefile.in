@@ -40,7 +40,20 @@ SCMFILES  = $(srcdir)/graviton.scm
 HEADERS   =
 
 TARGET    = $(ARCHFILES)
-GENERATED = graviton.sci graviton.c
+GENERATED = \
+	async-lib.c \
+	common-lib.c \
+	draw-lib.c \
+	event-lib.c \
+	graviton-lib.c \
+	image-lib.c \
+	music-lib.c \
+	png-lib.c \
+	sound-lib.c \
+	sprite-lib.c \
+	tilemap-lib.c \
+	window-lib.c \
+
 CONFIG_GENERATED = Makefile
 
 GAUCHE_PKGINCDIR  = "$(DESTDIR)@GAUCHE_PKGINCDIR@"
@@ -104,11 +117,11 @@ sound-lib.c: sound-lib.scm types.scm
 graviton-audio.$(SOEXT): graviton-audio.c music-lib.c sound-lib.c graviton.h
 	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton-audio graviton-audio.c music-lib.c sound-lib.c
 
-graviton.sci graviton.c: $(graviton_SRCS)
-	$(PRECOMP) -e $<
+graviton-lib.c: graviton-lib.scm
+	$(PRECOMP) $<
 
-graviton.$(SOEXT): graviton.c graviton.h
-	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton $<
+graviton.$(SOEXT): graviton.c graviton-lib.c graviton.h
+	$(GAUCHE_PACKAGE) compile --output=$@ --local=$(LOCAL_PATHS) --cflags="$(CFLAGS)" --libs="$(LIBS)" --verbose graviton graviton.c graviton-lib.c
 
 enum2sym.scm:
 	$(GOSH) ../scripts/genenum2sym > $@
@@ -126,7 +139,6 @@ uninstall :
 	$(INSTALL) -U $(GAUCHE_PKGLIBDIR)/.packages $(PACKAGE).gpd
 
 clean :
-	$(GAUCHE_PACKAGE) compile --clean graviton graviton.c
 	rm -rf core $(TARGET) $(GENERATED) *.o *~ test.log so_locations
 
 distclean : clean
