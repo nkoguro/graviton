@@ -36,10 +36,27 @@
  (declcode
   (.include "SDL.h"
             "gauche.h"
-            "graviton.h"))
+            "graviton.h"
+            "string.h"))
 
  (define-cvar Grv_CustomEventType::Uint32)
+
  (define-cvar global-lock::SDL_SpinLock :static)
+ (define-cvar object-pool::ScmObj* :static)
+ (define-cvar object-pool-size::int :static)
+
+ (.define OBJECT_POOL_INITIAL_SIZE 256)
+
+ (initcode
+  (set! Grv_CustomEventType (SDL_RegisterEvents 1))
+  (when (== Grv_CustomEventType #xffffffff)
+    (Scm_Error "SDL_RegisterEvents failed: %s" (SDL_GetError)))
+
+  (set! global-lock 0)
+
+  (set! object-pool-size OBJECT_POOL_INITIAL_SIZE
+        object-pool (SCM_NEW_ARRAY (.type ScmObj) object-pool-size))
+  (memset object-pool 0 (* (sizeof ScmObj) object-pool-size)))
 
  (define-cfn Grv_LockGlobal ()
    ::void
@@ -63,12 +80,37 @@
             (* b) (logand (>> color 8) #xff)
             (* a) (logand color #xff)))))
 
- (initcode
-  (set! Grv_CustomEventType (SDL_RegisterEvents 1))
-  (when (== Grv_CustomEventType #xffffffff)
-    (Scm_Error "SDL_RegisterEvents failed: %s" (SDL_GetError)))
+ (define-cfn Grv_RetainObject (obj::ScmObj)
+   ::void
+   (when (or (== obj NULL)
+             (not (SCM_PTRP obj)))
+     (return))
 
-  (set! global-lock 0))
+   (let* ((i::int))
+     (for ((set! i 0) (< i object-pool-size) (inc! i))
+       (when (== (aref object-pool i) NULL)
+         (set! (aref object-pool i) obj)
+         (return)))
+     (let* ((new-object-pool-size::int (* object-pool-size 2))
+            (new-object-pool::ScmObj* (SCM_NEW_ARRAY (.type ScmObj) new-object-pool-size)))
+       (memset new-object-pool 0 (* (sizeof ScmObj) new-object-pool-size))
+       (memmove new-object-pool object-pool object-pool-size)
+       (set! object-pool new-object-pool
+             object-pool-size new-object-pool-size)
+       (Grv_RetainObject obj))))
+
+ (define-cfn Grv_ReleaseObject (obj::ScmObj)
+   ::void
+   (when (or (== obj NULL)
+             (not (SCM_PTRP obj)))
+     (return))
+
+   (let* ((i::int))
+     (for ((set! i 0) (< i object-pool-size) (inc! i))
+       (when (== (aref object-pool i) obj)
+         (set! (aref object-pool i) NULL)
+         (return)))))
+
  ) ;; end of inline-stub
 
 

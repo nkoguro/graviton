@@ -274,6 +274,8 @@
              ((GRV_EVENT_WINDOW_UPDATE)
               (Grv_UpdateWindowContents))
              ) ;; end of case (for Grv_CustomEventType)
+           (Grv_ReleaseObject (ref (-> sdl-event user) data1))
+           (Grv_ReleaseObject (ref (-> sdl-event user) data2))
            ))  ;; end of cond
         ))     ;; end of case
      (when (SCM_PROCEDUREP proc)

@@ -48,7 +48,8 @@ extern Uint32 Grv_CustomEventType;
 extern void Grv_LockGlobal();
 extern void Grv_UnlockGlobal();
 extern void Grv_DecomposeRGBA(Uint32 color, Uint8 *r, Uint8 *g, Uint8 *b, Uint8 *a);
-
+extern void Grv_RetainObject(ScmObj obj);
+extern void Grv_ReleaseObject(ScmObj obj);
 
 /*
  * Custom Event
@@ -67,6 +68,8 @@ extern void Grv_DecomposeRGBA(Uint32 color, Uint8 *r, Uint8 *g, Uint8 *b, Uint8 
     event.user.data1 = arg0;                    \
     event.user.data2 = arg1;                    \
     SDL_PushEvent(&event);                      \
+    Grv_RetainObject(arg0);                     \
+    Grv_RetainObject(arg1);                     \
   } while (0);
 
 #define GRV_APPLY(proc, args) GRV_SEND_EVENT(GRV_EVENT_APPLY, proc, args)
