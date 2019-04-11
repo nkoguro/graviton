@@ -42,12 +42,16 @@
  (define-cvar Grv_CustomEventType::Uint32)
 
  (define-cvar global-lock::SDL_SpinLock :static)
+ (define-cvar main-thread-id::SDL_threadID :static)
+ (define-cvar event-loop-running?::bool :static)
  (define-cvar object-pool::ScmObj* :static)
  (define-cvar object-pool-size::int :static)
 
  (.define OBJECT_POOL_INITIAL_SIZE 256)
 
  (initcode
+  (set! main-thread-id (SDL_ThreadID))
+  (set! event-loop-running? false)
   (set! Grv_CustomEventType (SDL_RegisterEvents 1))
   (when (== Grv_CustomEventType #xffffffff)
     (Scm_Error "SDL_RegisterEvents failed: %s" (SDL_GetError)))
@@ -111,6 +115,29 @@
          (set! (aref object-pool i) NULL)
          (return)))))
 
+ (define-cfn Grv_SetEventLoopStatus (running?::bool)
+   ::void
+   (Grv_LockGlobal)
+   (set! event-loop-running? running?)
+   (Grv_UnlockGlobal))
+
+ (define-cfn Grv_IsEventLoopRunning ()
+   ::bool
+   (let* ((running?::bool))
+     (Grv_LockGlobal)
+     (set! running? event-loop-running?)
+     (Grv_UnlockGlobal)
+     (return running?)))
  ) ;; end of inline-stub
 
+(define-cproc on-main-thread? ()
+  ::<boolean>
+  (return (== main-thread-id (SDL_ThreadID))))
 
+(define-cproc event-loop-running? ()
+  ::<boolean>
+  (return (Grv_IsEventLoopRunning)))
+
+(define-cproc set-event-loop-running! (running?::<boolean>)
+  ::<void>
+  (Grv_SetEventLoopStatus running?))

@@ -49,6 +49,7 @@
   (use graviton.async)
   (use graviton.audio)
   (use graviton.color)
+  (use graviton.common)
   (use graviton.event)
   (use graviton.video)
   (use math.const)
@@ -69,8 +70,10 @@
 
           async
           async/thread
+          async/pool
           async-apply
           async/thread-apply
+          async/pool-apply
           await
           yield
           await-sleep

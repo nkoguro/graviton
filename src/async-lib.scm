@@ -38,16 +38,9 @@
             "gauche.h"
             "graviton.h"
             "stdbool.h"
-            "strings.h")
+            "strings.h"))
 
-  (.define MAX_MESSAGE_LENGTH 1024)
-  )
-
- (define-cvar main-thread-id::SDL_threadID :static)
-
- (initcode
-  (set! main-thread-id (SDL_ThreadID))
-  )
+ (.define MAX_MESSAGE_LENGTH 1024)
 
  (define-cfn finalize-future (z data::void*)
    ::void :static
@@ -82,7 +75,7 @@
         (set! (-> gfuture result) result
               conts (-> gfuture continuations)
               (-> gfuture continuations) SCM_NIL)
-        (SDL_CondSignal (-> gfuture cond)))
+        (SDL_CondBroadcast (-> gfuture cond)))
        (else
         (set! err? true)))
      (SDL_UnlockMutex (-> gfuture lock))
@@ -129,7 +122,7 @@
                (-> gfuture message) msg
                conts (-> gfuture continuations)
                (-> gfuture continuations) SCM_NIL)
-         (SDL_CondSignal (-> gfuture cond))))
+         (SDL_CondBroadcast (-> gfuture cond))))
       (else
        (set! err? true)))
     (SDL_UnlockMutex (-> gfuture lock))
@@ -179,10 +172,6 @@
       (for-each (lambda (cont)
                   (GRV_APPLY cont (SCM_LIST2 result exception)))
                 conts))))
-
-(define-cproc on-main-thread? ()
-  ::<boolean>
-  (return (== main-thread-id (SDL_ThreadID))))
 
 (define-cproc submit/main (thunk::<procedure>)
   ::<void>

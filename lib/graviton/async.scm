@@ -31,27 +31,26 @@
 ;;;
 
 (define-module graviton.async
+  (use control.thread-pool)
+  (use gauche.parameter)
   (use gauche.partcont)
   (use gauche.threads)
   (use graviton.common)
 
-  (export make-future
-          set-future-result!
-          set-future-exception!
-          async
-          async/thread
-          await
-          await-sleep
-          yield
-          )
+  (export-all)
   ) ;; end of define-module
 
 (select-module graviton.async)
 (dynamic-load "graviton-async")
 
+(define current-thread-pool (make-parameter #f))
+
 (define (submit/thread thunk)
-  (thread-start! (make-thread
-                   (lambda ()
+  (thread-start! (make-thread thunk)))
+
+(define (submit/pool pool thunk)
+  (add-job! pool (lambda ()
+                   (parameterize ((current-thread-pool pool))
                      (thunk)))))
 
 (define (%async-apply submit proc args)
@@ -70,6 +69,9 @@
 (define (async/thread-apply proc :rest args)
   (%async-apply submit/thread proc args))
 
+(define (async/pool-apply pool proc :rest args)
+  (%async-apply (cut submit/pool pool <>) proc args))
+
 (define-syntax async
   (syntax-rules ()
     ((_ expr ...)
@@ -80,31 +82,54 @@
     ((_ expr ...)
      (async/thread-apply (lambda () expr ...)))))
 
+(define-syntax async/pool
+  (syntax-rules ()
+    ((_ pool expr ...)
+     (async/pool-apply pool (lambda () expr ...)))))
+
 (define (await future)
-  (unless (on-main-thread?)
-    (error "await is unavailable on non-main thread."))
   (cond
     ((is-a? future <graviton-future>)
-     (receive (result exception) (shift cont
-                                   (add-future-continuation! future cont))
+     (receive (result exception) (cond
+                                   ((in-event-loop?)
+                                    (shift cont
+                                      (add-future-continuation! future cont)))
+                                   ((current-thread-pool)
+                                    (shift cont
+                                      (add-future-continuation! future (let1 pool (current-thread-pool)
+                                                                         (lambda args
+                                                                           (submit/pool pool (lambda ()
+                                                                                               (apply cont args))))))))
+                                   (else
+                                    (future-result&exception future)))
        (cond
          (result
           (apply values result))
          (exception
           (raise exception))
          (else
-          (error "[BUG] result and exception aren't specified.")))))
+          (error "[BUG] neither result nor exception is specified.")))))
     (else
      future)))
 
 (define (await-sleep sec)
-  (unless (on-main-thread?)
-    (error "await-sleep is unavailable on non-main thread."))
-  (shift cont
-    (add-cont-timer! sec (lambda ()
-                           (submit/main cont)))))
+  (cond
+    ((in-event-loop?)
+     (shift cont
+       (add-cont-timer! sec cont)))
+    ((current-thread-pool)
+     (shift cont
+       (add-cont-timer! sec (let1 pool (current-thread-pool)
+                              (lambda ()
+                                (submit/pool pool cont))))))
+    (else
+     (thread-sleep! sec))))
 
 (define (yield)
-  (unless (on-main-thread?)
-    (error "yield is unavailable on non-main thread."))
-  (shift cont (submit/main cont)))
+  (cond
+    ((in-event-loop?)
+     (shift cont (submit/main cont)))
+    ((current-thread-pool)
+     (shift cont (submit/pool (current-thread-pool) cont)))
+    (else
+     #f)))

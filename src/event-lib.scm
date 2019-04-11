@@ -38,21 +38,14 @@
             "SDL_mixer.h"
             "gauche.h"
             "graviton.h"
-            "stdbool.h")
-
-  (define-ctype EventLoopStatus::(.struct
-                                  (lock::SDL_SpinLock
-                                   running?::bool))))
+            "stdbool.h"))
 
  (define-cvar Grv_GlobalHandlerTable)
- (define-cvar event-loop-status::EventLoopStatus :static)
  (define-cvar main-thunk-finished?::bool :static)
 
  (initcode
   (set! Grv_GlobalHandlerTable (Scm_MakeHashTableSimple SCM_HASH_EQ 16)
-        Grv_MusicLastFinishedTick 0
-        (ref event-loop-status lock) 0
-        (ref event-loop-status running?) false))
+        Grv_MusicLastFinishedTick 0))
 
  (define-cfn id->window (window-id::Uint32)
    ::ScmObj
@@ -276,26 +269,12 @@
              ) ;; end of case (for Grv_CustomEventType)
            (Grv_ReleaseObject (ref (-> sdl-event user) data1))
            (Grv_ReleaseObject (ref (-> sdl-event user) data2))
-           ))  ;; end of cond
-        ))     ;; end of case
+           )) ;; end of cond
+        ))    ;; end of case
      (when (SCM_PROCEDUREP proc)
        (Scm_ApplyRec proc args))
      ) ;; end of let*
    )   ;; end of define-cfn
-
- (define-cfn set-event-loop-status (running?::bool)
-   ::void
-   (SDL_AtomicLock (& (ref event-loop-status lock)))
-   (set! (ref event-loop-status running?) running?)
-   (SDL_AtomicUnlock (& (ref event-loop-status lock))))
-
- (define-cfn event-loop-running? ()
-   ::bool
-   (let* ((running?::bool))
-     (SDL_AtomicLock (& (ref event-loop-status lock)))
-     (set! running? (ref event-loop-status running?))
-     (SDL_AtomicUnlock (& (ref event-loop-status lock)))
-     (return running?)))
 
  (define-cfn update-windows-callback (interval::Uint32 param::void*)
    ::Uint32
@@ -318,17 +297,13 @@
   ::<void>
   (GRV_SEND_EVENT GRV_EVENT_EXCEPTION exception NULL))
 
-(define-cproc event-loop-running? ()
-  ::<boolean>
-  (return (event-loop-running?)))
-
 (define-cproc set-main-thunk-finished? (flag::<boolean>)
   ::<void>
   (set! main-thunk-finished? flag))
 
 (define-cproc start-global-event-loop (thunk)
   ::<void>
-  (set-event-loop-status true)
+  (Grv_SetEventLoopStatus true)
   (SDL_StartTextInput)
 
   (GRV_APPLY thunk SCM_NIL)
@@ -346,7 +321,7 @@
           (process-event (& event)))))
     (SDL_RemoveTimer callback-id))
 
-  (set-event-loop-status false))
+  (Grv_SetEventLoopStatus false))
 
 (define-cproc global-handler-table ()
   (return Grv_GlobalHandlerTable))

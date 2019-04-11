@@ -50,6 +50,9 @@ extern void Grv_UnlockGlobal();
 extern void Grv_DecomposeRGBA(Uint32 color, Uint8 *r, Uint8 *g, Uint8 *b, Uint8 *a);
 extern void Grv_RetainObject(ScmObj obj);
 extern void Grv_ReleaseObject(ScmObj obj);
+extern void Grv_SetEventLoopStatus(bool is_running);
+extern bool Grv_IsEventLoopRunning();
+
 
 /*
  * Custom Event

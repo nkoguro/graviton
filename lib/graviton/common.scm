@@ -32,11 +32,11 @@
 
 (define-module graviton.common
 
-  (export)
-  )
+  (export-all))
 
 (select-module graviton.common)
 (dynamic-load "graviton-common")
 
-
-
+(define (in-event-loop?)
+  (and (on-main-thread?)
+       (event-loop-running?)))
