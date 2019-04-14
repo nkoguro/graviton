@@ -124,58 +124,61 @@
           grv-exit
           grv-repl
 
-          on-window-shown
-          on-window-hidden
-          on-window-exposed
-          on-window-moved
-          on-window-resized
-          on-window-size-changed
-          on-window-minimized
-          on-window-maximized
-          on-window-restored
-          on-window-enter
-          on-window-leave
-          on-window-focus-gained
-          on-window-focus-lost
-          on-window-close
-          on-window-take-focus
-          on-window-hit-test
-          on-key-down
-          on-key-up
-          on-text-editing
-          on-text-input
-          on-mouse-motion
-          on-mouse-button-down
-          on-mouse-button-up
-          on-mouse-wheel
-          on-drop-file
-          on-drop-text
-          on-drop-begin
-          on-drop-complete
-          on-update
+          window-hook
+          window-shown-hook-of
+          window-hidden-hook-of
+          window-exposed-hook-of
+          window-moved-hook-of
+          window-resized-hook-of
+          window-size-changed-hook-of
+          window-minimized-hook-of
+          window-maximized-hook-of
+          window-restored-hook-of
+          window-enter-hook-of
+          window-leave-hook-of
+          window-focus-gained-hook-of
+          window-focus-lost-hook-of
+          window-close-hook-of
+          window-take-focus-hook-of
+          window-hit-test-hook-of
+          window-update-begin-hook-of
+          window-update-complete-hook-of
+          key-down-hook-of
+          key-up-hook-of
+          text-editing-hook-of
+          text-input-hook-of
+          mouse-motion-hook-of
+          mouse-button-down-hook-of
+          mouse-button-up-hook-of
+          mouse-wheel-hook-of
+          drop-file-hook-of
+          drop-text-hook-of
+          drop-begin-hook-of
+          drop-complete-hook-of
 
-          on-joystick-axis-motion
-          on-joystick-ball-motion
-          on-joystick-hat-motion
-          on-joystick-button-down
-          on-joystick-button-up
-          on-joystick-device-added
-          on-joystick-device-removed
-          on-controller-axis-motion
-          on-controller-button-down
-          on-controller-button-up
-          on-controller-device-added
-          on-controller-device-removed
-          on-controller-device-remapped
-          on-audio-device-added
-          on-audio-device-removed
-          on-quit
-          on-finger-motion
-          on-finger-down
-          on-finger-up
-          on-multi-gesture
-          on-dollar-gesture
-          on-dollar-record
+          global-hook
+          joystick-axis-motion-hook
+          joystick-ball-motion-hook
+          joystick-hat-motion-hook
+          joystick-button-down-hook
+          joystick-button-up-hook
+          joystick-device-added-hook
+          joystick-device-removed-hook
+          controller-axis-motion-hook
+          controller-button-down-hook
+          controller-button-up-hook
+          controller-device-added-hook
+          controller-device-removed-hook
+          controller-device-remapped-hook
+          audio-device-added-hook
+          audio-device-removed-hook
+          quit-hook
+          finger-motion-hook
+          finger-down-hook
+          finger-up-hook
+          multi-gesture-hook
+          dollar-gesture-hook
+          dollar-record-hook
 
           display-image
           make-image
@@ -283,6 +286,11 @@
 (select-module graviton)
 (dynamic-load "graviton")
 
+(add-hook! make-window-hook
+  (lambda (win)
+    (add-hook! (window-close-hook-of win) destroy-window)
+    (add-hook! (window-resized-hook-of win) reflect-resized-window-parameter)))
+
 (define (grv-main thunk)
   (cond
     ((event-loop-running?)
@@ -323,23 +331,25 @@
                              :resizable? resizable?
                              :fullscreen? fullscreen?))
            (sprite (make-sprite win :image image :x (center-x win) :y (center-y win))))
-      (on-key-up win (scancode sym mod repeat?)
-        (case scancode
-          ((escape)
-           (destroy-window win))
-          ((f)
-           (set-window-fullscreen! win (not (window-fullscreen? win))))))
-      (on-text-input win (text)
-        (cond
-          ((equal? text "+")
-           (let ((w (* (window-physical-width win) 2))
-                 (h (* (window-physical-height win) 2)))
-             (set-window-physical-size! win w h)))
-          ((equal? text "-")
-           (let ((w (/ (window-physical-width win) 2))
-                 (h (/ (window-physical-height win) 2)))
-             (when (and (<= (image-width image) w) (<= (image-height image) h))
-               (set-window-physical-size! win w h)))))))))
+      (add-hook! (key-up-hook-of win)
+        (lambda (win scancode sym mod repeat?)
+          (case scancode
+            ((escape)
+             (destroy-window win))
+            ((f)
+             (set-window-fullscreen! win (not (window-fullscreen? win)))))))
+      (add-hook! (text-input-hook-of win)
+        (lambda (win text)
+          (cond
+            ((equal? text "+")
+             (let ((w (* (window-physical-width win) 2))
+                   (h (* (window-physical-height win) 2)))
+               (set-window-physical-size! win w h)))
+            ((equal? text "-")
+             (let ((w (/ (window-physical-width win) 2))
+                   (h (/ (window-physical-height win) 2)))
+               (when (and (<= (image-width image) w) (<= (image-height image) h))
+                 (set-window-physical-size! win w h))))))))))
 
 
 ;;;

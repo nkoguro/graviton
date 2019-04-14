@@ -42,6 +42,7 @@
 
  (define-cvar Grv_GlobalHandlerTable)
  (define-cvar main-thunk-finished?::bool :static)
+ (define-cvar update-all-windows :static SCM_UNDEFINED)
 
  (initcode
   (set! Grv_GlobalHandlerTable (Scm_MakeHashTableSimple SCM_HASH_EQ 16)
@@ -56,27 +57,29 @@
              Grv_Windows)
    (return SCM_FALSE))
 
- (define-cfn window-handler (win event)
+ (define-cfn window-hook (win event)
    ::ScmObj
    (when (SCM_FALSEP win)
      (return SCM_FALSE))
 
    (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
-     (let* ((handler (Scm_HashTableRef (SCM_HASH_TABLE (-> gwin handler-table)) event SCM_FALSE)))
-       (cond
-         ((SCM_PROCEDUREP handler)
-          (return handler))
-         (else
-          (return SCM_FALSE))))))
+     (return (Scm_HashTableRef (SCM_HASH_TABLE (-> gwin hook-table)) event SCM_FALSE))))
 
- (define-cfn global-handler (event)
+ (define-cfn set-window-hook! (win event hook)
+   ::void
+   (when (SCM_FALSEP win)
+     (return))
+
+   (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win)))
+     (Scm_HashTableSet (SCM_HASH_TABLE (-> gwin hook-table)) event hook 0)))
+
+ (define-cfn global-hook (event)
    ::ScmObj
-   (let* ((handler (Scm_HashTableRef (SCM_HASH_TABLE Grv_GlobalHandlerTable) event SCM_FALSE)))
-     (cond
-       ((SCM_PROCEDUREP handler)
-        (return handler))
-       (else
-        (return SCM_FALSE)))))
+   (return (Scm_HashTableRef (SCM_HASH_TABLE Grv_GlobalHandlerTable) event SCM_FALSE)))
+
+ (define-cfn set-global-hook! (event hook)
+   ::void
+   (Scm_HashTableSet (SCM_HASH_TABLE Grv_GlobalHandlerTable) event hook 0))
 
  (define-cfn process-event (sdl-event::SDL_Event*)
    ::void
@@ -87,16 +90,16 @@
         (let* ((win (id->window (ref (-> sdl-event window) windowID))))
           (case (ref (-> sdl-event window) event)
             ((SDL_WINDOWEVENT_MOVED SDL_WINDOWEVENT_RESIZED SDL_WINDOWEVENT_SIZE_CHANGED)
-             (set! proc (window-handler win (window-event->symbol (ref (-> sdl-event window) event)))
+             (set! proc (window-hook win (window-event->symbol (ref (-> sdl-event window) event)))
                    args (SCM_LIST3 win
                                    (SCM_MAKE_INT (ref (-> sdl-event window) data1))
                                    (SCM_MAKE_INT (ref (-> sdl-event window) data2)))))
             (else
-             (set! proc (window-handler win (window-event->symbol (ref (-> sdl-event window) event)))
+             (set! proc (window-hook win (window-event->symbol (ref (-> sdl-event window) event)))
                    args (SCM_LIST1 win))))))
        ((SDL_KEYDOWN SDL_KEYUP)
         (let* ((win (id->window (ref (-> sdl-event key) windowID))))
-          (set! proc (window-handler win (?: (== (-> sdl-event type) SDL_KEYDOWN) 'key-down 'key-up))
+          (set! proc (window-hook win (?: (== (-> sdl-event type) SDL_KEYDOWN) 'key-down 'key-up))
                 args (SCM_LIST5 win
                                 (scancode->symbol (ref (-> sdl-event key) keysym scancode))
                                 (keycode->symbol (ref (-> sdl-event key) keysym sym))
@@ -104,19 +107,19 @@
                                 (SCM_MAKE_BOOL (ref (-> sdl-event key) repeat))))))
        ((SDL_TEXTEDITING)
         (let* ((win (id->window (ref (-> sdl-event edit) windowID))))
-          (set! proc (window-handler win 'text-editing)
+          (set! proc (window-hook win 'text-editing)
                 args (SCM_LIST4 win
                                 (SCM_MAKE_STR_COPYING (ref (-> sdl-event edit) text))
                                 (SCM_MAKE_INT (ref (-> sdl-event edit) start))
                                 (SCM_MAKE_INT (ref (-> sdl-event edit) length))))))
        ((SDL_TEXTINPUT)
         (let* ((win (id->window (ref (-> sdl-event text) windowID))))
-          (set! proc (window-handler win 'text-input)
+          (set! proc (window-hook win 'text-input)
                 args (SCM_LIST2 win
                                 (SCM_MAKE_STR_COPYING (ref (-> sdl-event text) text))))))
        ((SDL_MOUSEMOTION)
         (let* ((win (id->window (ref (-> sdl-event motion) windowID))))
-          (set! proc (window-handler win 'mouse-motion)
+          (set! proc (window-hook win 'mouse-motion)
                 args (Scm_List win
                                (SCM_MAKE_INT (ref (-> sdl-event motion) which))
                                (mouse-button-state->symbols (ref (-> sdl-event motion) state))
@@ -127,8 +130,8 @@
                                NULL))))
        ((SDL_MOUSEBUTTONDOWN SDL_MOUSEBUTTONUP)
         (let* ((win (id->window (ref (-> sdl-event button) windowID))))
-          (set! proc (window-handler win
-                                     (?: (== (-> sdl-event type) SDL_MOUSEBUTTONDOWN) 'mouse-button-down 'mouse-button-up))
+          (set! proc (window-hook win
+                                  (?: (== (-> sdl-event type) SDL_MOUSEBUTTONDOWN) 'mouse-button-down 'mouse-button-up))
                 args (Scm_List win
                                (SCM_MAKE_INT (ref (-> sdl-event button) which))
                                (mouse-button->symbol (ref (-> sdl-event button) button))
@@ -138,74 +141,74 @@
                                NULL))))
        ((SDL_MOUSEWHEEL)
         (let* ((win (id->window (ref (-> sdl-event wheel) windowID))))
-          (set! proc (window-handler win 'mouse-wheel)
+          (set! proc (window-hook win 'mouse-wheel)
                 args (SCM_LIST5 win
                                 (SCM_MAKE_INT (ref (-> sdl-event wheel) which))
                                 (SCM_MAKE_INT (ref (-> sdl-event wheel) x))
                                 (SCM_MAKE_INT (ref (-> sdl-event wheel) y))
                                 (?: (== (ref (-> sdl-event wheel) direction) SDL_MOUSEWHEEL_NORMAL) 'normal 'flipped)))))
        ((SDL_JOYAXISMOTION)
-        (set! proc (global-handler 'joystick-axis-motion)
+        (set! proc (global-hook 'joystick-axis-motion)
               args (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event jaxis) which))
                               (SCM_MAKE_INT (ref (-> sdl-event jaxis) axis))
                               (SCM_MAKE_INT (ref (-> sdl-event jaxis) value)))))
        ((SDL_JOYBALLMOTION)
-        (set! proc (global-handler 'joystick-ball-motion)
+        (set! proc (global-hook 'joystick-ball-motion)
               args (SCM_LIST4 (SCM_MAKE_INT (ref (-> sdl-event jball) which))
                               (SCM_MAKE_INT (ref (-> sdl-event jball) ball))
                               (SCM_MAKE_INT (ref (-> sdl-event jball) xrel))
                               (SCM_MAKE_INT (ref (-> sdl-event jball) yrel)))))
        ((SDL_JOYHATMOTION)
-        (set! proc (global-handler 'joystick-hat-motion)
+        (set! proc (global-hook 'joystick-hat-motion)
               args (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event jhat) which))
                               (SCM_MAKE_INT (ref (-> sdl-event jhat) hat))
                               (hat-position->symbol (ref (-> sdl-event jhat) value)))))
        ((SDL_JOYBUTTONDOWN SDL_JOYBUTTONUP)
-        (set! proc (global-handler (?: (== (ref (-> sdl-event jbutton) type) SDL_JOYBUTTONDOWN)
-                                       'joystick-button-down
-                                       'joystick-button-up))
+        (set! proc (global-hook (?: (== (ref (-> sdl-event jbutton) type) SDL_JOYBUTTONDOWN)
+                                    'joystick-button-down
+                                    'joystick-button-up))
               args (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event jbutton) which))
                               (SCM_MAKE_INT (ref (-> sdl-event jbutton) button))
                               (state->symbol (ref (-> sdl-event jbutton) state)))))
        ((SDL_JOYDEVICEADDED SDL_JOYDEVICEREMOVED)
-        (set! proc (global-handler (?: (== (-> sdl-event type) SDL_JOYDEVICEADDED)
-                                       'joystick-device-added
-                                       'joystick-device-removed))
+        (set! proc (global-hook (?: (== (-> sdl-event type) SDL_JOYDEVICEADDED)
+                                    'joystick-device-added
+                                    'joystick-device-removed))
               args (SCM_LIST1 (SCM_MAKE_INT (ref (-> sdl-event jdevice) which)))))
        ((SDL_CONTROLLERAXISMOTION)
-        (set! proc (global-handler 'controller-axis-motion)
+        (set! proc (global-hook 'controller-axis-motion)
               args (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event caxis) which))
                               (axis->symbol (ref (-> sdl-event caxis) axis))
                               (SCM_MAKE_INT (ref (-> sdl-event caxis) value)))))
        ((SDL_CONTROLLERBUTTONDOWN SDL_CONTROLLERBUTTONUP)
-        (set! proc (global-handler (?: (== (-> sdl-event type) SDL_CONTROLLERBUTTONDOWN)
-                                       'controller-button-down
-                                       'controller-button-up))
+        (set! proc (global-hook (?: (== (-> sdl-event type) SDL_CONTROLLERBUTTONDOWN)
+                                    'controller-button-down
+                                    'controller-button-up))
               args (SCM_LIST3 (SCM_MAKE_INT (ref (-> sdl-event cbutton) which))
                               (button->symbol (ref (-> sdl-event cbutton) button))
                               (state->symbol (ref (-> sdl-event cbutton) state)))))
        ((SDL_CONTROLLERDEVICEADDED SDL_CONTROLLERDEVICEREMOVED SDL_CONTROLLERDEVICEREMAPPED)
-        (set! proc (global-handler (?: (== (-> sdl-event type) SDL_CONTROLLERDEVICEADDED)
-                                       'controller-device-added
-                                       (?: (== (-> sdl-event type) SDL_CONTROLLERDEVICEREMOVED)
-                                           'controller-device-removed
-                                           'controller-device-remapped)))
+        (set! proc (global-hook (?: (== (-> sdl-event type) SDL_CONTROLLERDEVICEADDED)
+                                    'controller-device-added
+                                    (?: (== (-> sdl-event type) SDL_CONTROLLERDEVICEREMOVED)
+                                        'controller-device-removed
+                                        'controller-device-remapped)))
               args (SCM_LIST1 (SCM_MAKE_INT (ref (-> sdl-event cdevice) which)))))
        ((SDL_AUDIODEVICEADDED SDL_AUDIODEVICEREMOVED)
-        (set! proc (global-handler (?: (== (-> sdl-event type) SDL_AUDIODEVICEADDED)
-                                       'audio-device-added
-                                       'audio-device-removed))
+        (set! proc (global-hook (?: (== (-> sdl-event type) SDL_AUDIODEVICEADDED)
+                                    'audio-device-added
+                                    'audio-device-removed))
               args (SCM_LIST2 (SCM_MAKE_INT (ref (-> sdl-event adevice) which))
                               (SCM_MAKE_BOOL (ref (-> sdl-event adevice) iscapture)))))
        ((SDL_QUIT)
-        (set! proc (global-handler 'quit)
+        (set! proc (global-hook 'quit)
               args SCM_NIL))
        ((SDL_FINGERMOTION SDL_FINGERDOWN SDL_FINGERUP)
-        (set! proc (global-handler (?: (== (-> sdl-event type) SDL_FINGERMOTION)
-                                       'finger-motion
-                                       (?: (== (-> sdl-event type) SDL_FINGERDOWN)
-                                           'finger-down
-                                           'finger-up)))
+        (set! proc (global-hook (?: (== (-> sdl-event type) SDL_FINGERMOTION)
+                                    'finger-motion
+                                    (?: (== (-> sdl-event type) SDL_FINGERDOWN)
+                                        'finger-down
+                                        'finger-up)))
               args (Scm_List (Scm_MakeInteger (ref (-> sdl-event tfinger) touchId))
                              (Scm_MakeInteger (ref (-> sdl-event tfinger) fingerId))
                              (Scm_MakeFlonum (ref (-> sdl-event tfinger) x))
@@ -215,7 +218,7 @@
                              (Scm_MakeFlonum (ref (-> sdl-event tfinger) pressure))
                              NULL)))
        ((SDL_MULTIGESTURE)
-        (set! proc (global-handler 'multi-gesture)
+        (set! proc (global-hook 'multi-gesture)
               args (Scm_List (Scm_MakeInteger (ref (-> sdl-event mgesture) touchId))
                              (Scm_MakeFlonum (ref (-> sdl-event mgesture) dTheta))
                              (Scm_MakeFlonum (ref (-> sdl-event mgesture) dDist))
@@ -224,9 +227,9 @@
                              (SCM_MAKE_INT (ref (-> sdl-event mgesture) numFingers))
                              NULL)))
        ((SDL_DOLLARGESTURE SDL_DOLLARRECORD)
-        (set! proc (global-handler (?: (== (-> sdl-event type) SDL_DOLLARGESTURE)
-                                       'dollar-gesture
-                                       'dollar-record))
+        (set! proc (global-hook (?: (== (-> sdl-event type) SDL_DOLLARGESTURE)
+                                    'dollar-gesture
+                                    'dollar-record))
               args (Scm_List (Scm_MakeInteger (ref (-> sdl-event dgesture) touchId))
                              (Scm_MakeInteger (ref (-> sdl-event dgesture) gestureId))
                              (SCM_MAKE_INT (ref (-> sdl-event dgesture) numFingers))
@@ -236,12 +239,12 @@
                              NULL)))
        ((SDL_DROPFILE SDL_DROPTEXT)
         (let* ((win (id->window (ref (-> sdl-event drop) windowID))))
-          (set! proc (window-handler win (?: (== (-> sdl-event type) SDL_DROPFILE) 'drop-file 'drop-text))
+          (set! proc (window-hook win (?: (== (-> sdl-event type) SDL_DROPFILE) 'drop-file 'drop-text))
                 args (SCM_LIST2 win (SCM_MAKE_STR_COPYING (ref (-> sdl-event drop) file)))))
         (SDL_free (ref (-> sdl-event drop) file)))
        ((SDL_DROPBEGIN SDL_DROPCOMPLETE)
         (let* ((win (id->window (ref (-> sdl-event drop) windowID))))
-          (set! proc (window-handler win (?: (== (-> sdl-event type) SDL_DROPBEGIN) 'drop-begin 'drop-complete))
+          (set! proc (window-hook win (?: (== (-> sdl-event type) SDL_DROPBEGIN) 'drop-begin 'drop-complete))
                 args (SCM_LIST1 win))))
        (else
         (cond
@@ -265,27 +268,22 @@
               (set! proc (ref (-> sdl-event user) data1)
                     args (ref (-> sdl-event user) data2)))
              ((GRV_EVENT_WINDOW_UPDATE)
-              (Grv_UpdateWindowContents))
+              (SCM_BIND_PROC update-all-windows "update-all-windows" (SCM_MODULE Grv_GravitonEventModule))
+              (set! proc update-all-windows
+                    args SCM_NIL))
              ) ;; end of case (for Grv_CustomEventType)
            (Grv_ReleaseObject (ref (-> sdl-event user) data1))
            (Grv_ReleaseObject (ref (-> sdl-event user) data2))
            )) ;; end of cond
         ))    ;; end of case
-     (when (SCM_PROCEDUREP proc)
+     (unless (SCM_FALSEP proc)
        (Scm_ApplyRec proc args))
      ) ;; end of let*
    )   ;; end of define-cfn
 
  (define-cfn update-windows-callback (interval::Uint32 param::void*)
    ::Uint32
-   (for-each (lambda (win)
-               (let* ((proc (window-handler win 'update)))
-                 (when (SCM_PROCEDUREP proc)
-                   (GRV_APPLY proc (SCM_LIST1 win)))))
-             Grv_Windows)
-
    (GRV_SEND_EVENT GRV_EVENT_WINDOW_UPDATE NULL NULL)
-
    (return (/ 1000 Grv_FramePerSecond)))
 
  (.define MUSIC_FINISHED_GRACE_PERIOD 200)
@@ -323,9 +321,16 @@
 
   (Grv_SetEventLoopStatus false))
 
-(define-cproc global-handler-table ()
-  (return Grv_GlobalHandlerTable))
+(define-cproc window-hook (win event)
+  (let* ((hook (window-hook win event)))
+    (when (SCM_FALSEP hook)
+       (set! hook (Scm_EvalRec (SCM_LIST2 'make-event-hook (SCM_LIST2 'quote event)) Grv_GravitonEventModule))
+       (set-window-hook! win event hook))
+    (return hook)))
 
-(define (set-global-handler! event proc)
-  (hash-table-set! (Grv_GlobalHandlerTable) event proc))
-
+(define-cproc global-hook (event)
+  (let* ((hook (global-hook event)))
+    (when (SCM_FALSEP hook)
+      (set! hook (Scm_EvalRec (SCM_LIST2 'make-event-hook (SCM_LIST2 'quote event)) Grv_GravitonEventModule))
+      (set-global-hook! event hook))
+    (return hook)))

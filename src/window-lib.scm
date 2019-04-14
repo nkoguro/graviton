@@ -66,7 +66,7 @@
    (set! (-> gwin window) NULL
          (-> gwin renderer) NULL))
 
- (define-cfn Grv_UpdateWindowContents ()
+ (define-cfn Grv_UpdateWindowContents (window-list)
    ::void
    (for-each (lambda (win)
                (let* ((gwin::GrvWindow* (GRV_WINDOW_PTR win))
@@ -79,7 +79,7 @@
                              (Grv_RenderSprite (GRV_SPRITE_PTR sprite)))
                            (-> gwin sprites))
                  (SDL_RenderPresent renderer)))
-             Grv_Windows))
+             window-list))
 
  (define-cfn set-window-logical-size! (gwin::GrvWindow* physical-width::int physical-height::int logical-width::int logical-height::int)
    ::void
@@ -131,7 +131,7 @@
             (-> gwin renderer) NULL
             (-> gwin sprites) SCM_NIL
             (-> gwin icon) icon
-            (-> gwin handler-table) (Scm_MakeHashTableSimple SCM_HASH_EQ 16))
+            (-> gwin hook-table) (Scm_MakeHashTableSimple SCM_HASH_EQ 16))
 
       (set! (-> gwin window) (SDL_CreateWindow title
                                                SDL_WINDOWPOS_UNDEFINED
@@ -154,19 +154,9 @@
         (SDL_GetWindowSize (-> gwin window) (& physical-width) (& physical-height))
         (set-window-logical-size! gwin physical-width physical-height logical-width logical-height))
 
-      (Scm_HashTableSet (SCM_HASH_TABLE (-> gwin handler-table))
-                        'window-close
-                        (Scm_EvalRec 'destroy-window
-                                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
-                        0)
-      (Scm_HashTableSet (SCM_HASH_TABLE (-> gwin handler-table))
-                        'window-resized
-                        (Scm_EvalRec 'reflect-resized-window-parameter
-                                     (SCM_OBJ (Scm_FindModule (SCM_SYMBOL 'graviton) 0)))
-                        0)
-
       (let* ((win (GRV_WINDOW_BOX gwin)))
         (set! Grv_Windows (Scm_Cons win Grv_Windows))
+        (Scm_EvalRec (SCM_LIST2 'make-window-hook win) Grv_GravitonVideoModule)
         (return win)))))
 
 (define-cproc clear-window-sprites! (gwin::<graviton-window>)
@@ -326,9 +316,6 @@
   ::<void>
   (set-window-logical-size! gwin physical-width physical-height (-> gwin logical-width) (-> gwin logical-height)))
 
-(define-cproc window-handler-table (gwin::<graviton-window>)
-  (return (-> gwin handler-table)))
-
 (define-cproc all-windows ()
   (return Grv_Windows))
 
@@ -345,3 +332,7 @@
   ::<void>
   (let* ((t::Uint32 (cast Uint32 (floor (/ 1000.0 fps)))))
     (set! Grv_FramePerSecond fps)))
+
+(define-cproc update-window-contents (window-list::<list>)
+  ::<void>
+  (Grv_UpdateWindowContents window-list))

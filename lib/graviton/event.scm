@@ -31,6 +31,7 @@
 ;;;
 
 (define-module graviton.event
+  (use gauche.hook)
   (use graviton.audio)
   (use graviton.common)
   (use graviton.video)
@@ -40,85 +41,210 @@
 (select-module graviton.event)
 (dynamic-load "graviton-event")
 
-(define-macro (define-on-window-event-macros :rest events)
-  `(begin
-     ,@(map (lambda (event)
-              (let1  on-event (string->symbol (format "on-~a" event))
-                `(define-syntax ,on-event
-                   (syntax-rules ()
-                     ((_ window (arg ...) body ...)
-                      (set-window-handler! window ',event
-                        (lambda (window arg ...)
-                          body ...)))))))
-            events)))
+(define hook-arity-table
+  '(
+    ;; Window hook
+    (window-shown . 1)
+    (window-hidden . 1)
+    (window-exposed . 1)
+    (window-moved . 3)
+    (window-resized . 3)
+    (window-size-changed . 3)
+    (window-minimized . 1)
+    (window-maximized . 1)
+    (window-restored . 1)
+    (window-enter . 1)
+    (window-leave . 1)
+    (window-focus-gained . 1)
+    (window-focus-lost . 1)
+    (window-close . 1)
+    (window-take-focus . 1)
+    (window-hit-test . 1)
+    (window-update-begin . 1)
+    (window-update-complete . 1)
+    (key-down . 5)
+    (key-up . 5)
+    (text-editing . 4)
+    (text-input . 2)
+    (mouse-motion . 7)
+    (mouse-button-down . 6)
+    (mouse-button-up . 6)
+    (mouse-wheel . 5)
+    (drop-file . 2)
+    (drop-text . 2)
+    (drop-begin . 1)
+    (drop-complete . 1)
 
-(define-macro (define-on-global-event-macros :rest events)
-  `(begin
-     ,@(map (lambda (event)
-              (let1  on-event (string->symbol (format "on-~a" event))
-                `(define-syntax ,on-event
-                   (syntax-rules ()
-                     ((_ (arg ...) body ...)
-                      (set-global-handler! ',event
-                        (lambda (arg ...)
-                          body ...)))))))
-            events)))
+    ;; Global hook
+    (joystick-axis-motion . 3)
+    (joystick-ball-motion . 4)
+    (joystick-hat-motion . 3)
+    (joystick-button-down . 3)
+    (joystick-button-up . 3)
+    (joystick-device-added . 1)
+    (joystick-device-removed . 1)
+    (controller-axis-motion . 3)
+    (controller-button-down . 3)
+    (controller-button-up . 3)
+    (controller-device-added . 1)
+    (controller-device-removed . 1)
+    (controller-device-remapped . 1)
+    (audio-device-added . 2)
+    (audio-device-removed . 2)
+    (quit . 0)
+    (finger-motion . 7)
+    (finger-down . 7)
+    (finger-up . 7)
+    (multi-gesture . 6)
+    (dollar-gesture . 6)
+    (dollar-record . 6)
+  ))
 
-(define-on-window-event-macros
-  window-shown
-  window-hidden
-  window-exposed
-  window-moved
-  window-resized
-  window-size-changed
-  window-minimized
-  window-maximized
-  window-restored
-  window-enter
-  window-leave
-  window-focus-gained
-  window-focus-lost
-  window-close
-  window-take-focus
-  window-hit-test
-  key-down
-  key-up
-  text-editing
-  text-input
-  mouse-motion
-  mouse-button-down
-  mouse-button-up
-  mouse-wheel
-  drop-file
-  drop-text
-  drop-begin
-  drop-complete
-  update
-  ) ;; end of define-on-window-event-macros
+(define (make-event-hook name)
+  (let1 hook-arity (or (assoc-ref hook-arity-table name #f)
+                       (errorf "Invalid hook name: ~a" name))
+    (make-hook hook-arity)))
 
-(define-on-global-event-macros
-  joystick-axis-motion
-  joystick-ball-motion
-  joystick-hat-motion
-  joystick-button-down
-  joystick-button-up
-  joystick-device-added
-  joystick-device-removed
-  controller-axis-motion
-  controller-button-down
-  controller-button-up
-  controller-device-added
-  controller-device-removed
-  controller-device-remapped
-  audio-device-added
-  audio-device-removed
-  quit
-  finger-motion
-  finger-down
-  finger-up
-  multi-gesture
-  dollar-gesture
-  dollar-record
-  ) ;; end of define-on-global-event-macros
+(define (window-shown-hook-of win)
+  (window-hook win 'window-shown))
 
+(define (window-hidden-hook-of win)
+  (window-hook win 'window-hidden))
 
+(define (window-exposed-hook-of win)
+  (window-hook win 'window-exposed))
+
+(define (window-moved-hook-of win)
+  (window-hook win 'window-moved))
+
+(define (window-resized-hook-of win)
+  (window-hook win 'window-resized))
+
+(define (window-size-changed-hook-of win)
+  (window-hook win 'window-size-changed))
+
+(define (window-minimized-hook-of win)
+  (window-hook win 'window-minimized))
+
+(define (window-maximized-hook-of win)
+  (window-hook win 'window-maximized))
+
+(define (window-restored-hook-of win)
+  (window-hook win 'window-restored))
+
+(define (window-enter-hook-of win)
+  (window-hook win 'window-enter))
+
+(define (window-leave-hook-of win)
+  (window-hook win 'window-leave))
+
+(define (window-focus-gained-hook-of win)
+  (window-hook win 'window-focus-gained))
+
+(define (window-focus-lost-hook-of win)
+  (window-hook win 'window-focus-lost))
+
+(define (window-close-hook-of win)
+  (window-hook win 'window-close))
+
+(define (window-take-focus-hook-of win)
+  (window-hook win 'window-take-focus))
+
+(define (window-hit-test-hook-of win)
+  (window-hook win 'window-hit-test))
+
+(define (window-update-begin-hook-of win)
+  (window-hook win 'window-update-begin))
+
+(define (window-update-complete-hook-of win)
+  (window-hook win 'window-update-complete))
+
+(define (key-down-hook-of win)
+  (window-hook win 'key-down))
+
+(define (key-up-hook-of win)
+  (window-hook win 'key-up))
+
+(define (text-editing-hook-of win)
+  (window-hook win 'text-editing))
+
+(define (text-input-hook-of win)
+  (window-hook win 'text-input))
+
+(define (mouse-motion-hook-of win)
+  (window-hook win 'mouse-motion))
+
+(define (mouse-button-down-hook-of win)
+  (window-hook win 'mouse-button-down))
+
+(define (mouse-button-up-hook-of win)
+  (window-hook win 'mouse-button-up))
+
+(define (mouse-wheel-hook-of win)
+  (window-hook win 'mouse-wheel))
+
+(define (drop-file-hook-of win)
+  (window-hook win 'drop-file))
+
+(define (drop-text-hook-of win)
+  (window-hook win 'drop-text))
+
+(define (drop-begin-hook-of win)
+  (window-hook win 'drop-begin))
+
+(define (drop-complete-hook-of win)
+  (window-hook win 'drop-complete))
+
+(define joystick-axis-motion-hook (global-hook 'joystick-axis-motion))
+
+(define joystick-ball-motion-hook (global-hook 'joystick-ball-motion))
+
+(define joystick-hat-motion-hook (global-hook 'joystick-hat-motion))
+
+(define joystick-button-down-hook (global-hook 'joystick-button-down))
+
+(define joystick-button-up-hook (global-hook 'joystick-button-up))
+
+(define joystick-device-added-hook (global-hook 'joystick-device-added))
+
+(define joystick-device-removed-hook (global-hook 'joystick-device-removed))
+
+(define controller-axis-motion-hook (global-hook 'controller-axis-motion))
+
+(define controller-button-down-hook (global-hook 'controller-button-down))
+
+(define controller-button-up-hook (global-hook 'controller-button-up))
+
+(define controller-device-added-hook (global-hook 'controller-device-added))
+
+(define controller-device-removed-hook (global-hook 'controller-device-removed))
+
+(define controller-device-remapped-hook (global-hook 'controller-device-remapped))
+
+(define audio-device-added-hook (global-hook 'audio-device-added))
+
+(define audio-device-removed-hook (global-hook 'audio-device-removed))
+
+(define quit-hook (global-hook 'quit))
+
+(define finger-motion-hook (global-hook 'finger-motion))
+
+(define finger-down-hook (global-hook 'finger-down))
+
+(define finger-up-hook (global-hook 'finger-up))
+
+(define multi-gesture-hook (global-hook 'multi-gesture))
+
+(define dollar-gesture-hook (global-hook 'dollar-gesture))
+
+(define dollar-record-hook (global-hook 'dollar-record))
+
+(define (update-all-windows)
+  (let1 win-list (all-windows)
+    (for-each (lambda (win)
+                ((window-update-begin-hook-of win) win))
+              win-list)
+    (update-window-contents win-list)
+    (for-each (lambda (win)
+                ((window-update-complete-hook-of win) win))
+              win-list)))

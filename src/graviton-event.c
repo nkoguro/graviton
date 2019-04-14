@@ -35,12 +35,16 @@
 #include <gauche/extend.h>
 #include "graviton.h"
 
+ScmObj Grv_GravitonEventModule;
+
 extern void Scm_Init_event_lib();
 
 void Scm_Init_graviton_event(void)
 {
   ScmModule *mod;
   SCM_INIT_EXTENSION(graviton_event);
+  mod = SCM_MODULE(SCM_FIND_MODULE("graviton.event", TRUE));
+  Grv_GravitonEventModule = SCM_OBJ(mod);
   Scm_Init_event_lib();
 }
 

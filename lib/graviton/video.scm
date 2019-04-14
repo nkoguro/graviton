@@ -31,6 +31,7 @@
 ;;;
 
 (define-module graviton.video
+  (use gauche.hook)
   (use gauche.record)
   (use gauche.regexp)
   (use gauche.uvector)
@@ -196,6 +197,7 @@
 (set! (setter window-maximized?) set-window-maximized!)
 (set! (setter window-minimized?) set-window-minimized!)
 
+(define make-window-hook (make-hook 1))
 
 ;;;
 ;;; Sprite

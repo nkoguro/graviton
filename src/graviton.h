@@ -179,7 +179,7 @@ typedef struct GrvWindowRec {
   int logical_height;
   int offset_x;
   int offset_y;
-  ScmObj handler_table;
+  ScmObj hook_table;
   SDL_Rect *clip;
 } GrvWindow;
 
@@ -255,7 +255,8 @@ extern ScmClass *GrvTileMapClass;
  * Event
  */
 
-extern ScmObj Grv_GlobalHandlerTable;
+extern ScmObj Grv_GravitonEventModule;
+extern ScmObj Grv_GlobalHookTable;
 
 
 /*
