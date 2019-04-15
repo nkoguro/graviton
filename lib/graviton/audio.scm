@@ -300,7 +300,11 @@
                                   notes)
         (compose-soundlets (map (lambda (pitch-num)
                                   (if pitch-num
-                                      (make-tone (pitch pitch-num) amp-factor vols sec envelope)
+                                      (make-tone (pitch pitch-num)
+                                                 amp-factor
+                                                 vols
+                                                 (max (- sec (envelope-release-time envelope)) 0)
+                                                 envelope)
                                       (make-silent sec)))
                                 pitches))))))
 
