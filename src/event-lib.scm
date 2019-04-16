@@ -43,6 +43,7 @@
  (define-cvar Grv_GlobalHandlerTable)
  (define-cvar main-thunk-finished?::bool :static)
  (define-cvar update-all-windows :static SCM_UNDEFINED)
+ (define-cvar make-event-hook :static SCM_UNDEFINED)
 
  (initcode
   (set! Grv_GlobalHandlerTable (Scm_MakeHashTableSimple SCM_HASH_EQ 16)
@@ -324,13 +325,15 @@
 (define-cproc window-hook (win event)
   (let* ((hook (window-hook win event)))
     (when (SCM_FALSEP hook)
-       (set! hook (Scm_EvalRec (SCM_LIST2 'make-event-hook (SCM_LIST2 'quote event)) Grv_GravitonEventModule))
-       (set-window-hook! win event hook))
+      (SCM_BIND_PROC make-event-hook "make-event-hook" (SCM_MODULE Grv_GravitonEventModule))
+      (set! hook (Scm_ApplyRec1 make-event-hook event))
+      (set-window-hook! win event hook))
     (return hook)))
 
 (define-cproc global-hook (event)
   (let* ((hook (global-hook event)))
     (when (SCM_FALSEP hook)
-      (set! hook (Scm_EvalRec (SCM_LIST2 'make-event-hook (SCM_LIST2 'quote event)) Grv_GravitonEventModule))
+      (SCM_BIND_PROC make-event-hook "make-event-hook" (SCM_MODULE Grv_GravitonEventModule))
+      (set! hook (Scm_ApplyRec1 make-event-hook event))
       (set-global-hook! event hook))
     (return hook)))

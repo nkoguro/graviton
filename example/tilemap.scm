@@ -1,4 +1,5 @@
 (use file.util)
+(use gauche.hook)
 (use gauche.sequence)
 (use graviton)
 (use srfi-42)
@@ -32,10 +33,11 @@
              (format out "\x1b[48;5;~am  " color))
       (display "\x1b[0m\n\n" out)
 
-      (on-key-up win (scan key mod repeat?)
-        (case scan
-          ((escape)
-           (destroy-window win))))
+      (add-hook! (key-up-hook-of win)
+        (lambda (win scan key mod repeat?)
+          (case scan
+            ((escape)
+             (destroy-window win)))))
       )
     )
   0)

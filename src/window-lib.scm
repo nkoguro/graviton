@@ -42,6 +42,7 @@
             ))
  (define-cvar Grv_Windows SCM_NIL)
  (define-cvar Grv_FramePerSecond::int 30)
+ (define-cvar make-window-hook :static SCM_UNDEFINED)
 
  (define-cfn remove-destroyed-windows ()
    ::void
@@ -165,7 +166,8 @@
 
       (let* ((win (GRV_WINDOW_BOX gwin)))
         (set! Grv_Windows (Scm_Cons win Grv_Windows))
-        (Scm_EvalRec (SCM_LIST2 'make-window-hook win) Grv_GravitonVideoModule)
+        (SCM_BIND_PROC make-window-hook "make-window-hook" (SCM_MODULE Grv_GravitonVideoModule))
+        (Scm_ApplyRec1 make-window-hook win)
         (return win)))))
 
 (define-cproc clear-window-sprites! (gwin::<graviton-window>)

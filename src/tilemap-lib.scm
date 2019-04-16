@@ -39,6 +39,9 @@
            "graviton.h"
            "stdbool.h")
 
+ (define-cvar make-image :static SCM_UNDEFINED)
+ (define-cvar make-sprite :static SCM_UNDEFINED)
+
  (define-cfn tile-map-offset-index (gtilemap::GrvTileMap* x::int y::int)
    ::int
    (unless (and (<= 0 x) (< x (-> gtilemap columns)))
@@ -114,7 +117,15 @@
 
 (include "types.scm")
 
-(define-cproc make-tile-map (window tile-images::<vector> columns::<int> rows::<int> x::<double> y::<double> :key (z::<double> 0) (fill::<uint32> 0))
+(define-cproc make-tile-map (window
+                             tile-images::<vector>
+                             columns::<int>
+                             rows::<int>
+                             x::<double>
+                             y::<double>
+                             :key
+                             (z::<double> 0)
+                             (fill::<uint32> 0))
   ::<graviton-tile-map>
   (let* ((gtilemap::GrvTileMap* (SCM_NEW GrvTileMap))
          (size::int (* columns rows))
@@ -140,26 +151,27 @@
             (aref (-> gtilemap buf-tiles) i) (lognot fill) ;; enforce initial update
             (aref (-> gtilemap buf-attrs) i) NULL))
 
+    (SCM_BIND_PROC make-image "make-image" (SCM_MODULE Grv_GravitonVideoModule))
+    (SCM_BIND_PROC make-sprite "make-sprite" (SCM_MODULE Grv_GravitonVideoModule))
+
     (set! (-> gtilemap columns) columns
           (-> gtilemap rows) rows
           (-> gtilemap offset) 0
 
-          (-> gtilemap image) (Scm_EvalRec (SCM_LIST3 'make-image
-                                                      (SCM_MAKE_INT (* tile-width columns))
-                                                      (SCM_MAKE_INT (* tile-height rows)))
-                                           Grv_GravitonVideoModule)
+          (-> gtilemap image) (Scm_ApplyRec2 make-image
+                                             (SCM_MAKE_INT (* tile-width columns))
+                                             (SCM_MAKE_INT (* tile-height rows)))
           (-> gtilemap tile-images) (SCM_OBJ tile-images)
           (-> gtilemap tile-width) tile-width
           (-> gtilemap tile-height) tile-height
 
-          sprite (Scm_EvalRec (Scm_List 'make-sprite
-                                        window
-                                        ':image (-> gtilemap image)
-                                        ':x (Scm_MakeFlonum x)
-                                        ':y (Scm_MakeFlonum y)
-                                        ':z (Scm_MakeFlonum z)
-                                        NULL)
-                              Grv_GravitonVideoModule))
+          sprite (Scm_ApplyRec make-sprite
+                               (Scm_List window
+                                         ':image (-> gtilemap image)
+                                         ':x (Scm_MakeFlonum x)
+                                         ':y (Scm_MakeFlonum y)
+                                         ':z (Scm_MakeFlonum z)
+                                         NULL)))
     (dotimes (y rows)
       (dotimes (x columns)
         (update-tile-map gtilemap x y)))
