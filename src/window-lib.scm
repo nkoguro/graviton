@@ -108,7 +108,16 @@
 
 (include "types.scm")
 
-(define-cproc make-window (title::<const-cstring> logical-width::<int> logical-height::<int> :key (resizable?::<boolean> #f) (icon #f) (shown?::<boolean> #t) (maximized?::<boolean> #f) (minimized?::<boolean> #f) (fullscreen?::<boolean> #f))
+(define-cproc make-window (title::<const-cstring>
+                           logical-width::<int>
+                           logical-height::<int>
+                           :key
+                           (resizable?::<boolean> #f)
+                           (icon #f)
+                           (shown?::<boolean> #t)
+                           (maximized?::<boolean> #f)
+                           (minimized?::<boolean> #f)
+                           (fullscreen?::<boolean> #f))
   (let* ((flags::Uint32 0))
     (when fullscreen?
       (set! flags (logior flags SDL_WINDOW_FULLSCREEN_DESKTOP)))
