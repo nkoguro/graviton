@@ -192,6 +192,8 @@ extern ScmObj Grv_Windows;
 extern int Grv_FramePerSecond;
 extern void Grv_DestroyWindow(GrvWindow *gwin);
 extern void Grv_UpdateWindowContents();
+extern void Grv_UpdateWindowSize(GrvWindow *gwin);
+
 
 /*
  * Sprite

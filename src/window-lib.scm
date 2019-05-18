@@ -35,6 +35,7 @@
 (inline-stub
  (declcode
   (.include "SDL.h"
+            "SDL_syswm.h"
             "gauche.h"
             "gauche/extend.h"
             "graviton.h"
@@ -82,13 +83,21 @@
                  (SDL_RenderPresent renderer)))
              window-list))
 
- (define-cfn set-window-logical-size! (gwin::GrvWindow* physical-width::int physical-height::int logical-width::int logical-height::int)
+ (define-cfn set-window-physical-size! (gwin::GrvWindow* physical-width::int physical-height::int)
    ::void
-   (let* ((zoom-w::double)
+   (SDL_SetWindowSize (-> gwin window) physical-width physical-height)
+   (Grv_UpdateWindowSize gwin))
+
+ (define-cfn set-window-logical-size! (gwin::GrvWindow* logical-width::int logical-height::int)
+   ::void
+   (let* ((physical-width::int)
+          (physical-height::int)
+          (zoom-w::double)
           (zoom-h::double)
           (zoom::double)
           (renderer-logical-width::int)
           (renderer-logical-height::int))
+     (SDL_GetWindowSize (-> gwin window) (& physical-width) (& physical-height))
      (set! zoom-w (/ (cast double physical-width) (cast double logical-width))
            zoom-h (/ (cast double physical-height) (cast double logical-height))
            zoom (?: (< zoom-w zoom-h) zoom-w zoom-h)
@@ -105,6 +114,10 @@
            (-> gwin clip y) (-> gwin offset-y))
      (when (< (SDL_RenderSetLogicalSize (-> gwin renderer) renderer-logical-width renderer-logical-height) 0)
        (Scm_Error "SDL_RenderSetLogicalSize failed: %s" (SDL_GetError)))))
+
+ (define-cfn Grv_UpdateWindowSize (gwin::GrvWindow*)
+   ::void
+   (set-window-logical-size! gwin (-> gwin logical-width) (-> gwin logical-height)))
  ) ;; end of inline-stub
 
 (include "types.scm")
@@ -159,10 +172,7 @@
       (unless (-> gwin renderer)
         (Scm_Error "SDL_CreateRenderer failed: %s" (SDL_GetError)))
 
-      (let* ((physical-width::int)
-             (physical-height::int))
-        (SDL_GetWindowSize (-> gwin window) (& physical-width) (& physical-height))
-        (set-window-logical-size! gwin physical-width physical-height logical-width logical-height))
+      (set-window-logical-size! gwin logical-width logical-height)
 
       (let* ((win (GRV_WINDOW_BOX gwin)))
         (set! Grv_Windows (Scm_Cons win Grv_Windows))
@@ -210,8 +220,7 @@
 
 (define-cproc set-window-physical-size! (gwin::<graviton-window> physical-width::<int> physical-height::<int>)
   ::<void>
-  (SDL_SetWindowSize (-> gwin window) physical-width physical-height)
-  (set-window-logical-size! gwin physical-width physical-height (-> gwin logical-width) (-> gwin logical-height)))
+  (set-window-physical-size! gwin physical-width physical-height))
 
 (define-cproc window-logical-size (gwin::<graviton-window>)
   ::(<int> <int>)
@@ -219,10 +228,7 @@
 
 (define-cproc set-window-logical-size! (gwin::<graviton-window> logical-width::<int> logical-height::<int>)
   ::<void>
-  (let* ((physical-width::int)
-         (physical-height::int))
-    (SDL_GetWindowSize (-> gwin window) (& physical-width) (& physical-height))
-    (set-window-logical-size! gwin physical-width physical-height logical-width logical-height)))
+  (set-window-logical-size! gwin logical-width logical-height))
 
 (define-cproc window-fullscreen? (gwin::<graviton-window>)
   ::<boolean>
@@ -323,10 +329,6 @@
     (else
      (Scm_Error "<graviton-image> required, but got %S" icon))))
 
-(define-cproc reflect-resized-window-parameter (gwin::<graviton-window> physical-width::<int> physical-height::<int>)
-  ::<void>
-  (set-window-logical-size! gwin physical-width physical-height (-> gwin logical-width) (-> gwin logical-height)))
-
 (define-cproc all-windows ()
   (return Grv_Windows))
 
@@ -347,3 +349,15 @@
 (define-cproc update-window-contents (window-list::<list>)
   ::<void>
   (Grv_UpdateWindowContents window-list))
+
+(define-cproc window-system-id (gwin::<graviton-window>)
+  (let* ((info::SDL_SysWMinfo))
+    (SDL_VERSION (& (ref info version)))
+    (when (!= (SDL_GetWindowWMInfo (-> gwin window) (& info)) SDL_TRUE)
+      (Scm_Error "SDL_GetWindowWMInfo failed: %s" (SDL_GetError)))
+
+    (.cond
+     ((defined SDL_VIDEO_DRIVER_X11)
+      (when (== (ref info subsystem) SDL_SYSWM_X11)
+        (return (Scm_MakeIntegerU (ref info info x11 window))))))
+    (Scm_Error "Unsupported subsystem: %d" (ref info subsystem))))

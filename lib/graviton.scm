@@ -288,8 +288,7 @@
 
 (add-hook! make-window-hook
   (lambda (win)
-    (add-hook! (window-close-hook-of win) destroy-window)
-    (add-hook! (window-resized-hook-of win) reflect-resized-window-parameter)))
+    (add-hook! (window-close-hook-of win) destroy-window)))
 
 (define (grv-main thunk)
   (cond
