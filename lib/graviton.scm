@@ -50,6 +50,7 @@
   (use graviton.audio)
   (use graviton.color)
   (use graviton.common)
+  (use graviton.dialog)
   (use graviton.event)
   (use graviton.video)
   (use math.const)
@@ -280,6 +281,10 @@
           color
           register-color!
           define-color
+
+          show-info-dialog
+          show-warning-dialog
+          show-error-dialog
           ) ;; end of export
   ) ;; end of define-module
 
