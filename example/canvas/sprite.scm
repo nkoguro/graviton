@@ -82,8 +82,8 @@
   (let-args (cdr args) ((num-sprites "s|sprites=i" 100))
     (grv-begin
       (set-global-event-handler! 'keyup (lambda (event)
-                                        (when (equal? (slot-ref event 'code) "Escape")
-                                          (app-close))))
+                                          (when (equal? (slot-ref event 'code) "Escape")
+                                            (app-close))))
       (let ((sprite (make-canvas (* *sprite-width* *num-patterns*) *sprite-height* :visible? #f))
             (canvas (make-double-buffer-canvas *canvas-width* *canvas-height*))
             (balls (list-ec (: i num-sprites)
@@ -110,6 +110,6 @@
             (time-counter-stop! tc)
             (let1 st (max (- *tick* (time-counter-value tc)) 0)
               ;; (log-format "sleep time: ~a" st)
-              (thread-sleep! st))
+              (asleep! st))
             )))))
   0)

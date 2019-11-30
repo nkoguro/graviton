@@ -33,6 +33,7 @@
 (define-module graviton2
   (use binary.io)
   (use control.thread-pool)
+  (use data.queue)
   (use file.util)
   (use gauche.hook)
   (use gauche.logger)
@@ -50,6 +51,7 @@
   (use rfc.json)
   (use rfc.sha)
   (use srfi-13)
+  (use srfi-19)
   (use srfi-27)
   (use text.html-lite)
   (use text.tree)
@@ -68,6 +70,7 @@
           async-apply
           async
           await
+          asleep!
 
           with-command-transaction
           app-close
@@ -244,7 +247,7 @@
 
 (define (await future)
   (unless (slot-ref future 'ready?)
-    (error "~s hasn't been available yet." future))
+    (errorf "~s hasn't been available yet." future))
   (let ((lock (slot-ref future 'lock))
         (result-values #f)
         (result-exception #f))
@@ -461,6 +464,55 @@
         (proc (if event-alist
                   (alist->event event-alist)
                   #f))))))
+
+;;;
+
+(define *scheduler-command-queue* (make-mtqueue))
+
+(define (run-scheduler)
+  (thread-start! (make-thread
+                   (lambda ()
+                     (let loop ((schedule-list '()))
+                       (let1 now (current-time)
+                         (cond
+                           ((and (not (null? schedule-list))
+                                 (time<=? (caar schedule-list) now))
+                            (set-future-result-values&exception! (cdar schedule-list) '(#t) #f)
+                            (loop (cdr schedule-list)))
+                           (else
+                            (let1 timeout (if (null? schedule-list)
+                                              #f
+                                              (max (- (time->seconds (caar schedule-list)) (time->seconds now)) 0))
+                              (match (dequeue/wait! *scheduler-command-queue* timeout #f)
+                                (('shutdown)
+                                 #f)
+                                (('schedule wake-time future)
+                                 (loop (sort (cons (cons wake-time future) schedule-list)
+                                             time<?
+                                             car)))
+                                (('cancel future)
+                                 (loop (remove (lambda (schedule)
+                                                 (eq? (cdr schedule) future))
+                                               schedule-list)))
+                                (_
+                                 (loop schedule-list)))))))))
+                   "scheduler")))
+
+(define (shutdown-scheduler!)
+  (enqueue! *scheduler-command-queue* '(shutdown)))
+
+(define (add-schedule! wake-time future)
+  (enqueue! *scheduler-command-queue* (list 'schedule wake-time future)))
+
+(define (cancel-schedule! future)
+  (enqueue! *scheduler-command-queue* (list 'cancel future)))
+
+(define (asleep! sec)
+  (let1 future (make <graviton-future>)
+    (add-schedule! (add-duration (current-time) (make-time time-duration 0 sec)) future)
+    (mark-future-ready! future)
+    (await future)
+    (undefined)))
 
 ;;;
 
@@ -1593,8 +1645,11 @@
                        :error-log *graviton-error-log-drain*
                        :control-channel *control-channel*
                        :startup-callback (lambda (socks)
+                                           (run-scheduler)
                                            (when *graviton-use-player?*
-                                             (invoke-player (car socks)))))))
+                                             (invoke-player (car socks))))
+                       :shutdown-callback (lambda ()
+                                            (shutdown-scheduler!)))))
 
 (define-syntax grv-begin
   (syntax-rules ()
