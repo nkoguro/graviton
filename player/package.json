@@ -1,0 +1,15 @@
+{
+  "name": "graviton-player",
+  "version": "1.0.0",
+  "description": "The player application for Graviton.",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "KOGURO, Naoki",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^7.0.1",
+    "electron-packager": "^14.1.0"
+  }
+}
