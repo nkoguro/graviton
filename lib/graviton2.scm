@@ -70,7 +70,7 @@
           async-apply
           async
           await
-          asleep!
+          asleep
 
           with-command-transaction
           app-close
@@ -160,6 +160,27 @@
 
           set-global-event-handler!
           set-canvas-event-handler!
+
+          set-audio-base-time!
+          start-audio-node!
+          stop-audio-node!
+          connect-node!
+          disconnect-node!
+          free-node!
+          audio-node-end
+          make-audio-context-destination
+          audio-param-set-value-at-time!
+          audio-param-linear-ramp-to-value-at-time!
+          audio-param-exponential-ramp-to-value-at-time!
+          audio-param-set-target-at-time!
+          audio-param-set-value-curve-at-time!
+          audio-param-cancel-scheduled-values!
+          audio-param-cancel-and-hold-at-time!
+          pop-audio-param!
+          make-oscillator-node
+          set-oscillator-type!
+          push-oscillator-frequency-audio-param!
+          push-oscillator-detune-audio-param!
           ))
 
 (select-module graviton2)
@@ -233,10 +254,16 @@
     (unwind-protect
         (begin
           (mutex-lock! lock)
-          (slot-set! future 'result-values vals)
-          (slot-set! future 'result-exception exception)
-          (set! conts (slot-ref future 'continuations))
-          (slot-set! future 'continuations '()))
+          (cond
+            ((or (slot-ref future 'result-values)
+                 (slot-ref future 'result-exception))
+             ;; If values or exception is set, do nothing.
+             #f)
+            (else
+             (slot-set! future 'result-values vals)
+             (slot-set! future 'result-exception exception)
+             (set! conts (slot-ref future 'continuations))
+             (slot-set! future 'continuations '()))))
       (mutex-unlock! lock))
     (for-each (lambda (cont)
                 (add-job! (slot-ref future 'pool)
@@ -245,7 +272,7 @@
                       (cont vals exception)))))
               conts)))
 
-(define (await future)
+(define (await future :optional (timeout #f) :rest timeout-vals)
   (unless (slot-ref future 'ready?)
     (errorf "~s hasn't been available yet." future))
   (let ((lock (slot-ref future 'lock))
@@ -264,16 +291,31 @@
       (else
        (receive (vals exception) (shift cont
                                    (push! (slot-ref future 'continuations) cont)
+                                   (when timeout
+                                     (add-schedule! (add-duration (current-time)
+                                                                  (let* ((sec (floor timeout))
+                                                                         (nanosec (round->exact (* (- timeout sec)
+                                                                                                   1000000000))))
+                                                                    (make-time time-duration nanosec sec)))
+                                                    future
+                                                    timeout-vals))
                                    (mutex-unlock! lock))
          (set! result-values vals)
          (set! result-exception exception))))
     (cond
       (result-values
-       (apply values result-values))
+       (if (null? result-values)
+           (undefined)
+           (apply values result-values)))
       (result-exception
        (raise result-exception))
       (else
        (error "[BUG] Invalid future state")))))
+
+(define (asleep sec)
+  (let1 future (make <graviton-future>)
+    (mark-future-ready! future)
+    (await future sec)))
 
 (define (async-apply proc args)
   (let ((future (make <graviton-future>))
@@ -477,7 +519,8 @@
                          (cond
                            ((and (not (null? schedule-list))
                                  (time<=? (caar schedule-list) now))
-                            (set-future-result-values&exception! (cdar schedule-list) '(#t) #f)
+                            (match-let1 (_ future vals) (car schedule-list)
+                              (set-future-result-values&exception! future vals #f))
                             (loop (cdr schedule-list)))
                            (else
                             (let1 timeout (if (null? schedule-list)
@@ -486,8 +529,8 @@
                               (match (dequeue/wait! *scheduler-command-queue* timeout #f)
                                 (('shutdown)
                                  #f)
-                                (('schedule wake-time future)
-                                 (loop (sort (cons (cons wake-time future) schedule-list)
+                                (('schedule wake-time future vals)
+                                 (loop (sort (cons (list wake-time future vals) schedule-list)
                                              time<?
                                              car)))
                                 (('cancel future)
@@ -501,18 +544,11 @@
 (define (shutdown-scheduler!)
   (enqueue! *scheduler-command-queue* '(shutdown)))
 
-(define (add-schedule! wake-time future)
-  (enqueue! *scheduler-command-queue* (list 'schedule wake-time future)))
+(define (add-schedule! wake-time future vals)
+  (enqueue! *scheduler-command-queue* (list 'schedule wake-time future vals)))
 
 (define (cancel-schedule! future)
   (enqueue! *scheduler-command-queue* (list 'cancel future)))
-
-(define (asleep! sec)
-  (let1 future (make <graviton-future>)
-    (add-schedule! (add-duration (current-time) (make-time time-duration 0 sec)) future)
-    (mark-future-ready! future)
-    (await future)
-    (undefined)))
 
 ;;;
 
@@ -886,6 +922,27 @@
 
                       listen-global-event
                       listen-canvas-event
+
+                      set-audio-base-time
+                      start-audio-node
+                      stop-audio-node
+                      connect-node
+                      disconnect-node
+                      free-node
+                      audio-node-end
+                      audio-param-set-value-at-time
+                      audio-param-linear-ramp-to-value-at-time
+                      audio-param-exponential-ramp-to-value-at-time
+                      audio-param-set-target-at-time
+                      audio-param-set-value-curve-at-time
+                      audio-param-cancel-scheduled-values
+                      audio-param-cancel-and-hold-at-time
+                      pop-audio-param
+                      make-audio-context-destination
+                      make-oscillator-node
+                      set-oscillator-type
+                      push-oscillator-frequency-audio-param
+                      push-oscillator-detune-audio-param
                       ))
     tbl))
 
@@ -964,7 +1021,9 @@
               (let* ((url (register-resource! content-type arg))
                      (id (object-next-id)))
                 (push! (slot-ref (command-transaction) 'object-pair-buffer) (vector id url))
-                (write-u32 id out 'little-endian)))))
+                (write-u32 id out 'little-endian)))
+             ('audio-node
+              (write-u32 (slot-ref arg 'id) out 'little-endian))))
          types args)))
 
 (define (with-command-transaction thunk)
@@ -1596,6 +1655,88 @@
        (register-event-handler! (string->symbol event-name) proc (main-thread-pool) (websocket-output-port)))
       (else
        (unregister-event-handler! (string->symbol event-name))))))
+
+;;;
+
+(define audio-node-next-id (make-id-generator #xffffffff))
+
+(define-class <audio-node> ()
+  ((id :init-form (image-next-id))
+   (type :init-keyword :type)))
+
+(define (set-audio-base-time!)
+  (call-command 'set-audio-base-time '() '()))
+
+(define (start-audio-node! audio-node :optional (delta-when 0) (offset 0) (duration -1))
+  (call-command 'start-audio-node '(audio-node f64 f64 f64) (list audio-node delta-when offset duration)))
+
+(define (stop-audio-node! audio-node :optional (delta-when 0))
+  (call-command 'stop-audio-node '(audio-node f64) (list audio-node delta-when)))
+
+(define (connect-node! from-node to-node)
+  (call-command 'connect-node '(audio-node audio-node) (list from-node to-node)))
+
+(define (disconnect-node! from-node to-node)
+  (call-command 'disconnect-node '(audio-node audio-node) (list from-node to-node)))
+
+(define (free-node! audio-node)
+  (call-command 'free-node '(audio-node) (list audio-node)))
+
+(define (audio-node-end audio-node)
+  (let1 future (make <graviton-future>)
+    (call-command 'audio-node-end '(future audio-node) (list future audio-node))
+    future))
+
+(define (make-audio-context-destination)
+  (let1 audio-node (make <audio-node> :type 'audio-context-destination)
+    (call-command 'make-audio-context-destination '(audio-node) (list audio-node))
+    audio-node))
+
+(define (audio-param-set-value-at-time! val start-time)
+  (call-command 'audio-param-set-value-at-time '(f64 f64) (list val start-time)))
+
+(define (audio-param-linear-ramp-to-value-at-time! val end-time)
+  (call-command 'audio-param-linear-ramp-to-value-at-time '(f64 f64) (list val end-time)))
+
+(define (audio-param-exponential-ramp-to-value-at-time! val end-time)
+  (call-command 'audio-param-exponential-ramp-to-value-at-time '(f64 f64) (list val end-time)))
+
+(define (audio-param-set-target-at-time! val start-time time-constant)
+  (call-command 'audio-param-set-target-at-time '(f64 f64 f64) (list val start-time time-constant)))
+
+(define (audio-param-set-value-curve-at-time! vals start-time duration)
+  (call-command 'audio-param-set-value-curve-at-time '(object f64 f64) (list vals start-time duration)))
+
+(define (audio-param-cancel-scheduled-values! start-time)
+  (call-command 'audio-param-cancel-scheduled-values '(f64) (list start-time)))
+
+(define (audio-param-cancel-and-hold-at-time! cancel-time)
+  (call-command 'audio-param-cancel-and-hold-at-time '(f64) (list cancel-time)))
+
+(define (pop-audio-param!)
+  (call-command 'pop-audio-param '() '()))
+
+(define (make-oscillator-node)
+  (let1 oscillator-node (make <audio-node> :type 'oscillator)
+    (call-command 'make-oscillator-node '(audio-node) (list oscillator-node))
+    oscillator-node))
+
+(define oscillator-type-alist
+  '((sine . "sine")
+    (square . "square")
+    (sawtooth . "sawtooth")
+    (triangle . "triangle")))
+
+(define (set-oscillator-type! oscillator-node type)
+  (call-command 'set-oscillator-type '(audio-node object) (list oscillator-node
+                                                                (or (assoc-ref oscillator-type-alist type #f)
+                                                                    (errorf "Invalid oscillator type: ~a" type)))))
+
+(define (push-oscillator-frequency-audio-param! oscillator-node)
+  (call-command 'push-oscillator-frequency-audio-param '(audio-node) (list oscillator-node)))
+
+(define (push-oscillator-detune-audio-param! oscillator-node)
+  (call-command 'push-oscillator-detune-audio-param '(audio-node) (list oscillator-node)))
 
 ;;;
 

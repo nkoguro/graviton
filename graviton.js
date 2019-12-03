@@ -279,6 +279,7 @@ function initializeBinaryCommands() {
         connectNode,
         disconnectNode,
         freeNode,
+        audioNodeEnd,
         audioParamSetValueAtTime,
         audioParamLinearRampToValueAtTime,
         audioParamExponentialRampToValueAtTime,
@@ -926,6 +927,15 @@ function disconnectNode(ds) {
 function freeNode(ds) {
     let nodeId = ds.getUint32();
     audioNodeTable[nodeId] = null;
+}
+
+function audioNodeEnd(ds) {
+    let futureId = ds.getUint32();
+    let audioNode = ds.getAudioNode();
+
+    audioNode.onended = (event) => {
+        notifyValues(futureId, [true]);
+    };
 }
 
 function makeAudioContextDestination(ds) {

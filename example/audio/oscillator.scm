@@ -1,0 +1,31 @@
+(use graviton2)
+
+(define (main args)
+  (grv-begin
+    (let ((destination (make-audio-context-destination))
+          (pi (make-oscillator-node))
+          (po (make-oscillator-node)))
+      (set-oscillator-type! pi 'square)
+      (push-oscillator-frequency-audio-param! pi)
+      (audio-param-set-value-at-time! 2000 0)
+      (pop-audio-param!)
+      (connect-node! pi destination)
+
+      (set-oscillator-type! po 'square)
+      (push-oscillator-frequency-audio-param! po)
+      (audio-param-set-value-at-time! 1000 0)
+      (pop-audio-param!)
+      (connect-node! po destination)
+
+      (set-audio-base-time!)
+      (start-audio-node! pi)
+      (stop-audio-node! pi 0.1)
+      (free-node! pi)
+      (start-audio-node! po 0.1)
+      (stop-audio-node! po 0.2)
+      (free-node! po)
+
+      (asleep 0.5)
+      (app-close)
+      ))
+  0)
