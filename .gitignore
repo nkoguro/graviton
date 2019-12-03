@@ -2,8 +2,9 @@
 *.log
 .envrc
 VERSION
+player/node_modules
+src/*-lib.c
 src/*.o
 src/*.sci
 src/*.so
 src/Makefile
-src/*-lib.c
