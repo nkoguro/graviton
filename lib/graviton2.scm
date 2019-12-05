@@ -72,7 +72,7 @@
           await
           asleep
 
-          with-command-transaction
+          flush-commands
           app-close
           window-size
           make-canvas
@@ -222,8 +222,11 @@
                                           (report-error e)
                                           (exit 70)))
                                  (parameterize ((main-thread-pool pool)
-                                                (websocket-output-port out))
-                                   (proc event)))))))))))
+                                                (websocket-output-port out)
+                                                (command-transaction (make <command-transaction>
+                                                                       :out (open-output-uvector))))
+                                   (proc event)
+                                   (flush-commands)))))))))))
 
 (define (unregister-event-handler! event-type)
   (atomic *listener-table-atom*
@@ -240,11 +243,7 @@
                  :init-keyword :result-maker)
    (result-values :init-value #f)
    (result-exception :init-value #f)
-   (continuations :init-value '())
-   (ready? :init-value #f)))
-
-(define (mark-future-ready! future)
-  (slot-set! future 'ready? #t))
+   (continuations :init-value '())))
 
 (define (call-future-result-maker future args)
   (set-future-result-values&exception! future (values->list (apply (slot-ref future 'result-maker) args)) #f))
@@ -274,8 +273,7 @@
               conts)))
 
 (define (await future :optional (timeout #f) :rest timeout-vals)
-  (unless (slot-ref future 'ready?)
-    (errorf "~s hasn't been available yet." future))
+  (flush-commands)
   (let ((lock (slot-ref future 'lock))
         (result-values #f)
         (result-exception #f))
@@ -315,7 +313,6 @@
 
 (define (asleep sec)
   (let1 future (make <graviton-future>)
-    (mark-future-ready! future)
     (await future sec)))
 
 (define (async-apply proc args)
@@ -326,14 +323,15 @@
       (lambda ()
         (reset
           (parameterize ((main-thread-pool pool)
-                         (websocket-output-port out))
+                         (websocket-output-port out)
+                         (command-transaction (make <command-transaction> :out (open-output-uvector))))
             (let ((result-values #f)
                   (result-exception #f))
               (guard (e (else (set! result-exception e)))
                 (receive vals (apply proc args)
+                  (flush-commands)
                   (set! result-values vals)))
               (set-future-result-values&exception! future result-values result-exception))))))
-    (mark-future-ready! future)
     future))
 
 (define-syntax async
@@ -950,8 +948,7 @@
 
 (define-class <command-transaction> ()
   ((out :init-keyword :out)
-   (object-pair-buffer :init-value '())
-   (send-hook :init-keyword :send-hook)))
+   (object-pair-buffer :init-value '())))
 
 (define object-next-id (make-id-generator #xffffffff))
 
@@ -972,7 +969,7 @@
           (write-u8 (logior (logand n #x7f) #x80) out)
           (loop (ash n -7))))))))
 
-(define (%call-command cmd types args)
+(define (call-command cmd types args)
   (let1 out (slot-ref (command-transaction) 'out)
     (write-u16 (hash-table-get binary-command-table cmd) out 'little-endian)
     (map (lambda (type arg)
@@ -1011,10 +1008,7 @@
                 (write-u32 id out 'little-endian)))
              ('future
               (let1 id (register-future! arg)
-                (write-u32 id out 'little-endian)
-                (add-hook! (slot-ref (command-transaction) 'send-hook)
-                  (lambda ()
-                    (mark-future-ready! arg)))))
+                (write-u32 id out 'little-endian)))
              ('canvas
               (write-u32 (slot-ref arg 'id) out 'little-endian))
              ('image
@@ -1028,23 +1022,16 @@
               (write-u32 (slot-ref arg 'id) out 'little-endian))))
          types args)))
 
-(define (with-command-transaction thunk)
-  (let* ((out (open-output-uvector))
-         (txn (make <command-transaction> :out out :send-hook (make-hook))))
-    (parameterize ((command-transaction txn))
-      (begin0
-        (thunk)
-        (call-text-command "registerArgs" (list->vector (slot-ref txn 'object-pair-buffer)))
-        (send-binary-frame (websocket-output-port)
-                           (get-output-uvector out))
-        (run-hook (slot-ref txn 'send-hook))))))
-
-(define (call-command cmd types args)
-  (if (command-transaction)
-      (%call-command cmd types args)
-      (with-command-transaction
-        (lambda ()
-          (%call-command cmd types args)))))
+(define (flush-commands)
+  (let1 txn (command-transaction)
+    (let ((object-pair-buffer (slot-ref txn 'object-pair-buffer))
+          (output-data (get-output-uvector (slot-ref txn 'out))))
+      (unless (null? object-pair-buffer)
+        (call-text-command "registerArgs" (list->vector object-pair-buffer)))
+      (unless (= (uvector-length output-data) 0)
+        (send-binary-frame (websocket-output-port) output-data)))
+    (slot-set! txn 'object-pair-buffer '())
+    (slot-set! txn 'out (open-output-uvector))))
 
 (define (window-size)
   (let* ((future (make <graviton-future>)))

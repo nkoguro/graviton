@@ -25,20 +25,18 @@
   (vy))
 
 (define (prepare-ball-images canvas ball-width ball-height num-balls)
-  (with-command-transaction
-    (lambda ()
-      (parameterize ((current-canvas canvas))
-        (dotimes (i num-balls)
-          (begin-path)
-          (set-fill-style! (format "#~3,'0X" (random-integer #xfff)))
-          (ellipse (+ (* i ball-width) (/ ball-width 2))
-                   (/ ball-height 2)
-                   (/ ball-width 2)
-                   (/ ball-height 2)
-                   0
-                   0
-                   (* 2 pi))
-          (fill))))))
+  (parameterize ((current-canvas canvas))
+    (dotimes (i num-balls)
+      (begin-path)
+      (set-fill-style! (format "#~3,'0X" (random-integer #xfff)))
+      (ellipse (+ (* i ball-width) (/ ball-width 2))
+               (/ ball-height 2)
+               (/ ball-width 2)
+               (/ ball-height 2)
+               0
+               0
+               (* 2 pi))
+      (fill))))
 
 (define (update-balls! balls)
   (for-each (lambda (ball)
@@ -56,23 +54,21 @@
             balls))
 
 (define (draw-balls canvas sprite balls)
-  (with-command-transaction
-    (lambda ()
-      (parameterize ((current-canvas canvas))
-        (set-fill-style! "#000")
-        (fill-rect 0 0 *canvas-width* *canvas-height*)
-        (for-each (lambda (ball)
-                    (draw-canvas sprite
-                                 (* (ball-pattern-id ball) *sprite-width*)
-                                 0
-                                 *sprite-width*
-                                 *sprite-height*
-                                 (round->exact (- (ball-x ball) (/. *sprite-width* 2)))
-                                 (round->exact (- (ball-y ball) (/. *sprite-height* 2)))
-                                 *sprite-width*
-                                 *sprite-height*))
-                  balls)
-        (switch-double-buffer-canvas! canvas)))))
+  (parameterize ((current-canvas canvas))
+    (set-fill-style! "#000")
+    (fill-rect 0 0 *canvas-width* *canvas-height*)
+    (for-each (lambda (ball)
+                (draw-canvas sprite
+                             (* (ball-pattern-id ball) *sprite-width*)
+                             0
+                             *sprite-width*
+                             *sprite-height*
+                             (round->exact (- (ball-x ball) (/. *sprite-width* 2)))
+                             (round->exact (- (ball-y ball) (/. *sprite-height* 2)))
+                             *sprite-width*
+                             *sprite-height*))
+              balls)
+    (switch-double-buffer-canvas! canvas)))
 
 (define (main args)
   ;; (set-graviton-open-dev-tools! #t)
