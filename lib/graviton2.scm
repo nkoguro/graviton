@@ -158,7 +158,7 @@
           upload-image-data
           download-image-data
 
-          set-global-event-handler!
+          set-window-event-handler!
           set-canvas-event-handler!
 
           set-audio-base-time!
@@ -181,6 +181,7 @@
           set-oscillator-type!
           push-oscillator-frequency-audio-param!
           push-oscillator-detune-audio-param!
+          set-oscillator-periodic-wave!
           ))
 
 (select-module graviton2)
@@ -920,7 +921,7 @@
                       upload-image-data
                       download-image-data
 
-                      listen-global-event
+                      listen-window-event
                       listen-canvas-event
 
                       set-audio-base-time
@@ -943,6 +944,7 @@
                       set-oscillator-type
                       push-oscillator-frequency-audio-param
                       push-oscillator-detune-audio-param
+                      set-oscillator-periodic-wave
                       ))
     tbl))
 
@@ -1637,8 +1639,8 @@
     (call-command 'download-image-data '(future image) (list future image))
     future))
 
-(define (set-global-event-handler! event-type proc)
-  (call-command 'listen-global-event '(object boolean) (list (symbol->string event-type) (if proc #t #f)))
+(define (set-window-event-handler! event-type proc)
+  (call-command 'listen-window-event '(object boolean) (list (symbol->string event-type) (if proc #t #f)))
   (cond
     (proc
      (register-event-handler! event-type proc (main-thread-pool) (websocket-output-port)))
@@ -1737,6 +1739,11 @@
 
 (define (push-oscillator-detune-audio-param! oscillator-node)
   (call-command 'push-oscillator-detune-audio-param '(audio-node) (list oscillator-node)))
+
+(define (set-oscillator-periodic-wave! oscillator-node real imag :key (disable-nomalization #f))
+  (call-command 'set-oscillator-periodic-wave
+                '(audio-node object object object)
+                (list oscillator-node real imag `(("disableNomalization" . ,disable-nomalization)))))
 
 ;;;
 

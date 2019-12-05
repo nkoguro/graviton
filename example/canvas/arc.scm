@@ -7,7 +7,7 @@
   ;; (set-graviton-port! 8080)
   ;; (set-graviton-use-player! #f)
   (grv-begin
-    (set-global-event-handler! 'keyup (lambda (event)
+    (set-window-event-handler! 'keyup (lambda (event)
                                         (when (equal? (slot-ref event 'code) "Escape")
                                           (app-close))))
     (let1 canvas (make-canvas 150 200)

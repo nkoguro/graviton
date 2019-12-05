@@ -270,7 +270,7 @@ function initializeBinaryCommands() {
         uploadImageDataCommand,
         downloadImageDataCommand,
 
-        listenGlobalEvent,
+        listenWindowEvent,
         listenCanvasEvent,
 
         setAudioBaseTime,
@@ -292,7 +292,8 @@ function initializeBinaryCommands() {
         makeOscillatorNode,
         setOscillatorType,
         pushOscillatorFrequencyAudioParam,
-        pushOscillatorDetuneAudioParam
+        pushOscillatorDetuneAudioParam,
+        setOscillatorPeriodicWave
     ];
 }
 
@@ -317,7 +318,7 @@ function unregisterBinaryData(index) {
 
 let listenStateTable = {};
 
-function listenGlobalEvent(ds) {
+function listenWindowEvent(ds) {
     let eventType = ds.getObject();
     let flag = ds.getBoolean();
     listenStateTable[eventType] = flag;
@@ -1012,6 +1013,14 @@ function pushOscillatorFrequencyAudioParam(ds) {
 function pushOscillatorDetuneAudioParam(ds) {
     let audioNode = ds.getAudioNode();
     audioParamStack.unshift(audioNode.detune);
+}
+
+function setOscillatorPeriodicWave(ds) {
+    let oscillatorNode = ds.getAudioNode();
+    let real = ds.getObject();
+    let imag = ds.getObject();
+    let constraints = ds.getObject();
+    oscillatorNode.setPeriodicWave(audioContext.createPeriodicWave(real, imag, constraints));
 }
 
 

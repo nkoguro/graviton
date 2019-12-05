@@ -81,7 +81,7 @@
   (set-graviton-background-color! "black")
   (let-args (cdr args) ((num-sprites "s|sprites=i" 100))
     (grv-begin
-      (set-global-event-handler! 'keyup (lambda (event)
+      (set-window-event-handler! 'keyup (lambda (event)
                                           (when (equal? (slot-ref event 'code) "Escape")
                                             (app-close))))
       (let ((sprite (make-canvas (* *sprite-width* *num-patterns*) *sprite-height* :visible? #f))
@@ -110,6 +110,6 @@
             (time-counter-stop! tc)
             (let1 st (max (- *tick* (time-counter-value tc)) 0)
               ;; (log-format "sleep time: ~a" st)
-              (asleep! st))
+              (asleep st))
             )))))
   0)
