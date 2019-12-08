@@ -948,9 +948,9 @@
 
 (define-class <command-transaction> ()
   ((out :init-keyword :out)
-   (object-pair-buffer :init-value '())))
+   (json-pair-buffer :init-value '())))
 
-(define object-next-id (make-id-generator #xffffffff))
+(define json-next-id (make-id-generator #xffffffff))
 
 (define command-transaction (make-parameter #f))
 
@@ -1002,9 +1002,9 @@
               (write-uvector arg out))
              ('boolean
                (write-u8 (if arg 1 0) out 'little-endian))
-             ('object
-              (let1 id (object-next-id)
-                (push! (slot-ref (command-transaction) 'object-pair-buffer) (vector id arg))
+             ('json
+              (let1 id (json-next-id)
+                (push! (slot-ref (command-transaction) 'json-pair-buffer) (vector id arg))
                 (write-u32 id out 'little-endian)))
              ('future
               (let1 id (register-future! arg)
@@ -1015,8 +1015,8 @@
               (write-u32 (slot-ref arg 'id) out 'little-endian))
              (('resource content-type)
               (let* ((url (register-resource! content-type arg))
-                     (id (object-next-id)))
-                (push! (slot-ref (command-transaction) 'object-pair-buffer) (vector id url))
+                     (id (json-next-id)))
+                (push! (slot-ref (command-transaction) 'json-pair-buffer) (vector id url))
                 (write-u32 id out 'little-endian)))
              ('audio-node
               (write-u32 (slot-ref arg 'id) out 'little-endian))))
@@ -1024,13 +1024,13 @@
 
 (define (flush-commands)
   (let1 txn (command-transaction)
-    (let ((object-pair-buffer (slot-ref txn 'object-pair-buffer))
+    (let ((json-pair-buffer (slot-ref txn 'json-pair-buffer))
           (output-data (get-output-uvector (slot-ref txn 'out))))
-      (unless (null? object-pair-buffer)
-        (call-text-command "registerArgs" (list->vector object-pair-buffer)))
+      (unless (null? json-pair-buffer)
+        (call-text-command "registerArgs" (list->vector json-pair-buffer)))
       (unless (= (uvector-length output-data) 0)
         (send-binary-frame (websocket-output-port) output-data)))
-    (slot-set! txn 'object-pair-buffer '())
+    (slot-set! txn 'json-pair-buffer '())
     (slot-set! txn 'out (open-output-uvector))))
 
 (define (window-size)
@@ -1263,14 +1263,14 @@
 
 (define (set-fill-style! style)
   (set! (~ (current-canvas) 'context2d 'fill-style) style)
-  (call-command 'set-fill-style '(canvas object) (list (current-canvas) (style->json style))))
+  (call-command 'set-fill-style '(canvas json) (list (current-canvas) (style->json style))))
 
 (define (current-font)
   (~ (current-canvas) 'context2d 'font))
 
 (define (set-font! font)
   (set! (~ (current-canvas) 'context2d 'font) font)
-  (call-command 'set-font '(canvas object) (list (current-canvas) font)))
+  (call-command 'set-font '(canvas json) (list (current-canvas) font)))
 
 (define (current-global-alpha)
   (~ (current-canvas) 'context2d 'global-alpha))
@@ -1315,7 +1315,7 @@
     (unless op-name
       (errorf "Invalid global composite operation: ~a" op))
     (set! (~ (current-canvas) 'context2d 'global-composite-opration) op)
-    (call-command 'set-global-composite-operation '(canvas object) (list (current-canvas) op-name))))
+    (call-command 'set-global-composite-operation '(canvas json) (list (current-canvas) op-name))))
 
 (define (current-image-smoothing-enabled?)
   (~ (current-canvas) 'context2d 'image-smoothing-enabled))
@@ -1337,14 +1337,14 @@
     (unless opt-name
       (errorf "Invalid line cap option: ~a" opt))
     (set! (~ (current-canvas) 'context2d 'line-cap) opt)
-    (call-command 'set-line-cap '(canvas object) (list (current-canvas) opt-name))))
+    (call-command 'set-line-cap '(canvas json) (list (current-canvas) opt-name))))
 
 (define (current-line-dash)
   (~ (current-canvas) 'context2d 'line-dash))
 
 (define (set-line-dash! segments)
   (set! (~ (current-canvas) 'context2d 'line-dash) segments)
-  (call-command 'set-line-dash '(canvas object) (list (current-canvas) segments)))
+  (call-command 'set-line-dash '(canvas json) (list (current-canvas) segments)))
 
 (define (current-line-dash-offset)
   (~ (current-canvas) 'context2d 'line-dash-offset))
@@ -1366,7 +1366,7 @@
     (unless opt-name
       (errorf "Invalid line join option: ~a" opt))
     (set! (~ (current-canvas) 'context2d 'line-join) opt)
-    (call-command 'set-line-join '(canvas object) (list (current-canvas) offset))))
+    (call-command 'set-line-join '(canvas json) (list (current-canvas) offset))))
 
 (define (current-line-width)
   (~ (current-canvas) 'context2d 'line-width))
@@ -1394,7 +1394,7 @@
 
 (define (set-shadow-color! color)
   (set! (~ (current-canvas) 'context2d 'shadow-color) color)
-  (call-command 'set-shadow-color '(canvas object) (list (current-canvas) color)))
+  (call-command 'set-shadow-color '(canvas json) (list (current-canvas) color)))
 
 (define (current-shadow-offset-x)
   (~ (current-canvas) 'context2d 'shadow-offset-x))
@@ -1415,7 +1415,7 @@
 
 (define (set-stroke-style! style)
   (set! (~ (current-canvas) 'context2d 'stroke-style) style)
-  (call-command 'set-stroke-style '(canvas object) (list (current-canvas) (style->json style))))
+  (call-command 'set-stroke-style '(canvas json) (list (current-canvas) (style->json style))))
 
 (define (current-text-align)
   (~ (current-canvas) 'context2d 'text-align))
@@ -1432,7 +1432,7 @@
     (unless align-name
       (errorf "Invalid text align option: ~a" align))
     (set! (~ (current-canvas) 'context2d 'text-align) align)
-    (call-command 'set-text-align '(canvas object) (list (current-canvas) align-name))))
+    (call-command 'set-text-align '(canvas json) (list (current-canvas) align-name))))
 
 (define (current-text-baseline)
   (~ (current-canvas) 'context2d 'text-baseline))
@@ -1450,7 +1450,7 @@
     (unless opt-name
       (errorf "Invalid text baseline option: ~a" opt))
     (set! (~ (current-canvas) 'context2d 'text-baseline) opt)
-    (call-command 'set-text-baseline '(canvas object) (list (current-canvas) opt-name))))
+    (call-command 'set-text-baseline '(canvas json) (list (current-canvas) opt-name))))
 
 (define (arc x y radius start-angle end-angle :optional (anti-clockwise #f))
   (call-command 'arc
@@ -1477,7 +1477,7 @@
   (let1 rule-name (assoc-ref fillrule-alist rule #f)
     (unless rule-name
       (errorf "Invalid fillrule: ~a" rule))
-    (call-command 'clip '(canvas object) (list (current-canvas) rule-name))))
+    (call-command 'clip '(canvas json) (list (current-canvas) rule-name))))
 
 (define (close-path)
   (call-command 'close-path '(canvas) (list (current-canvas))))
@@ -1516,13 +1516,13 @@
   (let1 rule-name (assoc-ref fillrule-alist rule #f)
     (unless rule-name
       (errorf "Invalid fillrule: ~a" rule))
-    (call-command 'fill '(canvas object) (list (current-canvas) rule-name))))
+    (call-command 'fill '(canvas json) (list (current-canvas) rule-name))))
 
 (define (fill-rect x y w h)
   (call-command 'fill-rect '(canvas s32 s32 s32 s32) (list (current-canvas) x y w h)))
 
 (define (fill-text text x y :optional (max-width 0))
-  (call-command 'fill-text '(canvas object s32 s32 s32) (list (current-canvas) text x y max-width)))
+  (call-command 'fill-text '(canvas json s32 s32 s32) (list (current-canvas) text x y max-width)))
 
 (define (get-image-data sx sy sw sh)
   (let1 image (make <graviton-image> :width sw :height sh)
@@ -1535,7 +1535,7 @@
       (errorf "Invalid fillrule: ~a" rule))
 
     (let1 future (make <graviton-future>)
-      (call-command 'is-point-in-path '(canvas future s32 s32 object) (list (current-canvas) future x y rule-name))
+      (call-command 'is-point-in-path '(canvas future s32 s32 json) (list (current-canvas) future x y rule-name))
       future)))
 
 (define (is-point-in-stroke? x y)
@@ -1552,7 +1552,7 @@
 (define (measure-text text)
   (let1 future (make <graviton-future> :result-maker (lambda (alist)
                                                        (make <text-metrics> :width (assoc-ref alist "width"))))
-    (call-command 'measure-text '(canvas future object) (list (current-canvas) future text))
+    (call-command 'measure-text '(canvas future json) (list (current-canvas) future text))
     future))
 
 (define (move-to x y)
@@ -1599,7 +1599,7 @@
   (call-command 'stroke-rect '(canvas s32 s32 s32 s32) (list (current-canvas) x y w h)))
 
 (define (stroke-text text x y :optional (max-width 0))
-  (call-command 'stroke-text '(canvas object s32 s32 s32) (list (current-canvas) text x y max-width)))
+  (call-command 'stroke-text '(canvas json s32 s32 s32) (list (current-canvas) text x y max-width)))
 
 (define (transform a b c d e f)
   (call-command 'transform '(canvas f64 f64 f64 f64 f64 f64) (list (current-canvas) a b c d e f)))
@@ -1627,7 +1627,7 @@
     future))
 
 (define (set-window-event-handler! event-type proc)
-  (call-command 'listen-window-event '(object boolean) (list (symbol->string event-type) (if proc #t #f)))
+  (call-command 'listen-window-event '(json boolean) (list (symbol->string event-type) (if proc #t #f)))
   (cond
     (proc
      (register-event-handler! event-type proc (main-thread-pool) (websocket-output-port)))
@@ -1637,7 +1637,7 @@
 (define (set-canvas-event-handler! canvas event-type proc)
   (let1 event-name (format "_canvas_~a_~a" (slot-ref canvas 'id) event-type)
     (call-command 'listen-canvas-event
-                  '(canvas object object boolean)
+                  '(canvas json json boolean)
                   (list canvas (symbol->string event-type) event-name (if proc #t #f)))
     (cond
       (proc
@@ -1694,7 +1694,7 @@
   (call-command 'audio-param-set-target-at-time '(f64 f64 f64) (list val start-time time-constant)))
 
 (define (audio-param-set-value-curve-at-time! vals start-time duration)
-  (call-command 'audio-param-set-value-curve-at-time '(object f64 f64) (list vals start-time duration)))
+  (call-command 'audio-param-set-value-curve-at-time '(json f64 f64) (list vals start-time duration)))
 
 (define (audio-param-cancel-scheduled-values! start-time)
   (call-command 'audio-param-cancel-scheduled-values '(f64) (list start-time)))
@@ -1717,7 +1717,7 @@
     (triangle . "triangle")))
 
 (define (set-oscillator-type! oscillator-node type)
-  (call-command 'set-oscillator-type '(audio-node object) (list oscillator-node
+  (call-command 'set-oscillator-type '(audio-node json) (list oscillator-node
                                                                 (or (assoc-ref oscillator-type-alist type #f)
                                                                     (errorf "Invalid oscillator type: ~a" type)))))
 
@@ -1729,7 +1729,7 @@
 
 (define (set-oscillator-periodic-wave! oscillator-node real imag :key (disable-nomalization #f))
   (call-command 'set-oscillator-periodic-wave
-                '(audio-node object object object)
+                '(audio-node json json json)
                 (list oscillator-node real imag `(("disableNomalization" . ,disable-nomalization)))))
 
 ;;;

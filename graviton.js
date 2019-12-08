@@ -27,16 +27,16 @@ function connectServer() {
 
 let canvasTable = {};
 let imageTable = {};
-let objectTable = {};
+let jsonTable = {};
 let audioNodeTable = {};
 
-function registerObject(index, obj) {
-    objectTable[index] = obj;
+function registerJson(index, obj) {
+    jsonTable[index] = obj;
 }
 
-function fetchObject(index) {
-    let obj = objectTable[index];
-    objectTable[index] = null;
+function fetchJson(index) {
+    let obj = jsonTable[index];
+    jsonTable[index] = null;
     return obj;
 }
 
@@ -126,10 +126,10 @@ class DataStream {
         return v !== 0;
     }
 
-    getObject() {
+    getJson() {
         let index = this.dataView.getUint32(this.position, true);
         this.position += 4;
-        return fetchObject(index);
+        return fetchJson(index);
     }
 
     getUint8Array(len) {
@@ -319,15 +319,15 @@ function unregisterBinaryData(index) {
 let listenStateTable = {};
 
 function listenWindowEvent(ds) {
-    let eventType = ds.getObject();
+    let eventType = ds.getJson();
     let flag = ds.getBoolean();
     listenStateTable[eventType] = flag;
 }
 
 function listenCanvasEvent(ds) {
     let canvas = ds.getCanvas();
-    let eventType = ds.getObject();
-    let eventName = ds.getObject();
+    let eventType = ds.getJson();
+    let eventName = ds.getJson();
     let flag = ds.getBoolean();
 
     let handler = flag ? (e) => { notifyEvent(eventName, createMouseEvent(canvas, e)); } : null;
@@ -401,7 +401,7 @@ function makeCanvasCommand(ds) {
 function loadCanvasCommand(ds) {
     let futureId = ds.getUint32();
     let canvasId = ds.getUint32();
-    let url = ds.getObject();
+    let url = ds.getJson();
     let z = ds.getUint32();
     let visibility = ds.getBoolean();
 
@@ -450,13 +450,13 @@ let workingImages = new Set();
 
 function setFillStyleCommand(ds) {
     let ctx = ds.getContext2d();
-    let style = ds.getObject();
+    let style = ds.getJson();
     ctx.fillStyle = obj2style(ctx, style);
 }
 
 function setFontCommand(ds) {
     let ctx = ds.getContext2d();
-    let font = ds.getObject();
+    let font = ds.getJson();
     ctx.font = font;
 }
 
@@ -468,7 +468,7 @@ function setGlobalAlphaCommand(ds) {
 
 function setGlobalCompositeOperationCommand(ds) {
     let ctx = ds.getContext2d();
-    let op = ds.getObject();
+    let op = ds.getJson();
     ctx.globalCompositeOperation = op;
 }
 
@@ -480,13 +480,13 @@ function setImageSmoothingEnabledCommand(ds) {
 
 function setLineCapCommand(ds) {
     let ctx = ds.getContext2d();
-    let val = ds.getObject();
+    let val = ds.getJson();
     ctx.lineCap = val;
 }
 
 function setLineDashCommand(ds) {
     let ctx = ds.getContext2d();
-    let segments = ds.getObject();
+    let segments = ds.getJson();
     ctx.setLineDash(segments);
 }
 
@@ -498,7 +498,7 @@ function setLineDashOffsetCommand(ds) {
 
 function setLineJoinCommand(ds) {
     let ctx = ds.getContext2d();
-    let val = ds.getObject();
+    let val = ds.getJson();
     ctx.lineJoin = val;
 }
 
@@ -522,7 +522,7 @@ function setShadowBlurCommand(ds) {
 
 function setShadowColorCommand(ds) {
     let ctx = ds.getContext2d();
-    let color = ds.getObject();
+    let color = ds.getJson();
     ctx.shadowColor = color;
 }
 
@@ -540,19 +540,19 @@ function setShadowOffsetYCommand(ds) {
 
 function setStrokeStyleCommand(ds) {
     let ctx = ds.getContext2d();
-    let style = ds.getObject();
+    let style = ds.getJson();
     ctx.strokeStyle = obj2style(ctx, style);
 }
 
 function setTextAlignCommand(ds) {
     let ctx = ds.getContext2d();
-    let align = ds.getObject();
+    let align = ds.getJson();
     ctx.textAlign = align;
 }
 
 function setTextBaselineCommand(ds) {
     let ctx = ds.getContext2d();
-    let val = ds.getObject();
+    let val = ds.getJson();
     ctx.textBaseline = val;
 }
 
@@ -604,7 +604,7 @@ function clearRectCommand(ds) {
 
 function clipCommand(ds) {
     let ctx = ds.getContext2d();
-    let rule = ds.getObject();
+    let rule = ds.getJson();
     ctx.clip(rule);
 }
 
@@ -655,7 +655,7 @@ function ellipseCommand(ds) {
 
 function fillCommand(ds) {
     let ctx = ds.getContext2d();
-    let rule = ds.getObject();
+    let rule = ds.getJson();
     ctx.fill(rule);
 }
 
@@ -670,7 +670,7 @@ function fillRectCommand(ds) {
 
 function fillTextCommand(ds) {
     let ctx = ds.getContext2d();
-    let text = ds.getObject();
+    let text = ds.getJson();
     let x = ds.getInt32();
     let y = ds.getInt32();
     let maxWidth = ds.getInt32();
@@ -697,7 +697,7 @@ function isPointInPathCommand(ds) {
     let futureId = ds.getUint32();
     let x = ds.getInt32();
     let y = ds.getInt32();
-    let fillRule = ds.getObject();
+    let fillRule = ds.getJson();
     let result = ctx.isPointInPath(x, y, fillRule);
     notifyValues(futureId, [result]);
 }
@@ -721,7 +721,7 @@ function lineToCommand(ds) {
 function measureTextCommand(ds) {
     let ctx = ds.getContext2d();
     let futureId = ds.getUint32();
-    let text = ds.getObject();
+    let text = ds.getJson();
     let textMetrics = ctx.measureText(text);
     notifyMakeResult(futureId, [{"width": textMetrics.width}]);
 }
@@ -818,7 +818,7 @@ function strokeRectCommand(ds) {
 
 function strokeTextCommand(ds) {
     let ctx = ds.getContext2d();
-    let text = ds.getObject();
+    let text = ds.getJson();
     let x = ds.getInt32();
     let y = ds.getInt32();
     let maxWidth = ds.getInt32();
@@ -972,7 +972,7 @@ function audioParamSetTargetAtTime(ds) {
 }
 
 function audioParamSetValueCurveAtTime(ds) {
-    let values = ds.getObject();
+    let values = ds.getJson();
     let startTime = audioBaseTime + ds.getFloat64();
     let duration = ds.getFloat64();
     audioParamStack[0].setValueCurveAtTime(values, startTime, duration);
@@ -1001,7 +1001,7 @@ function makeOscillatorNode(ds) {
 
 function setOscillatorType(ds) {
     let audioNode = ds.getAudioNode();
-    let type = ds.getObject();
+    let type = ds.getJson();
     audioNode.type = type;
 }
 
@@ -1017,9 +1017,9 @@ function pushOscillatorDetuneAudioParam(ds) {
 
 function setOscillatorPeriodicWave(ds) {
     let oscillatorNode = ds.getAudioNode();
-    let real = ds.getObject();
-    let imag = ds.getObject();
-    let constraints = ds.getObject();
+    let real = ds.getJson();
+    let imag = ds.getJson();
+    let constraints = ds.getJson();
     oscillatorNode.setPeriodicWave(audioContext.createPeriodicWave(real, imag, constraints));
 }
 
@@ -1047,7 +1047,7 @@ function dispatchJsonMessage(params) {
 
 function registerArgs(pairs) {
     pairs.forEach((pair) => {
-        registerObject(pair[0], pair[1]);
+        registerJson(pair[0], pair[1]);
     });
 }
 
