@@ -29,17 +29,29 @@ let canvasTable = {};
 let imageTable = {};
 let jsonTable = {};
 let audioNodeTable = {};
+let proxyObjectTable = {};
 
-function registerJson(index, obj) {
-    jsonTable[index] = obj;
+function registerJson(index, json) {
+    jsonTable[index] = json;
 }
 
 function fetchJson(index) {
-    let obj = jsonTable[index];
+    let json = jsonTable[index];
     jsonTable[index] = null;
-    return obj;
+    return json;
 }
 
+function linkProxyObject(index, obj) {
+    proxyObjectTable[index] = obj;
+}
+
+function unlinkProxyObject(index) {
+    proxyObjectTable[index] = null;
+}
+
+function getProxyObject(index) {
+    return proxyObjectTable[index];
+}
 
 class DataStream {
     constructor(buf) {
@@ -157,6 +169,11 @@ class DataStream {
         let nodeId = this.getUint32();
         return audioNodeTable[nodeId];
     }
+
+    getProxyObject() {
+        let index = this.getUint32();
+        return getProxyObject(index);
+    }
 }
 
 function notifyValues(futureId, vals) {
@@ -210,6 +227,7 @@ function initializeBinaryCommands() {
     binaryCommands = [
         appClose,
 
+        unlinkProxyObjectCommand,
         registerBinaryData,
         makeCanvasCommand,
         loadCanvasCommand,
@@ -266,7 +284,6 @@ function initializeBinaryCommands() {
         transformCommand,
         translateCommand,
         createImageDataCommand,
-        freeImageDataCommand,
         uploadImageDataCommand,
         downloadImageDataCommand,
 
@@ -278,7 +295,6 @@ function initializeBinaryCommands() {
         stopAudioNode,
         connectNode,
         disconnectNode,
-        freeNode,
         audioNodeEnd,
         audioParamSetValueAtTime,
         audioParamLinearRampToValueAtTime,
@@ -301,6 +317,11 @@ function appClose(ds) {
     if (webSocket) {
         webSocket.close(1000);
     }
+}
+
+function unlinkProxyObjectCommand(ds) {
+    let index = ds.getUint32();
+    unlinkProxyObject(index);
 }
 
 let binaryDataTable = {};
@@ -856,11 +877,6 @@ function createImageDataCommand(ds) {
     imageTable[imageId] = image;
 }
 
-function freeImageDataCommand(ds) {
-    let imageId = ds.getUint32();
-    imageTable[imageId] = null;
-}
-
 function uploadImageDataCommand(ds) {
     let image = ds.getImageData();
     let len = ds.getUint32();
@@ -923,11 +939,6 @@ function disconnectNode(ds) {
     let fromAudioNode = ds.getAudioNode();
     let toAudioNode = ds.getAudioNode();
     fromAudioNode.disconnect(toAudioNode);
-}
-
-function freeNode(ds) {
-    let nodeId = ds.getUint32();
-    audioNodeTable[nodeId] = null;
 }
 
 function audioNodeEnd(ds) {

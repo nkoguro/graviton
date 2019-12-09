@@ -81,6 +81,7 @@
           current-canvas
           set-canvas-visible!
           switch-double-buffer-canvas!
+          unlink-proxy-object!
 
           linear-gradient
           radial-gradient
@@ -154,7 +155,6 @@
           transform
           translate
           create-image-data
-          free-image-data
           upload-image-data
           download-image-data
 
@@ -166,7 +166,6 @@
           stop-audio-node!
           connect-node!
           disconnect-node!
-          free-node!
           audio-node-end
           make-audio-context-destination
           audio-param-set-value-at-time!
@@ -209,7 +208,7 @@
 
 ;;;
 
-(define (register-event-handler! event-type proc pool out)
+(define (register-event-handler! event-type proc pool out next-id)
   (atomic *listener-table-atom*
     (lambda (tbl)
       (hash-table-set! tbl
@@ -223,6 +222,7 @@
                                           (exit 70)))
                                  (parameterize ((main-thread-pool pool)
                                                 (websocket-output-port out)
+                                                (proxy-object-next-id next-id)
                                                 (command-transaction (make <command-transaction>
                                                                        :out (open-output-uvector))))
                                    (proc event)
@@ -318,12 +318,14 @@
 (define (async-apply proc args)
   (let ((future (make <graviton-future>))
         (pool (main-thread-pool))
-        (out (websocket-output-port)))
+        (out (websocket-output-port))
+        (next-id (proxy-object-next-id)))
     (add-job! pool
       (lambda ()
         (reset
           (parameterize ((main-thread-pool pool)
                          (websocket-output-port out)
+                         (proxy-object-next-id next-id)
                          (command-transaction (make <command-transaction> :out (open-output-uvector))))
             (let ((result-values #f)
                   (result-exception #f))
@@ -551,6 +553,31 @@
 
 ;;;
 
+(define proxy-object-next-id (make-parameter #f))
+
+(define-class <proxy-object> ()
+  ((id :init-value #f)))
+
+(define-method initialize ((obj <proxy-object>) :rest args)
+  (next-method)
+  (if (proxy-object-next-id)
+      (slot-set! obj 'id ((proxy-object-next-id)))
+      (error "proxy object can't be instaniated in non app-main thread")))
+
+(define (proxy-object-id obj)
+  (or (slot-ref obj 'id)
+      (errorf "~s was unlinked" obj)))
+
+(define (unlink-proxy-object! obj)
+  (cond
+    ((slot-ref obj 'id) => (lambda (id)
+                             (slot-set! obj 'id #f)
+                             (call-command 'unlink-proxy-object '(u32) (list id))))
+    (else
+     #t)))
+
+;;;
+
 (log-open #t)
 
 (define (log-debug fmt :rest args)
@@ -734,7 +761,8 @@
           (guard (e (else (report-error e)))
             (let ((sel (make <selector>))
                   (ctx (make <websocket-server-context>))
-                  (pool (make-thread-pool 1)))
+                  (pool (make-thread-pool 1))
+                  (next-id (make-id-generator #xffffffff)))
               (define (close-websocket status data)
                 (log-info "WebSocket closed: code=~a, data=(~a)" status data)
                 (selector-delete! sel in #f #f)
@@ -769,7 +797,8 @@
                                          (lambda (event)
                                            (*initial-thunk*))
                                          pool
-                                         out)
+                                         out
+                                         next-id)
                 (notify-event "start" #f))
 
               (while (not (port-closed? in))
@@ -858,6 +887,7 @@
                       (hash-table-put! tbl cmd i))
                     '(
                       app-close
+                      unlink-proxy-object
                       register-binary
 
                       make-canvas
@@ -915,7 +945,6 @@
                       transform
                       translate
                       create-image-data
-                      free-image-data
                       upload-image-data
                       download-image-data
 
@@ -927,7 +956,6 @@
                       stop-audio-node
                       connect-node
                       disconnect-node
-                      free-node
                       audio-node-end
                       audio-param-set-value-at-time
                       audio-param-linear-ramp-to-value-at-time
@@ -1009,17 +1037,13 @@
              ('future
               (let1 id (register-future! arg)
                 (write-u32 id out 'little-endian)))
-             ('canvas
-              (write-u32 (slot-ref arg 'id) out 'little-endian))
-             ('image
-              (write-u32 (slot-ref arg 'id) out 'little-endian))
+             ('proxy
+              (write-u32 (proxy-object-id arg) out 'little-endian))
              (('resource content-type)
               (let* ((url (register-resource! content-type arg))
                      (id (json-next-id)))
                 (push! (slot-ref (command-transaction) 'json-pair-buffer) (vector id url))
-                (write-u32 id out 'little-endian)))
-             ('audio-node
-              (write-u32 (slot-ref arg 'id) out 'little-endian))))
+                (write-u32 id out 'little-endian)))))
          types args)))
 
 (define (flush-commands)
@@ -1041,13 +1065,10 @@
 (define (app-close)
   (call-command 'app-close '() '()))
 
-(define canvas-next-id (make-id-generator))
-
 (define current-canvas (make-parameter #f))
 
-(define-class <canvas> ()
-  ((id :init-keyword :id)
-   (width :init-keyword :width)
+(define-class <canvas> (<proxy-object>)
+  ((width :init-keyword :width)
    (height :init-keyword :height)
    (z :init-keyword :z)
    (visible? :init-keyword :visible?)
@@ -1072,7 +1093,9 @@
                                             (slot-ref db-canvas 'onscreen-index))))
    (id :allocation :virtual
        :slot-ref (lambda (db-canvas)
-                   (slot-ref (slot-ref db-canvas 'offscreen-canvas) 'id)))
+                   (proxy-object-id (slot-ref db-canvas 'offscreen-canvas)))
+       :slot-set! (lambda (db-canvas id)
+                    #t))
    (width :allocation :virtual
           :slot-ref (lambda (db-canvas)
                       (slot-ref (slot-ref db-canvas 'offscreen-canvas) 'width)))
@@ -1117,23 +1140,9 @@
               (class-direct-slots <context2d>))
     ctx2))
 
-(define image-next-id (make-id-generator))
-
-(define-class <graviton-image> ()
-  ((id :init-form (image-next-id))
-   (width :init-keyword :width)
-   (height :init-keyword :height)
-   (valid? :init-value #t)))
-
-(define (invalidate obj)
-  (slot-set! obj 'valid? #f))
-
-(define (valid? obj)
-  (slot-ref obj 'valid?))
-
-(define (check-valid obj)
-  (unless (valid? obj)
-    (errorf "~s isn't available." obj)))
+(define-class <graviton-image> (<proxy-object>)
+  ((width :init-keyword :width)
+   (height :init-keyword :height)))
 
 (define-class <linear-gradient> ()
   ((x0 :init-keyword :x0)
@@ -1204,37 +1213,33 @@
 (define-method style->json ((pattern <pattern>))
   `(("type" . "pattern")
     ("canvas" . ,(and-let1 canvas (slot-ref pattern 'canvas)
-                   (slot-ref canvas 'id)))
+                   (proxy-object-id canvas)))
     ("image" . ,(and-let1 image (slot-ref pattern 'image)
-                  (slot-ref image 'id)))
+                  (proxy-object-id image)))
     ("repetition" . ,(slot-ref pattern 'repetition))))
 
 (define (make-canvas width height :key (z 0) (visible? #t))
-  (let ((id (canvas-next-id)))
-    (call-command 'make-canvas '(u32 u32 u32 u32 boolean) (list id width height z visible?))
-    (let1 canvas (make <canvas> :id id :width width :height height :z z :visible? visible?)
-      (when visible?
-        (current-canvas canvas))
-      canvas)))
+  (let1 canvas (make <canvas> :width width :height height :z z :visible? visible?)
+    (call-command 'make-canvas '(proxy u32 u32 u32 boolean) (list canvas width height z visible?))
+    (when visible?
+      (current-canvas canvas))
+    canvas))
 
 (define (load-canvas filename :key (z 0) (visible? #t) (content-type #f))
-  (let* ((id (canvas-next-id))
+  (let* ((canvas (make <canvas> :z z :visible? visible?))
          (future (make <graviton-future> :result-maker (lambda (w h)
-                                                         (make <canvas>
-                                                           :id id
-                                                           :width w
-                                                           :height h
-                                                           :z z
-                                                           :visible? visible?))))
+                                                         (slot-set! canvas 'width w)
+                                                         (slot-set! canvas 'height h)
+                                                         canvas)))
          (data (call-with-input-file filename port->uvector)))
     (call-command 'load-canvas
                   `(future
-                    u32
+                    proxy
                     (resource ,(or content-type
                                    (estimate-content-type filename)))
                     u32
                     boolean)
-                  (list future id data z visible?))
+                  (list future canvas data z visible?))
     future))
 
 (define (make-double-buffer-canvas width height :key (z 0) (visible? #t))
@@ -1255,7 +1260,7 @@
                (modulo (+ (slot-ref db-canvas 'offscreen-index) 1) 2))))
 
 (define (set-canvas-visible! canvas visible?)
-  (call-command 'set-canvas-visibility '(canvas boolean) (list canvas visible?))
+  (call-command 'set-canvas-visibility '(proxy boolean) (list canvas visible?))
   (slot-set! canvas 'visible? visible?))
 
 (define (current-fill-style)
@@ -1263,21 +1268,21 @@
 
 (define (set-fill-style! style)
   (set! (~ (current-canvas) 'context2d 'fill-style) style)
-  (call-command 'set-fill-style '(canvas json) (list (current-canvas) (style->json style))))
+  (call-command 'set-fill-style '(proxy json) (list (current-canvas) (style->json style))))
 
 (define (current-font)
   (~ (current-canvas) 'context2d 'font))
 
 (define (set-font! font)
   (set! (~ (current-canvas) 'context2d 'font) font)
-  (call-command 'set-font '(canvas json) (list (current-canvas) font)))
+  (call-command 'set-font '(proxy json) (list (current-canvas) font)))
 
 (define (current-global-alpha)
   (~ (current-canvas) 'context2d 'global-alpha))
 
 (define (set-global-alpha! alpha)
   (set! (~ (current-canvas) 'context2d 'global-alpha) alpha)
-  (call-command 'set-global-alpha '(canvas f64) (list (current-canvas) alpha)))
+  (call-command 'set-global-alpha '(proxy f64) (list (current-canvas) alpha)))
 
 (define (current-global-composite-operation)
   (~ (current-canvas) 'context2d 'global-composite-operation))
@@ -1315,14 +1320,14 @@
     (unless op-name
       (errorf "Invalid global composite operation: ~a" op))
     (set! (~ (current-canvas) 'context2d 'global-composite-opration) op)
-    (call-command 'set-global-composite-operation '(canvas json) (list (current-canvas) op-name))))
+    (call-command 'set-global-composite-operation '(proxy json) (list (current-canvas) op-name))))
 
 (define (current-image-smoothing-enabled?)
   (~ (current-canvas) 'context2d 'image-smoothing-enabled))
 
 (define (set-image-smoothing-enabled! flag)
   (set! (~ (current-canvas) 'context2d 'image-smoothing-enabled) flag)
-  (call-command 'set-image-smoothing-enabled '(canvas boolean) (list (current-canvas) flag)))
+  (call-command 'set-image-smoothing-enabled '(proxy boolean) (list (current-canvas) flag)))
 
 (define (current-line-cap)
   (~ (current-canvas) 'context2d 'line-cap))
@@ -1337,21 +1342,21 @@
     (unless opt-name
       (errorf "Invalid line cap option: ~a" opt))
     (set! (~ (current-canvas) 'context2d 'line-cap) opt)
-    (call-command 'set-line-cap '(canvas json) (list (current-canvas) opt-name))))
+    (call-command 'set-line-cap '(proxy json) (list (current-canvas) opt-name))))
 
 (define (current-line-dash)
   (~ (current-canvas) 'context2d 'line-dash))
 
 (define (set-line-dash! segments)
   (set! (~ (current-canvas) 'context2d 'line-dash) segments)
-  (call-command 'set-line-dash '(canvas json) (list (current-canvas) segments)))
+  (call-command 'set-line-dash '(proxy json) (list (current-canvas) segments)))
 
 (define (current-line-dash-offset)
   (~ (current-canvas) 'context2d 'line-dash-offset))
 
 (define (set-line-dash-offset! offset)
   (set! (~ (current-canvas) 'context2d 'line-dash-offset) offset)
-  (call-command 'set-line-dash-offset '(canvas f64) (list (current-canvas) offset)))
+  (call-command 'set-line-dash-offset '(proxy f64) (list (current-canvas) offset)))
 
 (define (current-line-join)
   (~ (current-canvas) 'context2d 'line-join))
@@ -1366,56 +1371,56 @@
     (unless opt-name
       (errorf "Invalid line join option: ~a" opt))
     (set! (~ (current-canvas) 'context2d 'line-join) opt)
-    (call-command 'set-line-join '(canvas json) (list (current-canvas) offset))))
+    (call-command 'set-line-join '(proxy json) (list (current-canvas) offset))))
 
 (define (current-line-width)
   (~ (current-canvas) 'context2d 'line-width))
 
 (define (set-line-width! w)
   (set! (~ (current-canvas) 'context2d 'line-width) w)
-  (call-command 'set-line-width '(canvas f64) (list (current-canvas) w)))
+  (call-command 'set-line-width '(proxy f64) (list (current-canvas) w)))
 
 (define (current-miter-limit)
   (~ (current-canvas) 'context2d 'miter-limit))
 
 (define (set-miter-limit! limit)
   (set! (~ (current-canvas) 'context2d 'miter-limit) limit)
-  (call-command 'set-miter-limit '(canvas f64) (list (current-canvas) limit)))
+  (call-command 'set-miter-limit '(proxy f64) (list (current-canvas) limit)))
 
 (define (current-shadow-blur)
   (~ (current-canvas) 'context2d 'shadow-blur))
 
 (define (set-shadow-blur! level)
   (set! (~ (current-canvas) 'context2d 'shadow-blur) level)
-  (call-command 'set-shadow-blur '(canvas f64) (list (current-canvas) level)))
+  (call-command 'set-shadow-blur '(proxy f64) (list (current-canvas) level)))
 
 (define (current-shadow-color)
   (~ (current-canvas) 'context2d 'shadow-color))
 
 (define (set-shadow-color! color)
   (set! (~ (current-canvas) 'context2d 'shadow-color) color)
-  (call-command 'set-shadow-color '(canvas json) (list (current-canvas) color)))
+  (call-command 'set-shadow-color '(proxy json) (list (current-canvas) color)))
 
 (define (current-shadow-offset-x)
   (~ (current-canvas) 'context2d 'shadow-offset-x))
 
 (define (set-shadow-offset-x! offset)
   (set! (~ (current-canvas) 'context2d 'shadow-offset-x) offset)
-  (call-command 'set-shadow-offset-x '(canvas f64) (list (current-canvas) offset)))
+  (call-command 'set-shadow-offset-x '(proxy f64) (list (current-canvas) offset)))
 
 (define (current-shadow-offset-y)
   (~ (current-canvas) 'context2d 'shadow-offset-y))
 
 (define (set-shadow-offset-y! offset)
   (set! (~ (current-canvas) 'context2d 'shadow-offset-y) offset)
-  (call-command 'set-shadow-offset-y '(canvas f64) (list (current-canvas) offset)))
+  (call-command 'set-shadow-offset-y '(proxy f64) (list (current-canvas) offset)))
 
 (define (current-stroke-style)
   (~ (current-canvas) 'context2d 'stroke-style))
 
 (define (set-stroke-style! style)
   (set! (~ (current-canvas) 'context2d 'stroke-style) style)
-  (call-command 'set-stroke-style '(canvas json) (list (current-canvas) (style->json style))))
+  (call-command 'set-stroke-style '(proxy json) (list (current-canvas) (style->json style))))
 
 (define (current-text-align)
   (~ (current-canvas) 'context2d 'text-align))
@@ -1432,7 +1437,7 @@
     (unless align-name
       (errorf "Invalid text align option: ~a" align))
     (set! (~ (current-canvas) 'context2d 'text-align) align)
-    (call-command 'set-text-align '(canvas json) (list (current-canvas) align-name))))
+    (call-command 'set-text-align '(proxy json) (list (current-canvas) align-name))))
 
 (define (current-text-baseline)
   (~ (current-canvas) 'context2d 'text-baseline))
@@ -1450,24 +1455,24 @@
     (unless opt-name
       (errorf "Invalid text baseline option: ~a" opt))
     (set! (~ (current-canvas) 'context2d 'text-baseline) opt)
-    (call-command 'set-text-baseline '(canvas json) (list (current-canvas) opt-name))))
+    (call-command 'set-text-baseline '(proxy json) (list (current-canvas) opt-name))))
 
 (define (arc x y radius start-angle end-angle :optional (anti-clockwise #f))
   (call-command 'arc
-                '(canvas s32 s32 s32 f64 f64 boolean)
+                '(proxy s32 s32 s32 f64 f64 boolean)
                 (list (current-canvas) x y radius start-angle end-angle anti-clockwise)))
 
 (define (arc-to x1 y1 x2 y2 radius)
-  (call-command 'arc-to '(canvas s32 s32 s32 s32 s32) (list (current-canvas) x1 y1 x2 y2 radius)))
+  (call-command 'arc-to '(proxy s32 s32 s32 s32 s32) (list (current-canvas) x1 y1 x2 y2 radius)))
 
 (define (begin-path)
-  (call-command 'begin-path '(canvas) (list (current-canvas))))
+  (call-command 'begin-path '(proxy) (list (current-canvas))))
 
 (define (bezier-curve-to cp1x cp1y cp2x cp2y x y)
-  (call-command 'bezier-curve-to '(canvas s32 s32 s32 s32 s32 s32) (list (current-canvas) cp1x cp1y cp2x cp2y x y)))
+  (call-command 'bezier-curve-to '(proxy s32 s32 s32 s32 s32 s32) (list (current-canvas) cp1x cp1y cp2x cp2y x y)))
 
 (define (clear-rect x y w h)
-  (call-command 'clear-rect '(canvas s32 s32 s32 s32) (list (current-canvas) x y w h)))
+  (call-command 'clear-rect '(proxy s32 s32 s32 s32) (list (current-canvas) x y w h)))
 
 (define fillrule-alist
   '((nonzero . "nonzero")
@@ -1477,10 +1482,10 @@
   (let1 rule-name (assoc-ref fillrule-alist rule #f)
     (unless rule-name
       (errorf "Invalid fillrule: ~a" rule))
-    (call-command 'clip '(canvas json) (list (current-canvas) rule-name))))
+    (call-command 'clip '(proxy json) (list (current-canvas) rule-name))))
 
 (define (close-path)
-  (call-command 'close-path '(canvas) (list (current-canvas))))
+  (call-command 'close-path '(proxy) (list (current-canvas))))
 
 (define (estimate-content-type filename)
   (let1 ext (string-downcase (path-extension filename))
@@ -1497,36 +1502,36 @@
        #f))))
 
 (define-method draw-canvas ((canvas <canvas>) dx dy)
-  (call-command 'draw-canvas '(canvas canvas u8 s32 s32) (list (current-canvas) canvas 3 dx dy)))
+  (call-command 'draw-canvas '(proxy proxy u8 s32 s32) (list (current-canvas) canvas 3 dx dy)))
 
 (define-method draw-canvas ((canvas <canvas>) dx dy dw dh)
-  (call-command 'draw-canvas '(canvas canvas u8 s32 s32 s32 s32) (list (current-canvas) canvas 2 dx dy dw dh)))
+  (call-command 'draw-canvas '(proxy proxy u8 s32 s32 s32 s32) (list (current-canvas) canvas 2 dx dy dw dh)))
 
 (define-method draw-canvas ((canvas <canvas>) sx sy sw sh dx dy dw dh)
   (call-command 'draw-canvas
-                '(canvas canvas u8 s32 s32 s32 s32 s32 s32 s32 s32)
+                '(proxy proxy u8 s32 s32 s32 s32 s32 s32 s32 s32)
                 (list (current-canvas) canvas 1 sx sy sw sh dx dy dw dh)))
 
 (define (ellipse x y radius-x radius-y rotation start-angle end-angle :optional (anti-clockwise #f))
   (call-command 'ellipse
-                '(canvas s32 s32 s32 s32 f64 f64 f64 boolean)
+                '(proxy s32 s32 s32 s32 f64 f64 f64 boolean)
                 (list (current-canvas) x y radius-x radius-y rotation start-angle end-angle anti-clockwise)))
 
 (define (fill :optional (rule 'nonzero))
   (let1 rule-name (assoc-ref fillrule-alist rule #f)
     (unless rule-name
       (errorf "Invalid fillrule: ~a" rule))
-    (call-command 'fill '(canvas json) (list (current-canvas) rule-name))))
+    (call-command 'fill '(proxy json) (list (current-canvas) rule-name))))
 
 (define (fill-rect x y w h)
-  (call-command 'fill-rect '(canvas s32 s32 s32 s32) (list (current-canvas) x y w h)))
+  (call-command 'fill-rect '(proxy s32 s32 s32 s32) (list (current-canvas) x y w h)))
 
 (define (fill-text text x y :optional (max-width 0))
-  (call-command 'fill-text '(canvas json s32 s32 s32) (list (current-canvas) text x y max-width)))
+  (call-command 'fill-text '(proxy json s32 s32 s32) (list (current-canvas) text x y max-width)))
 
 (define (get-image-data sx sy sw sh)
   (let1 image (make <graviton-image> :width sw :height sh)
-    (call-command 'get-image-data '(canvas image s32 s32 s32 s32) (list (current-canvas) image sx sy sw sh))
+    (call-command 'get-image-data '(proxy proxy s32 s32 s32 s32) (list (current-canvas) image sx sy sw sh))
     image))
 
 (define (is-point-in-path? x y :optional (rule 'nonzero))
@@ -1535,16 +1540,16 @@
       (errorf "Invalid fillrule: ~a" rule))
 
     (let1 future (make <graviton-future>)
-      (call-command 'is-point-in-path '(canvas future s32 s32 json) (list (current-canvas) future x y rule-name))
+      (call-command 'is-point-in-path '(proxy future s32 s32 json) (list (current-canvas) future x y rule-name))
       future)))
 
 (define (is-point-in-stroke? x y)
   (let1 future (make <graviton-future>)
-    (call-command 'is-point-in-stroke '(canvas future s32 s32) (list (current-canvas) future x y))
+    (call-command 'is-point-in-stroke '(proxy future s32 s32) (list (current-canvas) future x y))
     future))
 
 (define (line-to x y)
-  (call-command 'line-to '(canvas s32 s32) (list (current-canvas) x y)))
+  (call-command 'line-to '(proxy s32 s32) (list (current-canvas) x y)))
 
 (define-class <text-metrics> ()
   ((width :init-keyword :width)))
@@ -1552,133 +1557,119 @@
 (define (measure-text text)
   (let1 future (make <graviton-future> :result-maker (lambda (alist)
                                                        (make <text-metrics> :width (assoc-ref alist "width"))))
-    (call-command 'measure-text '(canvas future json) (list (current-canvas) future text))
+    (call-command 'measure-text '(proxy future json) (list (current-canvas) future text))
     future))
 
 (define (move-to x y)
-  (call-command 'move-to '(canvas s32 s32) (list (current-canvas) x y)))
+  (call-command 'move-to '(proxy s32 s32) (list (current-canvas) x y)))
 
 (define-method put-image-data ((image <graviton-image>) dx dy)
-  (check-valid image)
-  (call-command 'put-image-data '(canvas image s32 s32 boolean) (list (current-canvas) image dx dy #f)))
+  (call-command 'put-image-data '(proxy proxy s32 s32 boolean) (list (current-canvas) image dx dy #f)))
 
 (define-method put-image-data ((image <graviton-image>) dx dy dirty-x dirty-y dirty-width dirty-height)
-  (check-valid image)
   (call-command 'put-image-data
-                '(canvas image s32 s32 boolean s32 s32 s32 s32)
+                '(proxy proxy s32 s32 boolean s32 s32 s32 s32)
                 (list (current-canvas) image #f dx dy dirty-x dirty-y dirty-width dirty-height)))
 
 (define (quadratic-curve-to cpx cpy x y)
-  (call-command 'quadratic-curve-to '(canvas s32 s32 s32 s32) (list (current-canvas) cpx cpy x y)))
+  (call-command 'quadratic-curve-to '(proxy s32 s32 s32 s32) (list (current-canvas) cpx cpy x y)))
 
 (define (rect x y w h)
-  (call-command 'rect '(canvas s32 s32 s32 s32) (list (current-canvas) x y w h)))
+  (call-command 'rect '(proxy s32 s32 s32 s32) (list (current-canvas) x y w h)))
 
 (define (restore-context)
-  (call-command 'restore '(canvas) (list (current-canvas)))
+  (call-command 'restore '(proxy) (list (current-canvas)))
   (pop! (slot-ref (current-canvas) 'context2d-list)))
 
 (define (rotate angle)
-  (call-command 'rotate '(canvas f64) (list (current-canvas) angle)))
+  (call-command 'rotate '(proxy f64) (list (current-canvas) angle)))
 
 (define (save-context)
-  (call-command 'save '(canvas) (list (current-canvas)))
+  (call-command 'save '(proxy) (list (current-canvas)))
   (let1 ctx2 (copy-context2d (slot-ref (current-canvas) 'context2d))
     (push! (slot-ref (current-canvas) 'context2d-list) ctx2)))
 
 (define (scale x y)
-  (call-command 'scale '(canvas f64 f64) (list (current-canvas) x y)))
+  (call-command 'scale '(proxy f64 f64) (list (current-canvas) x y)))
 
 (define (set-transform! a b c d e f)
-  (call-command 'set-transform '(canvas f64 f64 f64 f64 f64 f64) (list (current-canvas) a b c d e f)))
+  (call-command 'set-transform '(proxy f64 f64 f64 f64 f64 f64) (list (current-canvas) a b c d e f)))
 
 (define (stroke)
-  (call-command 'stroke '(canvas) (list (current-canvas))))
+  (call-command 'stroke '(proxy) (list (current-canvas))))
 
 (define (stroke-rect x y w h)
-  (call-command 'stroke-rect '(canvas s32 s32 s32 s32) (list (current-canvas) x y w h)))
+  (call-command 'stroke-rect '(proxy s32 s32 s32 s32) (list (current-canvas) x y w h)))
 
 (define (stroke-text text x y :optional (max-width 0))
-  (call-command 'stroke-text '(canvas json s32 s32 s32) (list (current-canvas) text x y max-width)))
+  (call-command 'stroke-text '(proxy json s32 s32 s32) (list (current-canvas) text x y max-width)))
 
 (define (transform a b c d e f)
-  (call-command 'transform '(canvas f64 f64 f64 f64 f64 f64) (list (current-canvas) a b c d e f)))
+  (call-command 'transform '(proxy f64 f64 f64 f64 f64 f64) (list (current-canvas) a b c d e f)))
 
 (define (translate x y)
-  (call-command 'translate '(canvas s32 s32) (list (current-canvas) x y)))
+  (call-command 'translate '(proxy s32 s32) (list (current-canvas) x y)))
 
 (define (create-image-data w h)
   (let1 image (make <graviton-image> :width w :height h)
-    (call-command 'create-image-data '(canvas image s32 s32) (list (current-canvas) image w h))
+    (call-command 'create-image-data '(proxy proxy s32 s32) (list (current-canvas) image w h))
     image))
 
-(define (free-image-data image)
-  (call-command 'free-image-data '(image) image)
-  (invalidate image))
-
 (define (upload-image-data image data)
-  (check-valid image)
-  (call-command 'upload-image-data '(image u8vector) (list image data)))
+  (call-command 'upload-image-data '(proxy u8vector) (list image data)))
 
 (define (download-image-data image)
-  (check-valid image)
   (let1 future (make <graviton-future>)
-    (call-command 'download-image-data '(future image) (list future image))
+    (call-command 'download-image-data '(future proxy) (list future image))
     future))
 
 (define (set-window-event-handler! event-type proc)
   (call-command 'listen-window-event '(json boolean) (list (symbol->string event-type) (if proc #t #f)))
   (cond
     (proc
-     (register-event-handler! event-type proc (main-thread-pool) (websocket-output-port)))
+     (register-event-handler! event-type proc (main-thread-pool) (websocket-output-port) (proxy-object-next-id)))
     (else
      (unregister-event-handler! event-type))))
 
 (define (set-canvas-event-handler! canvas event-type proc)
   (let1 event-name (format "_canvas_~a_~a" (slot-ref canvas 'id) event-type)
     (call-command 'listen-canvas-event
-                  '(canvas json json boolean)
+                  '(proxy json json boolean)
                   (list canvas (symbol->string event-type) event-name (if proc #t #f)))
     (cond
       (proc
-       (register-event-handler! (string->symbol event-name) proc (main-thread-pool) (websocket-output-port)))
+       (register-event-handler! (string->symbol event-name) proc (main-thread-pool) (websocket-output-port) (proxy-object-next-id)))
       (else
        (unregister-event-handler! (string->symbol event-name))))))
 
 ;;;
 
-(define audio-node-next-id (make-id-generator #xffffffff))
-
-(define-class <audio-node> ()
-  ((id :init-form (image-next-id))
-   (type :init-keyword :type)))
+(define-class <audio-node> (<proxy-object>)
+  ((type :init-keyword :type)))
 
 (define (set-audio-base-time!)
   (call-command 'set-audio-base-time '() '()))
 
 (define (start-audio-node! audio-node :optional (delta-when 0) (offset 0) (duration -1))
-  (call-command 'start-audio-node '(audio-node f64 f64 f64) (list audio-node delta-when offset duration)))
+  (call-command 'start-audio-node '(proxy f64 f64 f64) (list audio-node delta-when offset duration)))
 
 (define (stop-audio-node! audio-node :optional (delta-when 0))
-  (call-command 'stop-audio-node '(audio-node f64) (list audio-node delta-when)))
+  (call-command 'stop-audio-node '(proxy f64) (list audio-node delta-when)))
 
 (define (connect-node! from-node to-node)
-  (call-command 'connect-node '(audio-node audio-node) (list from-node to-node)))
+  (call-command 'connect-node '(proxy proxy) (list from-node to-node)))
 
 (define (disconnect-node! from-node to-node)
-  (call-command 'disconnect-node '(audio-node audio-node) (list from-node to-node)))
-
-(define (free-node! audio-node)
-  (call-command 'free-node '(audio-node) (list audio-node)))
+  (call-command 'disconnect-node '(proxy proxy) (list from-node to-node)))
 
 (define (audio-node-end audio-node)
   (let1 future (make <graviton-future>)
-    (call-command 'audio-node-end '(future audio-node) (list future audio-node))
+    (call-command 'audio-node-end '(future proxy) (list future audio-node))
     future))
 
 (define (make-audio-context-destination)
   (let1 audio-node (make <audio-node> :type 'audio-context-destination)
-    (call-command 'make-audio-context-destination '(audio-node) (list audio-node))
+    (call-command 'make-audio-context-destination '(proxy) (list audio-node))
     audio-node))
 
 (define (audio-param-set-value-at-time! val start-time)
@@ -1707,7 +1698,7 @@
 
 (define (make-oscillator-node)
   (let1 oscillator-node (make <audio-node> :type 'oscillator)
-    (call-command 'make-oscillator-node '(audio-node) (list oscillator-node))
+    (call-command 'make-oscillator-node '(proxy) (list oscillator-node))
     oscillator-node))
 
 (define oscillator-type-alist
@@ -1717,19 +1708,19 @@
     (triangle . "triangle")))
 
 (define (set-oscillator-type! oscillator-node type)
-  (call-command 'set-oscillator-type '(audio-node json) (list oscillator-node
-                                                                (or (assoc-ref oscillator-type-alist type #f)
-                                                                    (errorf "Invalid oscillator type: ~a" type)))))
+  (call-command 'set-oscillator-type '(proxy json) (list oscillator-node
+                                                         (or (assoc-ref oscillator-type-alist type #f)
+                                                             (errorf "Invalid oscillator type: ~a" type)))))
 
 (define (push-oscillator-frequency-audio-param! oscillator-node)
-  (call-command 'push-oscillator-frequency-audio-param '(audio-node) (list oscillator-node)))
+  (call-command 'push-oscillator-frequency-audio-param '(proxy) (list oscillator-node)))
 
 (define (push-oscillator-detune-audio-param! oscillator-node)
-  (call-command 'push-oscillator-detune-audio-param '(audio-node) (list oscillator-node)))
+  (call-command 'push-oscillator-detune-audio-param '(proxy) (list oscillator-node)))
 
 (define (set-oscillator-periodic-wave! oscillator-node real imag :key (disable-nomalization #f))
   (call-command 'set-oscillator-periodic-wave
-                '(audio-node json json json)
+                '(proxy json json json)
                 (list oscillator-node real imag `(("disableNomalization" . ,disable-nomalization)))))
 
 ;;;

@@ -20,10 +20,10 @@
       (set-audio-base-time!)
       (start-audio-node! pi)
       (stop-audio-node! pi 0.1)
-      (free-node! pi)
+      (unlink-proxy-object! pi)
       (start-audio-node! po 0.1)
       (stop-audio-node! po 0.2)
-      (free-node! po)
+      (unlink-proxy-object! po)
 
       (asleep 0.5)
       (app-close)
