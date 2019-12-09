@@ -25,10 +25,7 @@ function connectServer() {
     };
 }
 
-let canvasTable = {};
-let imageTable = {};
 let jsonTable = {};
-let audioNodeTable = {};
 let proxyObjectTable = {};
 
 function registerJson(index, json) {
@@ -150,24 +147,9 @@ class DataStream {
         return data;
     }
 
-    getCanvas() {
-        let canvasIndex = this.getUint32();
-        return canvasTable[canvasIndex];
-    }
-
     getContext2d() {
-        let canvas = this.getCanvas();
+        let canvas = this.getProxyObject();
         return canvas.getContext('2d');
-    }
-
-    getImageData() {
-        let imageId = this.getUint32();
-        return imageTable[imageId];
-    }
-
-    getAudioNode() {
-        let nodeId = this.getUint32();
-        return audioNodeTable[nodeId];
     }
 
     getProxyObject() {
@@ -346,7 +328,7 @@ function listenWindowEvent(ds) {
 }
 
 function listenCanvasEvent(ds) {
-    let canvas = ds.getCanvas();
+    let canvas = ds.getProxyObject();
     let eventType = ds.getJson();
     let eventName = ds.getJson();
     let flag = ds.getBoolean();
@@ -391,7 +373,7 @@ function makeCanvas(canvasId, width, height, z, visibility) {
     canvas.id = 'canvas' + canvasId;
     canvas.width = width;
     canvas.height = height;
-    canvasTable[canvasId] = canvas;
+    linkProxyObject(canvasId, canvas);
 
     centralizeCanvas(canvas);
     canvas.style.zIndex = z;
@@ -443,7 +425,7 @@ function loadCanvasCommand(ds) {
 }
 
 function setCanvasVisibilityCommand(ds) {
-    let canvas = ds.getCanvas();
+    let canvas = ds.getProxyObject();
     let visibility = ds.getBoolean();
 
     if (visibility) {
@@ -636,7 +618,7 @@ function closePathCommand(ds) {
 
 function drawCanvasCommand(ds) {
     let ctx = ds.getContext2d();
-    let srcCanvas = ds.getCanvas();
+    let srcCanvas = ds.getProxyObject();
     let mode = ds.getUint8();
     if (mode === 1) {
         let sx = ds.getInt32();
@@ -710,7 +692,7 @@ function getImageDataCommand(ds) {
     let sw = ds.getInt32();
     let sh = ds.getInt32();
     let image = ctx.getImageData(sx, sy, sw, sh);
-    imageTable[imageId] = image;
+    linkProxyObject(imageId, image);
 }
 
 function isPointInPathCommand(ds) {
@@ -756,7 +738,7 @@ function moveToCommand(ds) {
 
 function putImageDataCommand(ds) {
     let ctx = ds.getContext2d();
-    let image = ds.getImageData();
+    let image = ds.getProxyObject();
     let dx = ds.getInt32();
     let dy = ds.getInt32();
     let useDirty = ds.getBoolean();
@@ -874,11 +856,11 @@ function createImageDataCommand(ds) {
     let w = ds.getInt32();
     let h = ds.getInt32();
     let image = ctx.createImageData(w, h);
-    imageTable[imageId] = image;
+    linkProxyObject(imageId, image);
 }
 
 function uploadImageDataCommand(ds) {
-    let image = ds.getImageData();
+    let image = ds.getProxyObject();
     let len = ds.getUint32();
     let imageData = ds.getUint8Array(len);
     image.data.set(imageData);
@@ -886,7 +868,7 @@ function uploadImageDataCommand(ds) {
 
 function downloadImageDataCommand(ds) {
     let futureId = ds.getUint32();
-    let image = ds.getImageData();
+    let image = ds.getProxyObject();
     notifyBinaryData(futureId, image.data);
 }
 
@@ -902,7 +884,7 @@ function setAudioBaseTime(ds) {
 }
 
 function startAudioNode(ds) {
-    let audioNode = ds.getAudioNode();
+    let audioNode = ds.getProxyObject();
     let deltaWhen = ds.getFloat64();
     let offset = ds.getFloat64();
     let duration = ds.getFloat64();
@@ -919,7 +901,7 @@ function startAudioNode(ds) {
 }
 
 function stopAudioNode(ds) {
-    let audioNode = ds.getAudioNode();
+    let audioNode = ds.getProxyObject();
     let deltaWhen = ds.getFloat64();
 
     let when = 0;
@@ -930,20 +912,20 @@ function stopAudioNode(ds) {
 }
 
 function connectNode(ds) {
-    let fromAudioNode = ds.getAudioNode();
-    let toAudioNode = ds.getAudioNode();
+    let fromAudioNode = ds.getProxyObject();
+    let toAudioNode = ds.getProxyObject();
     fromAudioNode.connect(toAudioNode);
 }
 
 function disconnectNode(ds) {
-    let fromAudioNode = ds.getAudioNode();
-    let toAudioNode = ds.getAudioNode();
+    let fromAudioNode = ds.getProxyObject();
+    let toAudioNode = ds.getProxyObject();
     fromAudioNode.disconnect(toAudioNode);
 }
 
 function audioNodeEnd(ds) {
     let futureId = ds.getUint32();
-    let audioNode = ds.getAudioNode();
+    let audioNode = ds.getProxyObject();
 
     audioNode.onended = (event) => {
         notifyValues(futureId, [true]);
@@ -952,7 +934,7 @@ function audioNodeEnd(ds) {
 
 function makeAudioContextDestination(ds) {
     let nodeId = ds.getUint32();
-    audioNodeTable[nodeId] = audioContext.destination;
+    linkProxyObject(nodeId, audioContext.destination);
 }
 
 let audioParamStack = [];
@@ -1007,27 +989,27 @@ function makeOscillatorNode(ds) {
     let nodeId = ds.getUint32();
 
     let oscillatorNode = new OscillatorNode(audioContext);
-    audioNodeTable[nodeId] = oscillatorNode;
+    linkProxyObject(nodeId, oscillatorNode);
 }
 
 function setOscillatorType(ds) {
-    let audioNode = ds.getAudioNode();
+    let audioNode = ds.getProxyObject();
     let type = ds.getJson();
     audioNode.type = type;
 }
 
 function pushOscillatorFrequencyAudioParam(ds) {
-    let audioNode = ds.getAudioNode();
+    let audioNode = ds.getProxyObject();
     audioParamStack.unshift(audioNode.frequency);
 }
 
 function pushOscillatorDetuneAudioParam(ds) {
-    let audioNode = ds.getAudioNode();
+    let audioNode = ds.getProxyObject();
     audioParamStack.unshift(audioNode.detune);
 }
 
 function setOscillatorPeriodicWave(ds) {
-    let oscillatorNode = ds.getAudioNode();
+    let oscillatorNode = ds.getProxyObject();
     let real = ds.getJson();
     let imag = ds.getJson();
     let constraints = ds.getJson();
@@ -1103,9 +1085,9 @@ function obj2style(ctx, style) {
         case 'pattern':
             var image = null;
             if (style['canvas']) {
-                image = canvasTable[style['canvas']];
+                image = getProxyObject(style['canvas']);
             } else if (style['image']) {
-                image = createImageBitmap(imageTable[style['image']]);
+                image = createImageBitmap(getProxyObject(style['image']));
             } else {
                 throw new Error('Neither canvas nor image specified for pattern');
             }
