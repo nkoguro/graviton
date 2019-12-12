@@ -248,18 +248,16 @@
 (define-class <graviton-future> ()
   ((pool :init-form (main-thread-pool))
    (lock :init-form (make-mutex))
-   (result-maker :init-value #f
+   (result-maker :init-value values
                  :init-keyword :result-maker)
    (result-values :init-value #f)
    (result-exception :init-value #f)
    (continuations :init-value '())))
 
-(define (call-future-result-maker future args)
-  (set-future-result-values&exception! future (values->list (apply (slot-ref future 'result-maker) args)) #f))
-
-(define (set-future-result-values&exception! future vals exception)
+(define (set-future-result-values&exception! future args exception)
   (let ((lock (slot-ref future 'lock))
-        (conts '()))
+        (conts '())
+        (vals (values->list (apply (slot-ref future 'result-maker) args))))
     (unwind-protect
         (begin
           (mutex-lock! lock)
@@ -400,17 +398,6 @@
              (unless data
                (errorf "[BUG] No binary data found for ID: ~a" id))
              (set-future-result-values&exception! future (list data) #f))
-           (hash-table-delete! tbl id))
-          (else
-           (errorf "[BUG] Invalid future ID: ~a" id)))))))
-
-(define (notify-make-result id args)
-  (atomic *future-table-atom*
-    (lambda (tbl)
-      (let1 future (hash-table-get tbl id #f)
-        (cond
-          (future
-           (call-future-result-maker future (vector->list args))
            (hash-table-delete! tbl id))
           (else
            (errorf "[BUG] Invalid future ID: ~a" id)))))))
@@ -751,7 +738,6 @@
   (alist->hash-table
     `(("notifyResult" . ,notify-result)
       ("notifyBinaryResult" . ,notify-binary-result)
-      ("notifyMakeResult" . ,notify-make-result)
       ("notifyEvent" . ,notify-event))
     'equal?))
 

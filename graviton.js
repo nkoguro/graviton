@@ -177,10 +177,6 @@ function notifyException(futureId, exception) {
     webSocket.send(JSON.stringify(["notifyResult", futureId, false, exception.toString()]));
 }
 
-function notifyMakeResult(futureId, args) {
-    webSocket.send(JSON.stringify(["notifyMakeResult", futureId, args]));
-}
-
 function notifyEvent(eventType, event) {
     webSocket.send(JSON.stringify(["notifyEvent", eventType, event]));
 }
@@ -416,7 +412,7 @@ function loadCanvasCommand(ds) {
         let ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0);
         workingImages.delete(img);
-        notifyMakeResult(futureId, [canvas.width, canvas.height]);
+        notifyValues(futureId, [canvas.width, canvas.height]);
     };
     img.onerror = () => {
         console.log('Load image failed: ' + url);
@@ -726,7 +722,7 @@ function measureTextCommand(ds) {
     let futureId = ds.getUint32();
     let text = ds.getJson();
     let textMetrics = ctx.measureText(text);
-    notifyMakeResult(futureId, [{"width": textMetrics.width}]);
+    notifyValues(futureId, [{"width": textMetrics.width}]);
 }
 
 function moveToCommand(ds) {
