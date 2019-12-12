@@ -208,6 +208,22 @@
 
 ;;;
 
+(define (make-main-thread-thunk thunk pool output next-id)
+  (lambda ()
+    (reset
+      (guard (e (else
+                 (report-error e)
+                 (exit 70)))
+        (parameterize ((main-thread-pool pool)
+                       (websocket-output-port output)
+                       (proxy-object-next-id next-id)
+                       (command-transaction (make <command-transaction>
+                                              :out (open-output-uvector))))
+          (thunk)
+          (flush-commands))))))
+
+;;;
+
 (define (register-event-handler! event-type proc pool out next-id)
   (atomic *listener-table-atom*
     (lambda (tbl)
@@ -215,18 +231,11 @@
                        event-type
                        (lambda (event)
                          (add-job! pool
-                           (lambda ()
-                             (reset
-                               (guard (e (else
-                                          (report-error e)
-                                          (exit 70)))
-                                 (parameterize ((main-thread-pool pool)
-                                                (websocket-output-port out)
-                                                (proxy-object-next-id next-id)
-                                                (command-transaction (make <command-transaction>
-                                                                       :out (open-output-uvector))))
-                                   (proc event)
-                                   (flush-commands)))))))))))
+                           (make-main-thread-thunk (lambda ()
+                                                     (proc event))
+                                                   pool
+                                                   out
+                                                   next-id)))))))
 
 (define (unregister-event-handler! event-type)
   (atomic *listener-table-atom*
