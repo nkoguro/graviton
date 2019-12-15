@@ -53,22 +53,20 @@
                    (ball-vy-set! ball (- (ball-vy ball)))))))
             balls))
 
-(define (draw-balls canvas sprite balls)
-  (parameterize ((current-canvas canvas))
-    (set-fill-style! "#000")
-    (fill-rect 0 0 *canvas-width* *canvas-height*)
-    (for-each (lambda (ball)
-                (draw-canvas sprite
-                             (* (ball-pattern-id ball) *sprite-width*)
-                             0
-                             *sprite-width*
-                             *sprite-height*
-                             (round->exact (- (ball-x ball) (/. *sprite-width* 2)))
-                             (round->exact (- (ball-y ball) (/. *sprite-height* 2)))
-                             *sprite-width*
-                             *sprite-height*))
-              balls)
-    (switch-double-buffer-canvas! canvas)))
+(define (draw-balls sprite balls)
+  (set-fill-style! "#000")
+  (fill-rect 0 0 *canvas-width* *canvas-height*)
+  (for-each (lambda (ball)
+              (draw-canvas sprite
+                           (* (ball-pattern-id ball) *sprite-width*)
+                           0
+                           *sprite-width*
+                           *sprite-height*
+                           (round->exact (- (ball-x ball) (/. *sprite-width* 2)))
+                           (round->exact (- (ball-y ball) (/. *sprite-height* 2)))
+                           *sprite-width*
+                           *sprite-height*))
+            balls))
 
 (define (main args)
   ;; (set-graviton-open-dev-tools! #t)
@@ -81,7 +79,7 @@
                                           (when (equal? (slot-ref event 'code) "Escape")
                                             (app-close))))
       (let ((sprite (make-canvas (* *sprite-width* *num-patterns*) *sprite-height* :visible? #f))
-            (canvas (make-double-buffer-canvas *canvas-width* *canvas-height*))
+            (canvas (make-canvas *canvas-width* *canvas-height*))
             (balls (list-ec (: i num-sprites)
                             (make-ball (modulo i *num-patterns*)
                                        (random-integer *canvas-width*)
@@ -89,23 +87,9 @@
                                        (- (* (random-real) 400) 200)
                                        (- (* (random-real) 400) 200)))))
         (prepare-ball-images sprite *sprite-width* *sprite-height* *num-patterns*)
-        (let ((tc (make <real-time-counter>)))
-          (while #t
-            (time-counter-reset! tc)
-            (time-counter-start! tc)
-            (let1 ptc (make <real-time-counter>)
-              (with-time-counter ptc
-                (draw-balls canvas sprite balls))
-              ;; (log-format "draw-balls: ~a" (time-counter-value ptc))
-              )
-            (let1 ptc (make <real-time-counter>)
-              (with-time-counter ptc
-                (update-balls! balls))
-              ;; (log-format "update-balls!: ~a" (time-counter-value ptc))
-              )
-            (time-counter-stop! tc)
-            (let1 st (max (- *tick* (time-counter-value tc)) 0)
-              ;; (log-format "sleep time: ~a" st)
-              (asleep st))
-            )))))
+        (loop-frame 30
+          (lambda (break)
+            (parameterize ((current-canvas canvas))
+              (draw-balls sprite balls)
+              (update-balls! balls)))))))
   0)

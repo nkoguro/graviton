@@ -76,11 +76,9 @@
           app-close
           window-size
           make-canvas
-          make-double-buffer-canvas
           load-canvas
           current-canvas
           set-canvas-visible!
-          switch-double-buffer-canvas!
           unlink-proxy-object!
 
           linear-gradient
@@ -157,6 +155,8 @@
           create-image-data
           upload-image-data
           download-image-data
+
+          loop-frame
 
           set-window-event-handler!
           set-canvas-event-handler!
@@ -1072,41 +1072,6 @@
               :slot-ref (lambda (canvas)
                           (car (slot-ref canvas 'context2d-list))))))
 
-(define-class <double-buffer-canvas> (<canvas>)
-  ((canvases :init-keyword :canvases)
-   (offscreen-index :init-value 0)
-   (offscreen-canvas :allocation :virtual
-                     :slot-ref (lambda (db-canvas)
-                                 (vector-ref (slot-ref db-canvas 'canvases)
-                                             (slot-ref db-canvas 'offscreen-index))))
-   (onscreen-index :allocation :virtual
-                   :slot-ref (lambda (db-canvas)
-                               (modulo (+ (slot-ref db-canvas 'offscreen-index) 1) 2)))
-   (onscreen-canvas :allocation :virtual
-                    :slot-ref (lambda (db-canvas)
-                                (vector-ref (slot-ref db-canvas 'canvases)
-                                            (slot-ref db-canvas 'onscreen-index))))
-   (id :allocation :virtual
-       :slot-ref (lambda (db-canvas)
-                   (proxy-object-id (slot-ref db-canvas 'offscreen-canvas)))
-       :slot-set! (lambda (db-canvas id)
-                    #t))
-   (width :allocation :virtual
-          :slot-ref (lambda (db-canvas)
-                      (slot-ref (slot-ref db-canvas 'offscreen-canvas) 'width)))
-   (height :allocation :virtual
-          :slot-ref (lambda (db-canvas)
-                      (slot-ref (slot-ref db-canvas 'offscreen-canvas) 'height)))
-   (z :allocation :virtual
-      :slot-ref (lambda (db-canvas)
-                  (slot-ref (slot-ref db-canvas 'offscreen-canvas) 'z)))
-   (visible? :allocation :virtual
-             :slot-ref (lambda (db-canvas)
-                         (slot-ref (slot-ref db-canvas 'onscreen-canvas) 'visible?)))
-   (context2d-list :allocation :virtual
-                   :slot-ref (lambda (db-canvas)
-                               (slot-ref (slot-ref db-canvas 'offscreen-canvas) 'context2d-list)))))
-
 (define-class <context2d> ()
   ((fill-style :init-value "#000000")
    (font :init-value "10px sans-serif")
@@ -1236,23 +1201,6 @@
                     boolean)
                   (list future canvas data z visible?))
     future))
-
-(define (make-double-buffer-canvas width height :key (z 0) (visible? #t))
-  (let ((onscreen-canvas (make-canvas width height :z z :visible? visible?))
-        (offscreen-canvas (make-canvas width height :z z :visible? #f)))
-    (let1 db-canvas (make <double-buffer-canvas> :canvases (vector offscreen-canvas onscreen-canvas))
-      (when visible?
-        (current-canvas db-canvas))
-      db-canvas)))
-
-(define (switch-double-buffer-canvas! db-canvas)
-  (let ((onscreen-canvas (slot-ref db-canvas 'onscreen-canvas))
-        (offscreen-canvas (slot-ref db-canvas 'offscreen-canvas)))
-    (set-canvas-visible! offscreen-canvas (slot-ref onscreen-canvas 'visible?))
-    (set-canvas-visible! onscreen-canvas #f)
-    (slot-set! db-canvas
-               'offscreen-index
-               (modulo (+ (slot-ref db-canvas 'offscreen-index) 1) 2))))
 
 (define (set-canvas-visible! canvas visible?)
   (call-command 'set-canvas-visibility '(proxy boolean) (list canvas visible?))
@@ -1636,6 +1584,23 @@
        (register-event-handler! (string->symbol event-name) proc (main-thread-pool) (websocket-output-port) (proxy-object-next-id)))
       (else
        (unregister-event-handler! (string->symbol event-name))))))
+
+;;;
+
+(define (loop-frame frame-per-second proc)
+  (let ((exit? #f)
+        (frame-sec (/. 1 frame-per-second)))
+    (define (break)
+      (set! exit? #t))
+    (while (not exit?)
+      (let1 start-sec (time->seconds (current-time))
+        (proc break)
+        (let1 elapse-sec (- (time->seconds (current-time)) start-sec)
+          (when (< frame-sec elapse-sec)
+            (log-debug "Frame dropped. renderer procedure consumes ~a sec. It exceeds one frame sec: ~a"
+                       elapse-sec
+                       frame-sec))
+          (asleep (max 0 (- frame-sec elapse-sec))))))))
 
 ;;;
 
