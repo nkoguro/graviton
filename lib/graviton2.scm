@@ -67,8 +67,8 @@
           grv-main
           grv-begin
 
-          async-apply
-          async
+          async-apply-main
+          async-main
           await
           asleep
 
@@ -208,37 +208,34 @@
 
 ;;;
 
-(define (make-main-thread-thunk thunk pool output next-id)
-  (lambda ()
-    (reset
-      (guard (e (else
-                 (report-error e)
-                 (exit 70)))
-        (parameterize ((main-thread-pool pool)
-                       (websocket-output-port output)
-                       (proxy-object-next-id next-id)
-                       (command-transaction (make <command-transaction>
-                                              :out (open-output-uvector))))
-          (thunk)
-          (flush-commands))))))
+(define (make-main-thread-pool-thunk thunk error-handler)
+  (let ((app-context (application-context))
+        (pool (main-thread-pool)))
+    (lambda ()
+      (reset
+        (parameterize ((application-context app-context)
+                       (current-thread-pool pool))
+          (guard (e (else
+                     (error-handler e)))
+            (thunk)
+            (flush-commands)))))))
 
-;;;
-
-(define (register-event-handler! event-type proc pool out next-id)
-  (atomic *listener-table-atom*
-    (lambda (tbl)
-      (hash-table-set! tbl
-                       event-type
-                       (lambda (event)
-                         (add-job! pool
-                           (make-main-thread-thunk (lambda ()
-                                                     (proc event))
-                                                   pool
-                                                   out
-                                                   next-id)))))))
+(define (register-event-handler! event-type proc)
+  (let1 app-context (application-context)
+    (atomic (slot-ref app-context 'listener-table-atom)
+      (lambda (tbl)
+        (hash-table-set! tbl
+                         event-type
+                         (lambda (event)
+                           (add-job! (main-thread-pool)
+                             (make-main-thread-pool-thunk (lambda ()
+                                                            (proc event))
+                                                          (lambda (e)
+                                                            (report-error e)
+                                                            (exit 70))))))))))
 
 (define (unregister-event-handler! event-type)
-  (atomic *listener-table-atom*
+  (atomic (slot-ref (application-context) 'listener-table-atom)
     (lambda (tbl)
       (hash-table-delete! tbl event-type))))
 
@@ -246,17 +243,16 @@
 
 ;; future is await-able only in the main thread.
 (define-class <graviton-future> ()
-  ((pool :init-form (main-thread-pool))
-   (lock :init-form (make-mutex))
+  ((lock :init-form (make-mutex))
    (result-maker :init-value values
                  :init-keyword :result-maker)
    (result-values :init-value #f)
    (result-exception :init-value #f)
-   (continuations :init-value '())))
+   (pool&continuations :init-value '())))
 
 (define (set-future-result-values&exception! future args exception)
   (let ((lock (slot-ref future 'lock))
-        (conts '())
+        (pool&conts '())
         (vals (values->list (apply (slot-ref future 'result-maker) args))))
     (unwind-protect
         (begin
@@ -269,15 +265,15 @@
             (else
              (slot-set! future 'result-values vals)
              (slot-set! future 'result-exception exception)
-             (set! conts (slot-ref future 'continuations))
-             (slot-set! future 'continuations '()))))
+             (set! pool&conts (slot-ref future 'pool&continuations))
+             (slot-set! future 'pool&continuations '()))))
       (mutex-unlock! lock))
-    (for-each (lambda (cont)
-                (add-job! (slot-ref future 'pool)
-                  (lambda ()
-                    (reset
-                      (cont vals exception)))))
-              conts)))
+    (for-each (match-lambda ((pool cont)
+                             (add-job! pool
+                               (lambda ()
+                                 (reset
+                                   (cont vals exception))))))
+              pool&conts)))
 
 (define (await future :optional (timeout #f) :rest timeout-vals)
   (flush-commands)
@@ -295,19 +291,20 @@
             (set! result-exception exception)
             (mutex-unlock! lock)))
       (else
-       (receive (vals exception) (shift cont
-                                   (push! (slot-ref future 'continuations) cont)
-                                   (when timeout
-                                     (add-schedule! (add-duration (current-time)
-                                                                  (let* ((sec (floor timeout))
-                                                                         (nanosec (round->exact (* (- timeout sec)
-                                                                                                   1000000000))))
-                                                                    (make-time time-duration nanosec sec)))
-                                                    future
-                                                    timeout-vals))
-                                   (mutex-unlock! lock))
-         (set! result-values vals)
-         (set! result-exception exception))))
+       (let1 pool (current-thread-pool)
+         (receive (vals exception) (shift cont
+                                     (push! (slot-ref future 'pool&continuations) (list pool cont))
+                                     (when timeout
+                                       (add-schedule! (add-duration (current-time)
+                                                                    (let* ((sec (floor timeout))
+                                                                           (nanosec (round->exact (* (- timeout sec)
+                                                                                                     1000000000))))
+                                                                      (make-time time-duration nanosec sec)))
+                                                      future
+                                                      timeout-vals))
+                                     (mutex-unlock! lock))
+           (set! result-values vals)
+           (set! result-exception exception)))))
     (cond
       (result-values
        (if (null? result-values)
@@ -322,35 +319,23 @@
   (let1 future (make <graviton-future>)
     (await future sec)))
 
-(define (async-apply proc args)
+(define (async-apply-main proc args)
   (let ((future (make <graviton-future>))
-        (pool (main-thread-pool))
-        (out (websocket-output-port))
-        (next-id (proxy-object-next-id)))
-    (add-job! pool
-      (lambda ()
-        (reset
-          (parameterize ((main-thread-pool pool)
-                         (websocket-output-port out)
-                         (proxy-object-next-id next-id)
-                         (command-transaction (make <command-transaction> :out (open-output-uvector))))
-            (let ((result-values #f)
-                  (result-exception #f))
-              (guard (e (else (set! result-exception e)))
-                (receive vals (apply proc args)
-                  (flush-commands)
-                  (set! result-values vals)))
-              (set-future-result-values&exception! future result-values result-exception))))))
+        (app-context (application-context)))
+    (add-job! (main-thread-pool)
+      (make-main-thread-pool-thunk (lambda ()
+                                     (set! result-values (values->list (apply proc args))))
+                                   (lambda (e)
+                                     (set! result-exception e))))
     future))
 
-(define-syntax async
+(define-syntax async-main
   (syntax-rules ()
     ((_ expr ...)
-     (async-apply (lambda () expr ...) '()))))
+     (async-apply-main (lambda () expr ...) '()))))
 
 (define *future-table-atom* (atom (make-hash-table 'equal?)))
 (define future-next-id (make-id-generator #xffffffff))
-(define *listener-table-atom* (atom (make-hash-table 'equal?)))
 
 (define (register-future! future)
   (atomic *future-table-atom*
@@ -496,7 +481,7 @@
        (errorf "Unsupported event: ~a" event-type)))))
 
 (define (notify-event event-type-str event-alist)
-  (atomic *listener-table-atom*
+  (atomic (slot-ref (application-context) 'listener-table-atom)
     (lambda (tbl)
       (and-let* ((event-type (string->symbol event-type-str))
                  (proc (hash-table-get tbl event-type #f)))
@@ -549,16 +534,12 @@
 
 ;;;
 
-(define proxy-object-next-id (make-parameter #f))
-
 (define-class <proxy-object> ()
   ((id :init-value #f)))
 
 (define-method initialize ((obj <proxy-object>) :rest args)
   (next-method)
-  (if (proxy-object-next-id)
-      (slot-set! obj 'id ((proxy-object-next-id)))
-      (error "proxy object can't be instaniated in non app-main thread")))
+  (slot-set! obj 'id (proxy-object-next-id)))
 
 (define (proxy-object-id obj)
   (or (slot-ref obj 'id)
@@ -730,9 +711,60 @@
               (pong-handler payload-data)))))))))
 
 (define *initial-thunk* #f)
-(define main-thread-pool (make-parameter #f))
-(define websocket-output-port (make-parameter #f))
 (define *num-dispatcher* (atom 0))
+
+(define-class <send-context> ()
+  ((websocket-output-port :init-keyword :websocket-output-port)
+   (buffer-output-port :init-keyword :buffer-output-port)
+   (json-pair-buffer :init-value '())
+   (json-next-id-generator :init-form (make-id-generator #xffffffff))
+   (proxy-object-id-generator :init-form (make-id-generator #xffffffff))
+   (refresh-cycle-second :init-value (/. 1 30))))
+
+(define-class <application-context> ()
+  ((main-thread-pool :init-keyword :main-thread-pool)
+   (worker-thread-pool :init-keyword :worker-thread-pool)
+   (send-context-atom :init-keyword :send-context-atom)
+   (listener-table-atom :init-form (atom (make-hash-table 'equal?)))))
+
+(define application-context (make-parameter #f))
+(define current-thread-pool (make-parameter #f))
+
+(define (make-application-context num-main-pool-size num-worker-pool-size websocket-output-port)
+  (let* ((send-context (make <send-context>
+                         :websocket-output-port websocket-output-port
+                         :buffer-output-port (open-output-uvector)))
+         (app-context (make <application-context>
+                        :main-thread-pool (make-thread-pool num-main-pool-size)
+                        :worker-thread-pool (make-thread-pool num-worker-pool-size)
+                        :send-context-atom (atom send-context))))
+    app-context))
+
+(define (main-thread-pool)
+  (slot-ref (application-context) 'main-thread-pool))
+
+(define (worker-thread-pool)
+  (slot-ref (application-context) 'worker-thread-pool))
+
+(define current-send-context (make-parameter #f))
+
+(define (with-send-context proc)
+  (cond
+    ((current-send-context)
+     (proc (current-send-context)))
+    (else
+     (atomic (slot-ref (application-context) 'send-context-atom)
+       (lambda (ctx)
+         (parameterize ((current-send-context ctx))
+           (proc ctx)))))))
+
+(define (proxy-object-next-id)
+  (with-send-context (lambda (ctx)
+                       ((slot-ref ctx 'proxy-object-id-generator)))))
+
+(define (json-next-id)
+  (with-send-context (lambda (ctx)
+                       ((slot-ref ctx 'json-next-id-generator)))))
 
 (define json-command-table
   (alist->hash-table
@@ -748,36 +780,37 @@
     (make-thread
       (lambda ()
         (atomic-update! *num-dispatcher* (^x (+ x 1)))
-        (parameterize ((json-special-handler (lambda (sym)
-                                               (case sym
-                                                 ((false) #f)
-                                                 ((true) #t)
-                                                 (else sym)))))
-          (guard (e (else (report-error e)))
-            (let ((sel (make <selector>))
-                  (ctx (make <websocket-server-context>))
-                  (pool (make-thread-pool 1))
-                  (next-id (make-id-generator #xffffffff)))
-              (define (close-websocket status data)
-                (log-info "WebSocket closed: code=~a, data=(~a)" status data)
-                (selector-delete! sel in #f #f)
-                (close-input-port in))
-              (define (receive-json json-str)
-                (let* ((params (vector->list (parse-json-string json-str)))
-                       (cmd (car params))
-                       (args (cdr params))
-                       (proc (hash-table-get json-command-table cmd #f)))
-                  (cond
-                    (proc
-                     (apply proc args))
-                    (else
-                     (log-error "Invalid data received: ~s" params)))))
-              (define (receive-binary data)
-                (let1 id (get-u32 data 0)
-                  (atomic *binary-data-table-atom*
-                    (lambda (tbl)
-                      (hash-table-put! tbl id (uvector-alias <u8vector> data 4))))))
+        (guard (e (else (report-error e)))
+          (let* ((sel (make <selector>))
+                 (ctx (make <websocket-server-context>))
+                 (next-id (make-id-generator #xffffffff))
+                 (app-context (make-application-context 1 2 out)))
+            (define (close-websocket status data)
+              (log-info "WebSocket closed: code=~a, data=(~a)" status data)
+              (selector-delete! sel in #f #f)
+              (close-input-port in))
+            (define (receive-json json-str)
+              (let* ((params (vector->list (parse-json-string json-str)))
+                     (cmd (car params))
+                     (args (cdr params))
+                     (proc (hash-table-get json-command-table cmd #f)))
+                (cond
+                  (proc
+                   (apply proc args))
+                  (else
+                   (log-error "Invalid data received: ~s" params)))))
+            (define (receive-binary data)
+              (let1 id (get-u32 data 0)
+                (atomic *binary-data-table-atom*
+                  (lambda (tbl)
+                    (hash-table-put! tbl id (uvector-alias <u8vector> data 4))))))
 
+            (parameterize ((json-special-handler (lambda (sym)
+                                                   (case sym
+                                                     ((false) #f)
+                                                     ((true) #t)
+                                                     (else sym))))
+                           (application-context app-context))
               (selector-add! sel in (lambda (in flag)
                                       (while (and (byte-ready? in) (not (port-closed? in)))
                                         (dispatch-payload ctx
@@ -788,17 +821,15 @@
                                                           :close-handler close-websocket)))
                              '(r))
               (when *initial-thunk*
-                (register-event-handler! 'start
-                                         (lambda (event)
-                                           (*initial-thunk*))
-                                         pool
-                                         out
-                                         next-id)
+                (register-event-handler! 'start (lambda (event)
+                                                  (*initial-thunk*)))
                 (notify-event "start" #f))
 
               (while (not (port-closed? in))
                 (selector-select sel))
-              (terminate-all! pool :cancel-queued-jobs #t)
+              (for-each (lambda (pool)
+                          (terminate-all! pool :cancel-queued-jobs #t))
+                        (list (main-thread-pool) (worker-thread-pool)))
               (log-debug "WebSocket dispatcher finished")
               (close-input-port in)
               (close-output-port out)
@@ -873,8 +904,10 @@
 ;;;
 
 (define (call-text-command command-name :rest args)
-  (send-text-frame (websocket-output-port)
-                   (construct-json-string (apply vector command-name args))))
+  (with-send-context
+    (lambda (ctx)
+      (send-text-frame (slot-ref ctx 'websocket-output-port)
+                       (construct-json-string (apply vector command-name args))))))
 
 (define binary-command-table
   (let1 tbl (make-hash-table 'eq?)
@@ -969,14 +1002,6 @@
                       ))
     tbl))
 
-(define-class <command-transaction> ()
-  ((out :init-keyword :out)
-   (json-pair-buffer :init-value '())))
-
-(define json-next-id (make-id-generator #xffffffff))
-
-(define command-transaction (make-parameter #f))
-
 (define (write-variant n out)
   (cond
     ((zero? n)
@@ -993,64 +1018,67 @@
           (loop (ash n -7))))))))
 
 (define (call-command cmd types args)
-  (let1 out (slot-ref (command-transaction) 'out)
-    (write-u16 (hash-table-get binary-command-table cmd) out 'little-endian)
-    (map (lambda (type arg)
-           (match type
-             ('uint
-              (write-variant arg out))
-             ('int
-              (write-variant (if (<= 0 arg)
-                                 (ash arg 1)
-                                 (- (ash (- n) 1) 1))
-                             out))
-             ('f32
-              (write-f32 arg out 'little-endian))
-             ('f64
-              (write-f64 arg out 'little-endian))
-             ('s16
-              (write-s16 arg out 'little-endian))
-             ('s32
-              (write-s32 arg out 'little-endian))
-             ('s8
-              (write-s8 arg out 'little-endian))
-             ('u16
-              (write-u16 arg out 'little-endian))
-             ('u32
-              (write-u32 arg out 'little-endian))
-             ('u8
-              (write-u8 arg out 'little-endian))
-             ('u8vector
-              (write-u32 (u8vector-length arg) out 'little-endian)
-              (write-uvector arg out))
-             ('boolean
-               (write-u8 (if arg 1 0) out 'little-endian))
-             ('json
-              (let1 id (json-next-id)
-                (push! (slot-ref (command-transaction) 'json-pair-buffer) (vector id arg))
-                (write-u32 id out 'little-endian)))
-             ('future
-              (let1 id (register-future! arg)
-                (write-u32 id out 'little-endian)))
-             ('proxy
-              (write-u32 (proxy-object-id arg) out 'little-endian))
-             (('resource content-type)
-              (let* ((url (register-resource! content-type arg))
-                     (id (json-next-id)))
-                (push! (slot-ref (command-transaction) 'json-pair-buffer) (vector id url))
-                (write-u32 id out 'little-endian)))))
-         types args)))
+  (with-send-context
+    (lambda (ctx)
+      (let1 out (slot-ref ctx 'buffer-output-port)
+        (write-u16 (hash-table-get binary-command-table cmd) out 'little-endian)
+        (map (lambda (type arg)
+               (match type
+                 ('uint
+                  (write-variant arg out))
+                 ('int
+                  (write-variant (if (<= 0 arg)
+                                     (ash arg 1)
+                                     (- (ash (- n) 1) 1))
+                                 out))
+                 ('f32
+                  (write-f32 arg out 'little-endian))
+                 ('f64
+                  (write-f64 arg out 'little-endian))
+                 ('s16
+                  (write-s16 arg out 'little-endian))
+                 ('s32
+                  (write-s32 arg out 'little-endian))
+                 ('s8
+                  (write-s8 arg out 'little-endian))
+                 ('u16
+                  (write-u16 arg out 'little-endian))
+                 ('u32
+                  (write-u32 arg out 'little-endian))
+                 ('u8
+                  (write-u8 arg out 'little-endian))
+                 ('u8vector
+                  (write-u32 (u8vector-length arg) out 'little-endian)
+                  (write-uvector arg out))
+                 ('boolean
+                   (write-u8 (if arg 1 0) out 'little-endian))
+                 ('json
+                  (let1 id (json-next-id)
+                    (push! (slot-ref ctx 'json-pair-buffer) (vector id arg))
+                    (write-u32 id out 'little-endian)))
+                 ('future
+                  (let1 id (register-future! arg)
+                    (write-u32 id out 'little-endian)))
+                 ('proxy
+                  (write-u32 (proxy-object-id arg) out 'little-endian))
+                 (('resource content-type)
+                  (let* ((url (register-resource! content-type arg))
+                         (id (json-next-id)))
+                    (push! (slot-ref ctx 'json-pair-buffer) (vector id url))
+                    (write-u32 id out 'little-endian)))))
+             types args)))))
 
 (define (flush-commands)
-  (let1 txn (command-transaction)
-    (let ((json-pair-buffer (slot-ref txn 'json-pair-buffer))
-          (output-data (get-output-uvector (slot-ref txn 'out))))
-      (unless (null? json-pair-buffer)
-        (call-text-command "registerArgs" (list->vector json-pair-buffer)))
-      (unless (= (uvector-length output-data) 0)
-        (send-binary-frame (websocket-output-port) output-data)))
-    (slot-set! txn 'json-pair-buffer '())
-    (slot-set! txn 'out (open-output-uvector))))
+  (with-send-context
+    (lambda (ctx)
+      (let ((json-pair-buffer (slot-ref ctx 'json-pair-buffer))
+            (output-data (get-output-uvector (slot-ref ctx 'buffer-output-port))))
+        (unless (null? json-pair-buffer)
+          (call-text-command "registerArgs" (list->vector json-pair-buffer)))
+        (unless (= (uvector-length output-data) 0)
+          (send-binary-frame (slot-ref ctx 'websocket-output-port) output-data)))
+      (slot-set! ctx 'json-pair-buffer '())
+      (slot-set! ctx 'buffer-output-port (open-output-uvector)))))
 
 (define (window-size)
   (let* ((future (make <graviton-future>)))
@@ -1570,7 +1598,7 @@
   (call-command 'listen-window-event '(json boolean) (list (symbol->string event-type) (if proc #t #f)))
   (cond
     (proc
-     (register-event-handler! event-type proc (main-thread-pool) (websocket-output-port) (proxy-object-next-id)))
+     (register-event-handler! event-type proc))
     (else
      (unregister-event-handler! event-type))))
 
@@ -1581,7 +1609,7 @@
                   (list canvas (symbol->string event-type) event-name (if proc #t #f)))
     (cond
       (proc
-       (register-event-handler! (string->symbol event-name) proc (main-thread-pool) (websocket-output-port) (proxy-object-next-id)))
+       (register-event-handler! (string->symbol event-name) proc))
       (else
        (unregister-event-handler! (string->symbol event-name))))))
 
