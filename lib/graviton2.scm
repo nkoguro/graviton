@@ -208,31 +208,34 @@
 
 ;;;
 
-(define (make-main-thread-pool-thunk thunk error-handler)
-  (let ((app-context (application-context))
-        (pool (main-thread-pool)))
-    (lambda ()
-      (reset
-        (parameterize ((application-context app-context)
-                       (current-thread-pool pool))
-          (guard (e (else
-                     (error-handler e)))
-            (thunk)
-            (flush-commands)))))))
+(define (submit-thunk pool thunk :optional (error-handler #f))
+  (let1 app-context (application-context)
+    (add-job! pool
+      (lambda ()
+        (reset
+          (parameterize ((application-context app-context)
+                         (current-thread-pool pool))
+            (guard (e (else
+                       (cond
+                         (error-handler
+                          (error-handler e))
+                         (else
+                          (report-error e)
+                          (exit 70)))))
+              (thunk)
+              (flush-commands))))))))
 
 (define (register-event-handler! event-type proc)
-  (let1 app-context (application-context)
+  (let ((app-context (application-context))
+        (pool (current-thread-pool)))
     (atomic (slot-ref app-context 'listener-table-atom)
       (lambda (tbl)
         (hash-table-set! tbl
                          event-type
                          (lambda args
-                           (add-job! (main-thread-pool)
-                             (make-main-thread-pool-thunk (lambda ()
-                                                            (apply proc args))
-                                                          (lambda (e)
-                                                            (report-error e)
-                                                            (exit 70))))))))))
+                           (submit-thunk pool
+                                         (lambda ()
+                                           (apply proc args)))))))))
 
 (define (unregister-event-handler! event-type)
   (atomic (slot-ref (application-context) 'listener-table-atom)
@@ -328,11 +331,11 @@
 (define (async-apply-main proc args)
   (let ((future (make <graviton-future>))
         (app-context (application-context)))
-    (add-job! (main-thread-pool)
-      (make-main-thread-pool-thunk (lambda ()
-                                     (set! result-values (values->list (apply proc args))))
-                                   (lambda (e)
-                                     (set! result-exception e))))
+    (submit-thunk (main-thread-pool)
+                  (lambda ()
+                    (set! result-values (values->list (apply proc args))))
+                  (lambda (e)
+                    (set! result-exception e)))
     future))
 
 (define-syntax async-main
@@ -822,8 +825,7 @@
                                                           :close-handler close-websocket)))
                              '(r))
               (when *initial-thunk*
-                (register-event-handler! 'start *initial-thunk*)
-                (invoke-event-handler 'start))
+                (submit-thunk (main-thread-pool) *initial-thunk*))
 
               (while (not (port-closed? in))
                 (selector-select sel))
