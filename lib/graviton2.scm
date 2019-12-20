@@ -226,10 +226,10 @@
       (lambda (tbl)
         (hash-table-set! tbl
                          event-type
-                         (lambda (event)
+                         (lambda args
                            (add-job! (main-thread-pool)
                              (make-main-thread-pool-thunk (lambda ()
-                                                            (proc event))
+                                                            (apply proc args))
                                                           (lambda (e)
                                                             (report-error e)
                                                             (exit 70))))))))))
@@ -238,6 +238,12 @@
   (atomic (slot-ref (application-context) 'listener-table-atom)
     (lambda (tbl)
       (hash-table-delete! tbl event-type))))
+
+(define (invoke-event-handler event-type :rest args)
+  (atomic (slot-ref (application-context) 'listener-table-atom)
+    (lambda (tbl)
+      (and-let1 proc (hash-table-get tbl event-type #f)
+        (apply proc args)))))
 
 ;;;
 
@@ -477,14 +483,8 @@
       (else
        (errorf "Unsupported event: ~a" event-type)))))
 
-(define (notify-event event-type-str event-alist)
-  (atomic (slot-ref (application-context) 'listener-table-atom)
-    (lambda (tbl)
-      (and-let* ((event-type (string->symbol event-type-str))
-                 (proc (hash-table-get tbl event-type #f)))
-        (proc (if event-alist
-                  (alist->event event-alist)
-                  #f))))))
+(define (notify-client-event event-type-str event-alist)
+  (invoke-event-handler (string->symbol event-type-str) (alist->event event-alist)))
 
 ;;;
 
@@ -771,7 +771,7 @@
   (alist->hash-table
     `(("notifyResult" . ,notify-result)
       ("notifyBinaryResult" . ,notify-binary-result)
-      ("notifyEvent" . ,notify-event))
+      ("notifyEvent" . ,notify-client-event))
     'equal?))
 
 (define *binary-data-table-atom* (atom (make-hash-table 'equal?)))
@@ -822,9 +822,8 @@
                                                           :close-handler close-websocket)))
                              '(r))
               (when *initial-thunk*
-                (register-event-handler! 'start (lambda (event)
-                                                  (*initial-thunk*)))
-                (notify-event "start" #f))
+                (register-event-handler! 'start *initial-thunk*)
+                (invoke-event-handler 'start))
 
               (while (not (port-closed? in))
                 (selector-select sel))
