@@ -334,12 +334,9 @@
     ((_ expr ...)
      (async-apply-main (lambda () expr ...) '()))))
 
-(define *future-table-atom* (atom (make-hash-table 'equal?)))
-(define future-next-id (make-id-generator #xffffffff))
-
 (define (register-future! future)
-  (atomic *future-table-atom*
-    (lambda (tbl)
+  (with-future-table
+    (lambda (tbl future-next-id)
       (define (loop)
         (let1 id (future-next-id)
           (cond
@@ -351,8 +348,8 @@
       (loop))))
 
 (define (notify-result id vals err)
-  (atomic *future-table-atom*
-    (lambda (tbl)
+  (with-future-table
+    (lambda (tbl future-next-id)
       (let1 future (hash-table-get tbl id #f)
         (cond
           (future
@@ -370,8 +367,8 @@
            (errorf "[BUG] Invalid future ID: ~a" id)))))))
 
 (define (notify-binary-result id)
-  (atomic *future-table-atom*
-    (lambda (tbl)
+  (with-future-table
+    (lambda (tbl future-next-id)
       (let1 future (hash-table-get tbl id #f)
         (cond
           (future
@@ -725,7 +722,8 @@
   ((main-thread-pool :init-keyword :main-thread-pool)
    (worker-thread-pool :init-keyword :worker-thread-pool)
    (send-context-atom :init-keyword :send-context-atom)
-   (listener-table-atom :init-form (atom (make-hash-table 'equal?)))))
+   (listener-table-atom :init-form (atom (make-hash-table 'equal?)))
+   (future-table-atom :init-form (atom (make-hash-table 'equal?) (make-id-generator #xffffffff)))))
 
 (define application-context (make-parameter #f))
 (define current-thread-pool (make-parameter #f))
@@ -765,6 +763,9 @@
 (define (json-next-id)
   (with-send-context (lambda (ctx)
                        ((slot-ref ctx 'json-next-id-generator)))))
+
+(define (with-future-table proc)
+  (atomic (slot-ref (application-context) 'future-table-atom) proc))
 
 (define json-command-table
   (alist->hash-table
