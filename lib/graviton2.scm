@@ -208,45 +208,74 @@
 
 ;;;
 
+(define (make-pool-thunk app-context pool thunk :optional (error-handler #f))
+  (lambda ()
+    (reset
+      (parameterize ((application-context app-context)
+                     (current-thread-pool pool))
+        (guard (e (else
+                   (cond
+                     (error-handler
+                      (error-handler e))
+                     (else
+                      (report-error e)
+                      (exit 70)))))
+          (thunk)
+          (flush-commands))))))
+
 (define (submit-thunk pool thunk :optional (error-handler #f))
   (let1 app-context (application-context)
-    (add-job! pool
-      (lambda ()
-        (reset
-          (parameterize ((application-context app-context)
-                         (current-thread-pool pool))
-            (guard (e (else
-                       (cond
-                         (error-handler
-                          (error-handler e))
-                         (else
-                          (report-error e)
-                          (exit 70)))))
-              (thunk)
-              (flush-commands))))))))
+    (add-job! pool (make-pool-thunk app-context pool thunk error-handler))))
 
-(define (register-event-handler! event-type proc)
+(define (add-event-listener! event-type proc-or-future)
   (let ((app-context (application-context))
         (pool (current-thread-pool)))
     (atomic (slot-ref app-context 'listener-table-atom)
       (lambda (tbl)
-        (hash-table-set! tbl
-                         event-type
-                         (lambda args
-                           (submit-thunk pool
-                                         (lambda ()
-                                           (apply proc args)))))))))
+        (hash-table-push! tbl
+                          event-type
+                          (cond
+                            ((procedure? proc-or-future)
+                             (list pool proc-or-future))
+                            ((is-a? proc-or-future <graviton-future>)
+                             proc-or-future)
+                            (else
+                             (errorf "<procedure> or <graviton-future> required, but got ~s" proc-or-future))))))))
 
-(define (unregister-event-handler! event-type)
+(define (delete-event-listener! event-type proc-or-future)
   (atomic (slot-ref (application-context) 'listener-table-atom)
     (lambda (tbl)
-      (hash-table-delete! tbl event-type))))
+      (let loop ((vals '())
+                 (rest (hash-table-get tbl event-type)))
+        (match rest
+          (()
+           (hash-table-put! tbl event-type vals))
+          (((_ (? (cut equal? proc-or-future <>) proc)) rest ...)
+           (loop vals rest))
+          (((? (cut equal? proc-or-future <>)) rest ...)
+           (loop vals rest))
+          ((v rest ...)
+           (loop (cons v vals) rest)))))))
 
 (define (invoke-event-handler event-type :rest args)
   (atomic (slot-ref (application-context) 'listener-table-atom)
     (lambda (tbl)
-      (and-let1 proc (hash-table-get tbl event-type #f)
-        (apply proc args)))))
+      (let1 vals (hash-table-get tbl event-type '())
+        (hash-table-put! tbl
+                         event-type
+                         (fold (lambda (val new-vals)
+                                 (match val
+                                   ((pool proc)
+                                    (add-job! pool (make-pool-thunk (application-context)
+                                                       pool
+                                                     (lambda ()
+                                                       (apply proc args))))
+                                    (cons val new-vals))
+                                   (future
+                                    (set-future-result-values&exception! future args #f)
+                                    new-vals)))
+                               '()
+                               (hash-table-get tbl event-type '())))))))
 
 ;;;
 
@@ -1598,22 +1627,14 @@
 
 (define (set-window-event-handler! event-type proc)
   (call-command 'listen-window-event '(json boolean) (list (symbol->string event-type) (if proc #t #f)))
-  (cond
-    (proc
-     (register-event-handler! event-type proc))
-    (else
-     (unregister-event-handler! event-type))))
+  (add-event-listener! event-type proc))
 
 (define (set-canvas-event-handler! canvas event-type proc)
   (let1 event-name (format "_canvas_~a_~a" (slot-ref canvas 'id) event-type)
     (call-command 'listen-canvas-event
                   '(proxy json json boolean)
                   (list canvas (symbol->string event-type) event-name (if proc #t #f)))
-    (cond
-      (proc
-       (register-event-handler! (string->symbol event-name) proc))
-      (else
-       (unregister-event-handler! (string->symbol event-name))))))
+    (add-event-listener! (string->symbol event-name) proc)))
 
 ;;;
 
