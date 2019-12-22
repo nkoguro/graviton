@@ -70,6 +70,8 @@
           async-apply-main
           async-main
           await
+          await-window-event
+          await-canvas-event
           asleep
 
           flush-commands
@@ -333,13 +335,7 @@
          (receive (vals exception) (shift cont
                                      (push! (slot-ref future 'pool&continuations) (list pool cont))
                                      (when timeout
-                                       (add-schedule! (add-duration (current-time)
-                                                                    (let* ((sec (floor timeout))
-                                                                           (nanosec (round->exact (* (- timeout sec)
-                                                                                                     1000000000))))
-                                                                      (make-time time-duration nanosec sec)))
-                                                      future
-                                                      timeout-vals))
+                                       (add-timeout! timeout future timeout-vals))
                                      (mutex-unlock! lock))
            (set! result-values vals)
            (set! result-exception exception)))))
@@ -352,6 +348,17 @@
        (raise result-exception))
       (else
        (error "[BUG] Invalid future state")))))
+
+(define (await-event event-type :optional (timeout #f) :rest timeout-vals)
+  (let1 future (make <graviton-future>)
+    (add-event-listener! event-type future)
+    (apply await future timeout timeout-vals)))
+
+(define (await-window-event event-type :optional (timeout #f) :rest timeout-vals)
+  (apply await-event event-type timeout timeout-vals))
+
+(define (await-canvas-event canvas event-type :optional (timeout #f) :rest timeout-vals)
+  (apply await-event (canvas-event-type canvas event-type) timeout timeout-vals))
 
 (define (asleep sec)
   (let1 future (make <graviton-future>)
@@ -557,6 +564,15 @@
 
 (define (add-schedule! wake-time future vals)
   (enqueue! *scheduler-command-queue* (list 'schedule wake-time future vals)))
+
+(define (add-timeout! timeout-in-sec future vals)
+  (add-schedule! (add-duration (current-time)
+                               (let* ((sec (floor timeout-in-sec))
+                                      (nanosec (round->exact (* (- timeout-in-sec sec)
+                                                                1000000000))))
+                                 (make-time time-duration nanosec sec)))
+                 future
+                 vals))
 
 (define (cancel-schedule! future)
   (enqueue! *scheduler-command-queue* (list 'cancel future)))
@@ -1629,8 +1645,11 @@
   (call-command 'listen-window-event '(json boolean) (list (symbol->string event-type) (if proc #t #f)))
   (add-event-listener! event-type proc))
 
+(define (canvas-event-type canvas event-type)
+  (string->symbol (format "_canvas_~a_~a" (slot-ref canvas 'id) event-type)))
+
 (define (set-canvas-event-handler! canvas event-type proc)
-  (let1 event-name (format "_canvas_~a_~a" (slot-ref canvas 'id) event-type)
+  (let1 event-name (symbol->string (canvas-event-type canvas event-type))
     (call-command 'listen-canvas-event
                   '(proxy json json boolean)
                   (list canvas (symbol->string event-type) event-name (if proc #t #f)))
