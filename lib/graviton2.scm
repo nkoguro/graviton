@@ -222,8 +222,7 @@
                      (else
                       (report-error e)
                       (exit 70)))))
-          (thunk)
-          (flush-commands))))))
+          (thunk))))))
 
 (define (submit-thunk pool thunk :optional (error-handler #f))
   (let1 app-context (application-context)
@@ -316,7 +315,6 @@
               pool&conts)))
 
 (define (await future :optional (timeout #f) :rest timeout-vals)
-  (flush-commands)
   (let ((lock (slot-ref future 'lock))
         (result-values #f)
         (result-exception #f))
@@ -565,12 +563,15 @@
 (define (add-schedule! wake-time future vals)
   (enqueue! *scheduler-command-queue* (list 'schedule wake-time future vals)))
 
+(define (make-duration-from-second sec)
+  (let* ((sec-part (floor sec))
+         (nanosec-part (round->exact (* (- sec sec-part)
+                                        1000000000))))
+    (make-time time-duration nanosec-part sec-part)))
+
 (define (add-timeout! timeout-in-sec future vals)
   (add-schedule! (add-duration (current-time)
-                               (let* ((sec (floor timeout-in-sec))
-                                      (nanosec (round->exact (* (- timeout-in-sec sec)
-                                                                1000000000))))
-                                 (make-time time-duration nanosec sec)))
+                               (make-duration-from-second timeout-in-sec))
                  future
                  vals))
 
@@ -804,6 +805,11 @@
          (parameterize ((current-send-context ctx))
            (proc ctx)))))))
 
+(define (refresh-cycle-second)
+  (with-send-context
+    (lambda (ctx)
+      (slot-ref ctx 'refresh-cycle-second))))
+
 (define (proxy-object-next-id)
   (with-send-context (lambda (ctx)
                        ((slot-ref ctx 'proxy-object-id-generator)))))
@@ -872,8 +878,21 @@
               (when *initial-thunk*
                 (submit-thunk (main-thread-pool) *initial-thunk*))
 
-              (while (not (port-closed? in))
-                (selector-select sel))
+              (let1 now (time->seconds (current-time))
+                (let loop ((now now)
+                           (next-update-sec (+ now (refresh-cycle-second))))
+                  (cond
+                    ((port-closed? in)
+                     #f)
+                    ((<= next-update-sec now)
+                     (flush-commands)
+                     (invoke-event-handler 'update)
+                     (let1 now (time->seconds (current-time))
+                       (loop now (+ now (refresh-cycle-second)))))
+                    (else
+                     (selector-select sel (* (- next-update-sec now) 1000))
+                     (loop (time->seconds (current-time)) next-update-sec)))))
+
               (for-each (lambda (pool)
                           (terminate-all! pool :cancel-queued-jobs #t))
                         (list (main-thread-pool) (worker-thread-pool)))
@@ -1657,20 +1676,20 @@
 
 ;;;
 
-(define (loop-frame frame-per-second proc)
-  (let ((exit? #f)
-        (frame-sec (/. 1 frame-per-second)))
+(define (loop-frame proc)
+  (let ((exit? #f))
     (define (break)
       (set! exit? #t))
     (while (not exit?)
       (let1 start-sec (time->seconds (current-time))
         (proc break)
-        (let1 elapse-sec (- (time->seconds (current-time)) start-sec)
+        (let* ((frame-sec (refresh-cycle-second))
+               (elapse-sec (- (time->seconds (current-time)) start-sec)))
           (when (< frame-sec elapse-sec)
             (log-debug "Frame dropped. renderer procedure consumes ~a sec. It exceeds one frame sec: ~a"
                        elapse-sec
                        frame-sec))
-          (asleep (max 0 (- frame-sec elapse-sec))))))))
+          (await-window-event 'update))))))
 
 ;;;
 
