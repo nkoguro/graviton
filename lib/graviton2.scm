@@ -567,15 +567,15 @@
 (define (add-schedule! wake-time future vals)
   (enqueue! *scheduler-command-queue* (list 'schedule wake-time future vals)))
 
-(define (make-duration-from-second sec)
+(define (make-time-from-second type sec)
   (let* ((sec-part (floor sec))
          (nanosec-part (round->exact (* (- sec sec-part)
                                         1000000000))))
-    (make-time time-duration nanosec-part sec-part)))
+    (make-time type nanosec-part sec-part)))
 
 (define (add-timeout! timeout-in-sec future vals)
   (add-schedule! (add-duration (current-time)
-                               (make-duration-from-second timeout-in-sec))
+                               (make-time-from-second time-duration timeout-in-sec))
                  future
                  vals))
 
@@ -769,7 +769,8 @@
    (json-pair-buffer :init-value '())
    (json-next-id-generator :init-form (make-id-generator #xffffffff))
    (proxy-object-id-generator :init-form (make-id-generator #xffffffff))
-   (refresh-cycle-second :init-value (/. 1 30))))
+   (refresh-cycle-second :init-value (/. 1 30))
+   (next-update-time :init-form (current-time))))
 
 (define-class <application-context> ()
   ((main-thread-pool :init-keyword :main-thread-pool)
@@ -813,6 +814,11 @@
   (with-send-context
     (lambda (ctx)
       (slot-ref ctx 'refresh-cycle-second))))
+
+(define (set-next-update-time! next-update-time)
+  (with-send-context
+    (lambda (ctx)
+      (slot-set! ctx 'next-update-time next-update-time))))
 
 (define (proxy-object-next-id)
   (with-send-context (lambda (ctx)
@@ -885,6 +891,7 @@
               (let1 now (time->seconds (current-time))
                 (let loop ((now now)
                            (next-update-sec (+ now (refresh-cycle-second))))
+                  (set-next-update-time! (make-time-from-second time-utc next-update-sec))
                   (cond
                     ((port-closed? in)
                      #f)
