@@ -530,31 +530,35 @@
 (define (run-scheduler)
   (thread-start! (make-thread
                    (lambda ()
-                     (let loop ((schedule-list '()))
-                       (let1 now (current-time)
-                         (cond
-                           ((and (not (null? schedule-list))
-                                 (time<=? (caar schedule-list) now))
-                            (match-let1 (_ future vals) (car schedule-list)
-                              (set-future-result-values&exception! future vals #f))
-                            (loop (cdr schedule-list)))
-                           (else
-                            (let1 timeout (if (null? schedule-list)
-                                              #f
-                                              (max (- (time->seconds (caar schedule-list)) (time->seconds now)) 0))
-                              (match (dequeue/wait! *scheduler-command-queue* timeout #f)
-                                (('shutdown)
-                                 #f)
-                                (('schedule wake-time future vals)
-                                 (loop (sort (cons (list wake-time future vals) schedule-list)
-                                             time<?
-                                             car)))
-                                (('cancel future)
-                                 (loop (remove (lambda (schedule)
-                                                 (eq? (cdr schedule) future))
-                                               schedule-list)))
-                                (_
-                                 (loop schedule-list)))))))))
+                     (guard (e (else (report-error e)
+                                     (exit 70)))
+                       (let loop ((schedule-list '()))
+                         (let1 now (current-time)
+                           (cond
+                             ((and (not (null? schedule-list))
+                                   (time<=? (caar schedule-list) now))
+                              (match-let1 (_ future vals) (car schedule-list)
+                                (set-future-result-values&exception! future vals #f))
+                              (loop (cdr schedule-list)))
+                             (else
+                              (let1 timeout (if (null? schedule-list)
+                                                #f
+                                                (max (- (time->seconds (caar schedule-list))
+                                                        (time->seconds now))
+                                                     0))
+                                (match (dequeue/wait! *scheduler-command-queue* timeout #f)
+                                  (('shutdown)
+                                   #f)
+                                  (('schedule wake-time future vals)
+                                   (loop (sort (cons (list wake-time future vals) schedule-list)
+                                               time<?
+                                               car)))
+                                  (('cancel future)
+                                   (loop (remove (lambda (schedule)
+                                                   (eq? (cdr schedule) future))
+                                                 schedule-list)))
+                                  (_
+                                   (loop schedule-list))))))))))
                    "scheduler")))
 
 (define (shutdown-scheduler!)
