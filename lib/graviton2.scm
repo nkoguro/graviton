@@ -762,6 +762,7 @@
 
 (define *initial-thunk* #f)
 (define *num-dispatcher* (atom 0))
+(define *init-hook* (make-hook))
 
 (define-class <send-context> ()
   ((websocket-output-port :init-keyword :websocket-output-port)
@@ -844,79 +845,84 @@
   (thread-start!
     (make-thread
       (lambda ()
-        (atomic-update! *num-dispatcher* (^x (+ x 1)))
-        (guard (e (else (report-error e)))
-          (let* ((sel (make <selector>))
-                 (ctx (make <websocket-server-context>))
-                 (next-id (make-id-generator #xffffffff))
-                 (app-context (make-application-context 1 2 out)))
-            (define (close-websocket status data)
-              (log-info "WebSocket closed: code=~a, data=(~a)" status data)
-              (selector-delete! sel in #f #f)
-              (close-input-port in))
-            (define (receive-json json-str)
-              (let* ((params (vector->list (parse-json-string json-str)))
-                     (cmd (car params))
-                     (args (cdr params))
-                     (proc (hash-table-get json-command-table cmd #f)))
-                (cond
-                  (proc
-                   (apply proc args))
-                  (else
-                   (log-error "Invalid data received: ~s" params)))))
-            (define (receive-binary data)
-              (let1 id (get-u32 data 0)
-                (atomic *binary-data-table-atom*
-                  (lambda (tbl)
-                    (hash-table-put! tbl id (uvector-alias <u8vector> data 4))))))
-
-            (parameterize ((json-special-handler (lambda (sym)
-                                                   (case sym
-                                                     ((false) #f)
-                                                     ((true) #t)
-                                                     (else sym))))
-                           (application-context app-context))
-              (selector-add! sel in (lambda (in flag)
-                                      (while (and (byte-ready? in) (not (port-closed? in)))
-                                        (dispatch-payload ctx
-                                                          in
-                                                          out
-                                                          :text-handler receive-json
-                                                          :binary-handler receive-binary
-                                                          :close-handler close-websocket)))
-                             '(r))
-              (when *initial-thunk*
-                (submit-thunk (main-thread-pool) *initial-thunk*))
-
-              (let1 now (time->seconds (current-time))
-                (let loop ((now now)
-                           (next-update-sec (+ now (refresh-cycle-second))))
-                  (set-next-update-time! (make-time-from-second time-utc next-update-sec))
+        (guard (e (else (report-error e)
+                        (exit 70)))
+          (atomic-update! *num-dispatcher* (^x (+ x 1)))
+          (guard (e (else (report-error e)))
+            (let* ((sel (make <selector>))
+                   (ctx (make <websocket-server-context>))
+                   (next-id (make-id-generator #xffffffff))
+                   (app-context (make-application-context 1 2 out)))
+              (define (close-websocket status data)
+                (log-info "WebSocket closed: code=~a, data=(~a)" status data)
+                (selector-delete! sel in #f #f)
+                (close-input-port in))
+              (define (receive-json json-str)
+                (let* ((params (vector->list (parse-json-string json-str)))
+                       (cmd (car params))
+                       (args (cdr params))
+                       (proc (hash-table-get json-command-table cmd #f)))
                   (cond
-                    ((port-closed? in)
-                     #f)
-                    ((<= next-update-sec now)
-                     (flush-commands)
-                     (invoke-event-handler 'update)
-                     (let1 now (time->seconds (current-time))
-                       (loop now (+ now (refresh-cycle-second)))))
+                    (proc
+                     (apply proc args))
                     (else
-                     (selector-select sel (* (- next-update-sec now) 1000))
-                     (loop (time->seconds (current-time)) next-update-sec)))))
+                     (log-error "Invalid data received: ~s" params)))))
+              (define (receive-binary data)
+                (let1 id (get-u32 data 0)
+                  (atomic *binary-data-table-atom*
+                    (lambda (tbl)
+                      (hash-table-put! tbl id (uvector-alias <u8vector> data 4))))))
 
-              (for-each (lambda (pool)
-                          (terminate-all! pool :cancel-queued-jobs #t))
-                        (list (main-thread-pool) (worker-thread-pool)))
-              (log-debug "WebSocket dispatcher finished")
-              (close-input-port in)
-              (close-output-port out)
-              (connection-close sock)
-              (connection-shutdown sock 'both)
-              (atomic-update! *num-dispatcher* (lambda (x)
-                                                 (let1 num (- x 1)
-                                                   (when (= num 0)
-                                                     (terminate-server-loop *control-channel* 0))
-                                                   num))))))))))
+              (parameterize ((json-special-handler (lambda (sym)
+                                                     (case sym
+                                                       ((false) #f)
+                                                       ((true) #t)
+                                                       (else sym))))
+                             (application-context app-context))
+                (selector-add! sel in (lambda (in flag)
+                                        (while (and (byte-ready? in) (not (port-closed? in)))
+                                          (dispatch-payload ctx
+                                                            in
+                                                            out
+                                                            :text-handler receive-json
+                                                            :binary-handler receive-binary
+                                                            :close-handler close-websocket)))
+                               '(r))
+                (when *initial-thunk*
+                  (submit-thunk (main-thread-pool)
+                    (lambda ()
+                      (run-hook *init-hook*)
+                      (*initial-thunk*))))
+
+                (let1 now (time->seconds (current-time))
+                  (let loop ((now now)
+                             (next-update-sec (+ now (refresh-cycle-second))))
+                    (set-next-update-time! (make-time-from-second time-utc next-update-sec))
+                    (cond
+                      ((port-closed? in)
+                       #f)
+                      ((<= next-update-sec now)
+                       (flush-commands)
+                       (invoke-event-handler 'update)
+                       (let1 now (time->seconds (current-time))
+                         (loop now (+ now (refresh-cycle-second)))))
+                      (else
+                       (selector-select sel (* (- next-update-sec now) 1000))
+                       (loop (time->seconds (current-time)) next-update-sec)))))
+
+                (for-each (lambda (pool)
+                            (terminate-all! pool :cancel-queued-jobs #t))
+                          (list (main-thread-pool) (worker-thread-pool)))
+                (log-debug "WebSocket dispatcher finished")
+                (close-input-port in)
+                (close-output-port out)
+                (connection-close sock)
+                (connection-shutdown sock 'both)
+                (atomic-update! *num-dispatcher* (lambda (x)
+                                                   (let1 num (- x 1)
+                                                     (when (= num 0)
+                                                       (terminate-server-loop *control-channel* 0))
+                                                     num)))))))))))
 
 (define-http-handler "/s"
   (lambda (req app)
