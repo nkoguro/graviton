@@ -50,9 +50,11 @@
   (use rfc.base64)
   (use rfc.json)
   (use rfc.sha)
+  (use scheme.list)
   (use srfi-13)
   (use srfi-19)
   (use srfi-27)
+  (use srfi-42)
   (use text.html-lite)
   (use text.tree)
   (use util.match)
@@ -183,6 +185,9 @@
           push-oscillator-frequency-audio-param!
           push-oscillator-detune-audio-param!
           set-oscillator-periodic-wave!
+
+          play-sound
+          play-silent
           ))
 
 (select-module graviton2)
@@ -778,7 +783,8 @@
    (worker-thread-pool :init-keyword :worker-thread-pool)
    (send-context-atom :init-keyword :send-context-atom)
    (listener-table-atom :init-form (atom (make-hash-table 'equal?)))
-   (future-table-atom :init-form (atom (make-hash-table 'equal?) (make-id-generator #xffffffff)))))
+   (future-table-atom :init-form (atom (make-hash-table 'equal?) (make-id-generator #xffffffff)))
+   (audio-context-atom :init-form (atom #f))))
 
 (define application-context (make-parameter #f))
 (define current-thread-pool (make-parameter #f))
@@ -815,6 +821,11 @@
   (with-send-context
     (lambda (ctx)
       (slot-ref ctx 'refresh-cycle-second))))
+
+(define (next-update-second)
+  (with-send-context
+    (lambda (ctx)
+      (time->seconds (slot-ref ctx 'next-update-time)))))
 
 (define (set-next-update-time! next-update-time)
   (with-send-context
@@ -1788,6 +1799,138 @@
   (call-command 'set-oscillator-periodic-wave
                 '(proxy json json json)
                 (list oscillator-node real imag `(("disableNomalization" . ,disable-nomalization)))))
+
+(define-class <audio-context> ()
+  ((tracks :init-keyword :tracks)
+   (base-start-second :init-keyword :base-start-second)
+   (playing-soundlets :init-value '())
+   (destination-node :init-keyword :destination-node)))
+
+(define-class <audio-track> ()
+  ((queue :init-form (make-queue))
+   (last-sound-second :init-value 0)))
+
+(define-class <soundlet> ()
+  ((length :init-keyword :length)
+   (start-second :init-value 0)
+   (end-second :allocation :virtual
+               :slot-ref (lambda (obj)
+                           (+ (slot-ref obj 'start-second)
+                              (slot-ref obj 'length))))
+   (audio-nodes :init-value '())))
+
+(define-class <oscillator-soundlet> (<soundlet>)
+  ((frequency :init-keyword :frequency)
+   (type :init-keyword :type)))
+
+(define-method soundlet->nodes (ctx (obj <oscillator-soundlet>))
+  (let ((oscillator-node (make-oscillator-node)))
+    (set-oscillator-type! oscillator-node (slot-ref obj 'type))
+    (push-oscillator-frequency-audio-param! oscillator-node)
+    (audio-param-set-value-at-time! (slot-ref obj 'frequency) 0)
+    (pop-audio-param!)
+    (connect-node! oscillator-node (slot-ref ctx 'destination-node))
+    (let1 base-start-second (slot-ref ctx 'base-start-second)
+      (start-audio-node! oscillator-node (- (slot-ref obj 'start-second) base-start-second))
+      (stop-audio-node! oscillator-node (- (slot-ref obj 'end-second) base-start-second)))
+    (list oscillator-node)))
+
+(define (play-sound track-num type freq len)
+  (with-audio-context
+    (lambda (ctx)
+      (let ((track (vector-ref (slot-ref ctx 'tracks) track-num))
+            (soundlet (make <oscillator-soundlet> :frequency freq :type type :length len)))
+        (enqueue-soundlet! track soundlet)))))
+
+(define-class <silent-soundlet> (<soundlet>)
+  ())
+
+(define (play-silent track-num len)
+  (with-audio-context
+    (lambda (ctx)
+      (let ((track (vector-ref (slot-ref ctx 'tracks) track-num))
+            (soundlet (make <silent-soundlet> :length len)))
+        (enqueue-soundlet! track soundlet)))))
+
+(define-method soundlet->nodes (ctx (obj <silent-soundlet>))
+  '())
+
+(define (make-audio-context num-tracks)
+  (with-send-context
+    (lambda (send-context)
+      (set-audio-base-time!)
+      (let ((destination-node (make-audio-context-destination))
+            (base-start-second (next-update-second)))
+        (make <audio-context>
+          :tracks (vector-ec (: i num-tracks) (make <audio-track>))
+          :destination-node destination-node
+          :base-start-second base-start-second)))))
+
+(define (initialize-audio)
+  (slot-set! (application-context) 'audio-context-atom (atom (make-audio-context 16)))
+  (add-event-listener! 'update (lambda ()
+                                 (atomic (slot-ref (application-context) 'audio-context-atom)
+                                   (lambda (ctx)
+                                     (update-audio-context! ctx)
+                                     (cleanup-playing-soundlets! ctx))))))
+
+(add-hook! *init-hook* initialize-audio)
+
+(define (with-audio-context proc)
+  (atomic (slot-ref (application-context) 'audio-context-atom)
+    (lambda (ctx)
+      (unless ctx
+        (error "audio isn't available yet."))
+      (proc ctx))))
+
+(define (enqueue-soundlet! track soundlet)
+  (with-send-context
+    (lambda (send-context)
+      (let* ((now (next-update-second))
+             (last-sound-second (slot-ref track 'last-sound-second))
+             (start-second (if (< last-sound-second now)
+                               now
+                               last-sound-second)))
+        (slot-set! soundlet 'start-second start-second)
+        (enqueue! (slot-ref track 'queue) soundlet)
+        (slot-set! track 'last-sound-second (slot-ref soundlet 'end-second))))))
+
+(define (update-audio-context! ctx)
+  (with-send-context
+    (lambda (send-context)
+      (let* ((start-frame-second (next-update-second))
+             (end-frame-second (+ (next-update-second) (refresh-cycle-second))))
+        (for-each (lambda (track)
+                    (let ((queue (slot-ref track 'queue)))
+                      (let loop ((soundlet (queue-front queue #f)))
+                        (cond
+                          ((and soundlet
+                                (<= (slot-ref soundlet 'start-second) end-frame-second))
+                           (let1 nodes (soundlet->nodes ctx soundlet)
+                             (slot-set! soundlet 'audio-nodes nodes)
+                             (push! (slot-ref ctx 'playing-soundlets) soundlet)
+                             (dequeue! queue))
+                           (loop (queue-front queue #f)))
+                          (else
+                           #f)))))
+                  (slot-ref ctx 'tracks))))))
+
+(define (cleanup-playing-soundlets! ctx)
+  (with-send-context
+    (lambda (send-context)
+      (let* ((now (next-update-second))
+             (stopped-soundlets (filter (lambda (soundlet)
+                                          (<= (slot-ref soundlet 'end-second) now))
+                                        (slot-ref ctx 'playing-soundlets))))
+        (for-each (lambda (soundlet)
+                    (for-each (lambda (node)
+                                (unlink-proxy-object! node))
+                              (slot-ref soundlet 'audio-nodes)))
+                  stopped-soundlets)
+        (slot-set! ctx 'playing-soundlets (lset-difference eq?
+                                                           (slot-ref ctx 'playing-soundlets)
+                                                           stopped-soundlets))))))
+
 
 ;;;
 
