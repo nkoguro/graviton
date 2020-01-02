@@ -15,12 +15,16 @@ function connectServer() {
         window.close();
     };
     webSocket.onmessage = (event) => {
-        if (typeof event.data === 'string') {
-            let params =JSON.parse(event.data);
-            console.log('received: ' + params);
-            dispatchJsonMessage(params);
-        } else {
-            dispatchBinaryMessage(event.data);
+        try {
+            if (typeof event.data === 'string') {
+                let params =JSON.parse(event.data);
+                console.log('received: ' + params);
+                dispatchJsonMessage(params);
+            } else {
+                dispatchBinaryMessage(event.data);
+            }
+        } catch (e) {
+            notifyException(false, e.toString());
         }
     };
 }

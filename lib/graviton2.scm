@@ -416,6 +416,8 @@
                                                       (&message (message err))
                                                       (&error))))
            (hash-table-delete! tbl id))
+          ((not (eq? err 'false))
+           (raise err))
           (else
            (errorf "[BUG] Invalid future ID: ~a" id)))))))
 
