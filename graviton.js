@@ -186,7 +186,7 @@ function notifyEvent(eventType, event) {
  * Graviton binary commands
  */
 
-var binaryCommands = [];
+let binaryCommands = [];
 
 function dispatchBinaryMessage(abuf) {
     let ds = new DataStream(abuf);
