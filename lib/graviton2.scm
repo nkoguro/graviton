@@ -188,6 +188,11 @@
 
           play-sound
           play-silent
+          load-audio
+          play-audio
+          pause-audio
+          load-pcm
+          play-pcm
           ))
 
 (select-module graviton2)
@@ -1093,6 +1098,14 @@
                       push-oscillator-frequency-audio-param
                       push-oscillator-detune-audio-param
                       set-oscillator-periodic-wave
+                      load-audio
+                      play-audio
+                      pause-audio
+                      load-pcm
+                      make-audio-buffer-source-node
+                      push-audio-buffer-source-node-detune-audio-param
+                      push-audio-buffer-source-node-playback-rate-audio-param
+                      set-audio-buffer-source-node-loop
                       ))
     tbl))
 
@@ -1563,6 +1576,16 @@
        "image/gif")
       ((member ext '("bmp"))
        "image/bmp")
+      ((member ext '("mp3"))
+       "audio/mpeg")
+      ((member ext '("m4a"))
+       "audio/aac")
+      ((member ext '("ogg"))
+       "audio/ogg")
+      ((member ext '("mid" "midi"))
+       "audio/midi")
+      ((member ext '("wav"))
+       "audio/wav")
       (else
        #f))))
 
@@ -1855,6 +1878,54 @@
 (define-method soundlet->nodes (ctx (obj <silent-soundlet>))
   '())
 
+(define-class <pcm-soundlet> (<soundlet>)
+  ((pcm-data :init-keyword :pcm-data)
+   (detune :init-keyword :detune
+           :init-value 0)
+   (loop? :init-keyword :loop?
+          :init-value #f)
+   (loop-start :init-keyword :loop-start
+               :init-value 0)
+   (loop-end :init-keyword :loop-end
+             :init-value 0)
+   (playback-rate :init-keyword :playback-rate
+                  :init-value 1.0)))
+
+(define-method soundlet->nodes (ctx (obj <pcm-soundlet>))
+  (let ((pcm-node (make-audio-buffer-source-node (slot-ref obj 'pcm-data))))
+    (unless (zero? (slot-ref obj 'detune))
+      (push-audio-buffer-source-node-detune-audio-param pcm-node)
+      (audio-param-set-value-at-time! (slot-ref obj 'detune) 0)
+      (pop-audio-param!))
+    (unless (equal? (slot-ref obj 'playback-rate) 1.0)
+      (push-audio-buffer-source-node-playback-rate-audio-param pcm-node)
+      (audio-param-set-value-at-time! (slot-ref obj 'playback-rate) 0)
+      (pop-audio-param!))
+    (when (slot-ref obj 'loop?)
+      (set-audio-buffer-source-node-loop! pcm-node #t (slot-ref obj 'loop-start) (slot-ref obj 'loop-end)))
+    (connect-node! pcm-node (slot-ref ctx 'destination-node))
+    (let1 base-start-second (slot-ref ctx 'base-start-second)
+      (start-audio-node! pcm-node (- (slot-ref obj 'start-second) base-start-second))
+      (stop-audio-node! pcm-node (- (slot-ref obj 'end-second) base-start-second)))
+    (list pcm-node)))
+
+(define (play-pcm track-num pcm-data detune playback-rate :optional (loop-range #f) (len #f))
+  (with-audio-context
+    (lambda (ctx)
+      (let ((track (vector-ref (slot-ref ctx 'tracks) track-num))
+            (soundlet (make <pcm-soundlet>
+                        :pcm-data pcm-data
+                        :detune detune
+                        :playback-rate playback-rate
+                        :loop? (if loop-range #t #f)
+                        :length (if len
+                                    len
+                                    (slot-ref pcm-data 'duration)))))
+        (when loop-range
+          (slot-set! soundlet 'loop-start (list-ref loop-range 0))
+          (slot-set! soundlet 'loop-end (list-ref loop-range 1)))
+        (enqueue-soundlet! track soundlet)))))
+
 (define (make-audio-context num-tracks)
   (with-send-context
     (lambda (send-context)
@@ -1931,6 +2002,68 @@
                                                            (slot-ref ctx 'playing-soundlets)
                                                            stopped-soundlets))))))
 
+
+(define-class <audio-media-element-node> (<proxy-object>)
+  ((duration :init-value #f)))
+
+(define (load-audio filename :key (content-type #f))
+  (let* ((node (make <audio-media-element-node>))
+         (future (make <graviton-future> :result-maker (lambda (duration)
+                                                         (slot-set! node 'duration duration)
+                                                         node)))
+         (data (call-with-input-file filename port->uvector)))
+    (call-command 'load-audio
+                  '(future proxy (resource ,(or content-type
+                                                (estimate-content-type filename))))
+                  (list future node data))
+    future))
+
+(define (play-audio audio)
+  (call-command 'play-audio '(proxy) (list audio)))
+
+(define (pause-audio audio)
+  (call-command 'pause-audio '(proxy) (list audio)))
+
+(define-class <audio-buffer> (<proxy-object>)
+  ((sample-rate)
+   (length)
+   (duration)
+   (number-of-channels)))
+
+(define (load-pcm filename :key (content-type #f))
+  (let* ((pcm (make <audio-buffer>))
+         (future (make <graviton-future> :result-maker (lambda (sample-rate len duration num-of-channels)
+                                                         (slot-set! pcm 'sample-rate sample-rate)
+                                                         (slot-set! pcm 'length len)
+                                                         (slot-set! pcm 'duration duration)
+                                                         (slot-set! pcm 'number-of-channels num-of-channels)
+                                                         pcm)))
+         (data (call-with-input-file filename port->uvector)))
+    (call-command 'load-pcm
+                  '(future proxy (resource ,(or content-type
+                                                          (estimate-content-type filename))))
+                  (list future pcm data))
+    future))
+
+(define (make-audio-buffer-source-node pcm-data)
+  (let1 audio-buffer-source-node (make <audio-node> :type 'audio-buffer-source)
+    (call-command 'make-audio-buffer-source-node '(proxy proxy) (list audio-buffer-source-node pcm-data))
+    audio-buffer-source-node))
+
+(define (push-audio-buffer-source-node-detune-audio-param audio-buffer-source-node)
+  (call-command 'push-audio-buffer-source-node-detune-audio-param
+                '(proxy)
+                (list audio-buffer-source-node)))
+
+(define (push-audio-buffer-source-node-playback-rate-audio-param audio-buffer-source-node)
+  (call-command 'push-audio-buffer-source-node-playback-rate-audio-param
+                '(proxy)
+                (list audio-buffer-source-node)))
+
+(define (set-audio-buffer-source-node-loop! audio-buffer-source-node loop? loop-start loop-end)
+  (call-command 'set-audio-buffer-source-node-loop
+                '(proxy boolean f64 f64)
+                (list audio-buffer-source-node loop? loop-start loop-end)))
 
 ;;;
 

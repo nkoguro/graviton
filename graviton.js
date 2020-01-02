@@ -287,7 +287,15 @@ function initializeBinaryCommands() {
         setOscillatorType,
         pushOscillatorFrequencyAudioParam,
         pushOscillatorDetuneAudioParam,
-        setOscillatorPeriodicWave
+        setOscillatorPeriodicWave,
+        loadAudio,
+        playAudio,
+        pauseAudio,
+        loadPCM,
+        makeAudioBufferSourceNode,
+        pushAudioBufferSourceNodeDetuneAudioParam,
+        pushAudioBufferSourceNodePlaybackRateAudioParam,
+        setAudioBufferSourceNodeLoop
     ];
 }
 
@@ -417,6 +425,7 @@ function loadCanvasCommand(ds) {
     img.onerror = () => {
         console.log('Load image failed: ' + url);
         workingImages.delete(img);
+        notifyException(futureId, "Load image failed.");
     };
 }
 
@@ -1012,6 +1021,91 @@ function setOscillatorPeriodicWave(ds) {
     oscillatorNode.setPeriodicWave(audioContext.createPeriodicWave(real, imag, constraints));
 }
 
+function loadAudio(ds) {
+    let futureId = ds.getUint32();
+    let nodeId = ds.getUint32();
+    let url = ds.getJson();
+
+    let audio = new Audio(url);
+    audio.onloadedmetadata = () => {
+        let sourceNode = audioContext.createMediaElementSource(audio);
+        linkProxyObject(nodeId, sourceNode);
+        sourceNode.connect(audioContext.destination);
+        notifyValues(futureId, [audio.duration]);
+    };
+    audio.onstalled = () => {
+        notifyException(futureId, "Load audio failed.");
+    };
+}
+
+function playAudio(ds) {
+    let sourceNode = ds.getProxyObject();
+    sourceNode.mediaElement.play();
+}
+
+function pauseAudio(ds) {
+    let sourceNode = ds.getProxyObject();
+    sourceNode.mediaElement.pause();
+}
+
+function loadPCM(ds) {
+    let futureId = ds.getUint32();
+    let objectId = ds.getUint32();
+    let url = ds.getJson();
+
+    let req = new XMLHttpRequest();
+    req.open('GET', url, true);
+    req.responseType = 'arraybuffer';
+    req.onload = () => {
+        if (req.status === 200) {
+            let buf = req.response;
+            audioContext.decodeAudioData(buf).then(
+                (decodedData) => {
+                    linkProxyObject(objectId, decodedData);
+                    notifyValues(futureId, [decodedData.sampleRate,
+                                            decodedData.length,
+                                            decodedData.duration,
+                                            decodedData.numberOfChannels]);
+                },
+                (reason) => {
+                    notifyException(futureId, reason);
+                });
+        }
+    };
+    req.send();
+}
+
+function makeAudioBufferSourceNode(ds) {
+    let nodeId = ds.getUint32();
+    let pcmData = ds.getProxyObject();
+
+    let sourceNode = audioContext.createBufferSource();
+    sourceNode.buffer = pcmData;
+    linkProxyObject(nodeId, sourceNode);
+}
+
+function pushAudioBufferSourceNodeDetuneAudioParam(ds) {
+    let sourceNode = ds.getProxyObject();
+    audioParamStack.push(sourceNode.detune);
+}
+
+function pushAudioBufferSourceNodePlaybackRateAudioParam(ds) {
+    let sourceNode = ds.getProxyObject();
+    audioParamStack.push(sourceNode.playbackRate);
+}
+
+function setAudioBufferSourceNodeLoop(ds) {
+    let sourceNode = ds.getProxyObject();
+    let loop = ds.getBoolean();
+    let loopStart = ds.getFloat64();
+    let loopEnd = ds.getFloat64();
+
+    sourceNode.loop = loop;
+    if (loop) {
+        sourceNode.loopStart = loopStart;
+        sourceNode.loopEnd = loopEnd;
+    }
+}
 
 /**
  * Graviton text commands
