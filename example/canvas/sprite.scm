@@ -87,7 +87,7 @@
                                        (- (* (random-real) 400) 200)
                                        (- (* (random-real) 400) 200)))))
         (prepare-ball-images sprite *sprite-width* *sprite-height* *num-patterns*)
-        (loop-frame 30
+        (loop-frame
           (lambda (break)
             (parameterize ((current-canvas canvas))
               (draw-balls sprite balls)
