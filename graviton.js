@@ -145,7 +145,8 @@ class DataStream {
         return fetchJson(index);
     }
 
-    getUint8Array(len) {
+    getUint8Array() {
+        let len = this.getUint32();
         let data = new Uint8Array(this.dataView.buffer, this.position, len);
         this.position += len;
         return data;
@@ -191,17 +192,37 @@ function notifyEvent(eventType, event) {
  */
 
 let binaryCommands = [];
+let binaryCommands2 = [];
+let currentFutureId = false;
 
 function dispatchBinaryMessage(abuf) {
     let ds = new DataStream(abuf);
     while (ds.hasData()) {
         let commandIndex = ds.getUint16();
         let func = binaryCommands[commandIndex];
+        // TODO: Cleanup
+        if (!func && commandIndex > 1000) {
+            func = binaryCommands2[commandIndex];
+            currentFutureId = false;
+            if (commandIndex & 1) {
+                currentFutureId = ds.getUint32();
+            }
+        }
         if (func) {
-            func.apply(null, [ds]);
+            try {
+                func.apply(null, [ds]);
+            } catch (e) {
+                notifyException(currentFutureId, e.toString());
+            }
         } else {
             console.log('Invalid binary command index: ' + commandIndex);
         }
+    }
+}
+
+function result(...vals) {
+    if (currentFutureId) {
+        notifyValues(currentFutureId, vals);
     }
 }
 
@@ -318,8 +339,7 @@ let binaryDataTable = {};
 
 function registerBinaryData(ds) {
     let index = ds.getUint32();
-    let len = ds.getUint32();
-    let binaryData = ds.getUint8Array(len);
+    let binaryData = ds.getUint8Array();
     binaryDataTable[index] = binaryData;
 }
 
@@ -870,8 +890,7 @@ function createImageDataCommand(ds) {
 
 function uploadImageDataCommand(ds) {
     let image = ds.getProxyObject();
-    let len = ds.getUint32();
-    let imageData = ds.getUint8Array(len);
+    let imageData = ds.getUint8Array();
     image.data.set(imageData);
 }
 

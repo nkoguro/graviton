@@ -46,6 +46,7 @@
   (use gauche.threads)
   (use gauche.time)
   (use gauche.uvector)
+  (use graviton2.jsise)
   (use makiki)
   (use rfc.base64)
   (use rfc.json)
@@ -210,8 +211,8 @@
 
 ;;;
 
-(define (make-id-generator :optional (max-value #f))
-  (let1 counter-atom (atom 0)
+(define (make-id-generator :optional (max-value #f) (start 0))
+  (let1 counter-atom (atom start)
     (lambda ()
       (atomic-update! counter-atom (lambda (x)
                                      (if max-value
@@ -652,13 +653,22 @@
                          (html:head
                           (html:meta :charset "UTF-8")
                           (html:title title))
-                         (html:body :style (format "background-color: ~a" *background-color*)
-                          (html:div :id "_on")
-                          (html:script :src "graviton.js"))))))))
+                         (apply html:body :style (format "background-color: ~a" *background-color*)
+                                (html:div :id "_on")
+                                (html:script :src "graviton.js")
+                                (map (lambda (js-mod)
+                                       (html:script :src (format "js/~a" js-mod)))
+                                     (js-module-list)))))))))
 
 (define-http-handler "/graviton.js"
   (lambda (req app)
     (respond/ok req `(file ,*graviton-js-pathname*))))
+
+(define-http-handler #/js\/(.*)/
+  (lambda (req app)
+    (respond/ok req
+      (get-js-code ((slot-ref req 'path-rxmatch) 1))
+      :content-type "text/javascript")))
 
 (define-class <websocket-server-context> ()
   ((continuation-opcode :init-value 0)
@@ -1130,7 +1140,11 @@
   (with-send-context
     (lambda (ctx)
       (let1 out (slot-ref ctx 'buffer-output-port)
-        (write-u16 (hash-table-get binary-command-table cmd) out 'little-endian)
+        (write-u16 (if (symbol? cmd)
+                       (hash-table-get binary-command-table cmd)
+                       cmd)
+                   out
+                   'little-endian)
         (map (lambda (type arg)
                (match type
                  ('uint
@@ -1188,11 +1202,6 @@
           (send-binary-frame (slot-ref ctx 'websocket-output-port) output-data)))
       (slot-set! ctx 'json-pair-buffer '())
       (slot-set! ctx 'buffer-output-port (open-output-uvector)))))
-
-(define (window-size)
-  (let* ((future (make <graviton-future>)))
-    (call-command 'window-size '(future) (list future))
-    future))
 
 (define (app-close)
   (call-command 'app-close '() '()))
@@ -2066,6 +2075,87 @@
   (call-command 'set-audio-buffer-source-node-loop
                 '(proxy boolean f64 f64)
                 (list audio-buffer-source-node loop? loop-start loop-end)))
+
+;;;
+
+(define (parse-var-type spec)
+  (match (map string->symbol (string-split (symbol->string spec) "::"))
+    ((var type)
+     (list var type))
+    ((var)
+     (list var 'json))))
+
+;; TODO: Change start.
+(define binary-command-next-id (make-id-generator #x7fffffff 1000))
+
+(define-class <js-procedure> ()
+  ((types :init-keyword :types)
+   (call-id :init-keyword :call-id)
+   (run-id :init-keyword :run-id)))
+
+(define (compile-jslambda jsmodule-name var-type-list body)
+  (let* ((base-id (binary-command-next-id))
+         (run-id (ash base-id 1))
+         (call-id (+ (ash base-id 1) 1))
+         (name (gensym))
+         (ds (gensym)))
+    (register-js-stmt! jsmodule-name
+                       `(begin
+                          (define (,name ,ds)
+                            (let ,(map (match-lambda
+                                         ((var type)
+                                          `(,var ,(match type
+                                                    ('f32
+                                                     `((,ds .getFloat32)))
+                                                    ('f64
+                                                     `((,ds .getFloat64)))
+                                                    ('s16
+                                                     `((,ds .getInt16)))
+                                                    ('s32
+                                                     `((,ds .getInt32)))
+                                                    ('s8
+                                                     `((,ds .getInt8)))
+                                                    ('u16
+                                                     `((,ds .getUint16)))
+                                                    ('u32
+                                                     `((,ds .getUint32)))
+                                                    ('u8
+                                                     `((,ds .getUint8)))
+                                                    ('u8vector
+                                                     `((,ds .getUint8Array)))
+                                                    ('boolean
+                                                      `((,ds .getBoolean)))
+                                                    ('json
+                                                     `((,ds .getJson)))
+                                                    ('proxy
+                                                     `((,ds .getProxyObject)))))))
+                                       var-type-list)
+                              ,@body)
+                            undefined)
+                          (vector-set! binaryCommands2 ,call-id ,name)
+                          (vector-set! binaryCommands2 ,run-id ,name)))
+    (make <js-procedure> :call-id call-id :run-id run-id :types (map (cut list-ref <> 1) var-type-list))))
+
+(define-macro (jslambda arg-specs :rest body)
+  (compile-jslambda (module-name->path (module-name (current-module))) arg-specs body))
+
+(define (jscall js-proc :key (then #f) :rest args)
+  (let1 future (make <graviton-future>)
+    (when then
+      (slot-set! future 'result-maker then))
+    (call-command (slot-ref js-proc 'call-id)
+                  (cons 'future (slot-ref js-proc 'types))
+                  (cons future args))
+    future))
+
+(define (jsrun js-proc :rest args)
+  (call-command (slot-ref js-proc 'run-id)
+                (slot-ref js-proc 'types)
+                args))
+
+(define (window-size)
+  (jscall (jslambda ()
+            (result window.innerWidth window.innerHeight))))
 
 ;;;
 

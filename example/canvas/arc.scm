@@ -1,3 +1,4 @@
+(use gauche.logger)
 (use graviton2)
 (use math.const)
 (use util.list)
@@ -7,6 +8,8 @@
   ;; (set-graviton-port! 8080)
   ;; (set-graviton-use-player! #f)
   (grv-begin
+    (receive (w h) (await (window-size))
+      (log-format "window width=~a, height=~a" w h))
     (set-window-event-handler! 'keyup (lambda (event)
                                         (when (equal? (slot-ref event 'code) "Escape")
                                           (app-close))))
