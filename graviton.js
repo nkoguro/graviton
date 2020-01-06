@@ -31,6 +31,7 @@ function connectServer() {
 
 let jsonTable = {};
 let proxyObjectTable = {};
+let enumTable = {};
 
 function registerJson(index, json) {
     jsonTable[index] = json;
@@ -161,10 +162,17 @@ class DataStream {
         let index = this.getUint32();
         return getProxyObject(index);
     }
+
+    getEnum(name) {
+        let index = this.getUint8();
+        return enumTable[name][index];
+    }
 }
 
 function notifyValues(futureId, vals) {
-    webSocket.send(JSON.stringify(["notifyResult", futureId, vals, false]));
+    if (futureId) {
+        webSocket.send(JSON.stringify(["notifyResult", futureId, vals, false]));
+    }
 }
 
 function notifyBinaryData(futureId, data) {
@@ -193,36 +201,39 @@ function notifyEvent(eventType, event) {
 
 let binaryCommands = [];
 let binaryCommands2 = [];
-let currentFutureId = false;
 
 function dispatchBinaryMessage(abuf) {
     let ds = new DataStream(abuf);
     while (ds.hasData()) {
         let commandIndex = ds.getUint16();
-        let func = binaryCommands[commandIndex];
         // TODO: Cleanup
-        if (!func && commandIndex > 1000) {
-            func = binaryCommands2[commandIndex];
-            currentFutureId = false;
-            if (commandIndex & 1) {
-                currentFutureId = ds.getUint32();
-            }
-        }
-        if (func) {
-            try {
-                func.apply(null, [ds]);
-            } catch (e) {
-                notifyException(currentFutureId, e.toString());
+        if (commandIndex < 1000) {
+            let func = binaryCommands[commandIndex];
+            if (func) {
+                try {
+                    func.apply(null, [ds]);
+                } catch (e) {
+                    notifyException(false, e.toString());
+                }
+            } else {
+                console.log('Invalid binary command index: ' + commandIndex);
             }
         } else {
-            console.log('Invalid binary command index: ' + commandIndex);
+            let func = binaryCommands2[commandIndex];
+            let futureId = false;
+            if (commandIndex & 1) {
+                futureId = ds.getUint32();
+            }
+            if (func) {
+                try {
+                    func.apply(null, [futureId, ds]);
+                } catch (e) {
+                    notifyException(futureId, e.toString());
+                }
+            } else {
+                notifyException(false, 'Invalid binary command index: ' + commandIndex);
+            }
         }
-    }
-}
-
-function result(...vals) {
-    if (currentFutureId) {
-        notifyValues(currentFutureId, vals);
     }
 }
 

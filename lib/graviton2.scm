@@ -999,6 +999,12 @@
              (hash-table-put! tbl id (cons content-type data))
              (format "/r?id=~a" id))))))))
 
+(define-method resource-url ((filename <string>) :key (content-type #f))
+  (let1 data (call-with-input-file filename port->uvector)
+    (register-resource! (or content-type
+                            (estimate-content-type filename))
+                        data)))
+
 (define-http-handler "/r"
   (lambda (req app)
     (let-params req ((id "q"))
@@ -1188,7 +1194,11 @@
                   (let* ((url (register-resource! content-type arg))
                          (id (json-next-id)))
                     (push! (slot-ref ctx 'json-pair-buffer) (vector id url))
-                    (write-u32 id out 'little-endian)))))
+                    (write-u32 id out 'little-endian)))
+                 ((? symbol? enum-name)
+                  (unless (hash-table-contains? *enum-table* enum-name)
+                    (errorf "Invalid type: ~a" type))
+                  (write-u8 (enum-value enum-name arg) out 'little-endian))))
              types args)))))
 
 (define (flush-commands)
@@ -1755,84 +1765,292 @@
 
 ;;;
 
+(define (parse-arg-spec spec)
+  (match spec
+    ((? symbol? spec)
+     (parse-arg-spec (map string->symbol (string-split (symbol->string spec) "::"))))
+    ((var type)
+     (list var type))
+    ((var)
+     (list var 'json))))
+
+;; TODO: Change start.
+(define binary-command-next-id (make-id-generator #x7fffffff 1000))
+
+(define *enum-table* (make-hash-table))
+
+(define-class <js-procedure> ()
+  ((types :init-keyword :types)
+   (call-id :init-keyword :call-id)
+   (run-id :init-keyword :run-id)))
+
+(define (compile-jslambda jsmodule-name arg-specs body)
+  (let* ((var-type-list (map parse-arg-spec arg-specs))
+         (base-id (binary-command-next-id))
+         (run-id (ash base-id 1))
+         (call-id (+ (ash base-id 1) 1))
+         (name (gensym))
+         (ds (gensym)))
+    (register-js-stmt! jsmodule-name
+                       `(begin
+                          (define (,name %future-id ,ds)
+                            (let ,(map (match-lambda
+                                         ((var type)
+                                          `(,var ,(match type
+                                                    ('f32
+                                                     `((ref ,ds getFloat32)))
+                                                    ('f64
+                                                     `((ref ,ds getFloat64)))
+                                                    ('s16
+                                                     `((ref ,ds getInt16)))
+                                                    ('s32
+                                                     `((ref ,ds getInt32)))
+                                                    ('s8
+                                                     `((ref ,ds getInt8)))
+                                                    ('u16
+                                                     `((ref ,ds getUint16)))
+                                                    ('u32
+                                                     `((ref ,ds getUint32)))
+                                                    ('u8
+                                                     `((ref ,ds getUint8)))
+                                                    ('u8vector
+                                                     `((ref ,ds getUint8Array)))
+                                                    ('boolean
+                                                      `((ref ,ds getBoolean)))
+                                                    ('json
+                                                     `((ref ,ds getJson)))
+                                                    ('proxy
+                                                     `((ref ,ds getProxyObject)))
+                                                    ((? symbol? enum-name)
+                                                     (unless (hash-table-contains? *enum-table* enum-name)
+                                                       (errorf "Invalid type: ~a" type))
+                                                     `((ref ,ds getEnum) ,(symbol->string enum-name)))
+                                                    ))))
+                                       var-type-list)
+                              ,@body)
+                            undefined)
+                          (vector-set! binaryCommands2 ,call-id ,name)
+                          (vector-set! binaryCommands2 ,run-id ,name)))
+    (make <js-procedure> :call-id call-id :run-id run-id :types (map (cut list-ref <> 1) var-type-list))))
+
+(define-jsise-macro result
+  ((vals ...)
+   `(notifyValues %future-id ,(list->vector vals))))
+
+(define-jsise-macro result-error
+  ((err)
+   `(notifyException %future-id (err.toString))))
+
+(define-macro (jslambda arg-specs :rest body)
+  (compile-jslambda (module-name->path (module-name (current-module))) arg-specs body))
+
+(define (jscall js-proc provider :rest args)
+  (let1 future (make <graviton-future>)
+    (when provider
+      (slot-set! future 'result-maker provider))
+    (call-command (slot-ref js-proc 'call-id)
+                  (cons 'future (slot-ref js-proc 'types))
+                  (cons future args))
+    future))
+
+(define (jsrun js-proc :rest args)
+  (call-command (slot-ref js-proc 'run-id)
+                (slot-ref js-proc 'types)
+                args))
+
+(define-macro (jslet var-spec :rest body)
+  `(jsrun (jslambda ,var-spec
+            ,@body)
+          ,@(map (lambda (spec)
+                   (list-ref (parse-arg-spec spec) 0))
+                 var-spec)))
+
+(define-macro (jslet/result var-spec :rest body)
+  `(jscall (jslambda ,var-spec
+             ,@body)
+           #f
+           ,@(map (lambda (spec)
+                    (list-ref (parse-arg-spec spec) 0))
+                  var-spec)))
+
+(define-macro (jslet/result:then provider var-spec :rest body)
+  `(jscall (jslambda ,var-spec
+             ,@body)
+           ,provider
+           ,@(map (lambda (spec)
+                    (list-ref (parse-arg-spec spec) 0))
+                  var-spec)))
+
+(define-class <js-enum> ()
+  ((symbol->value-table :init-form (make-hash-table))
+   (jsvalue->symbol-table :init-form (make-hash-table 'equal?))))
+
+(define (make-enum jsmodule-name enum-name symbol->jsvalue-list)
+  (let ((enum (make <js-enum>))
+        (jsvals '()))
+    (for-each-with-index (lambda (i symbol->jsvalue)
+                           (match symbol->jsvalue
+                             ((sym jsval)
+                              (hash-table-put! (slot-ref enum 'symbol->value-table) sym i)
+                              (hash-table-put! (slot-ref enum 'jsvalue->symbol-table) jsval sym)
+                              (push! jsvals jsval))))
+                         symbol->jsvalue-list)
+    (register-js-stmt! jsmodule-name
+                       `(set! (aref enumTable ,(symbol->string enum-name)) ,(list->vector (reverse jsvals))))
+    enum))
+
+(define-syntax define-jsenum
+  (syntax-rules ()
+    ((_ name symbol->jsvalue ...)
+     (let1 enum (make-enum (module-name->path (module-name (current-module))) 'name '(symbol->jsvalue ...))
+       (hash-table-put! *enum-table* 'name enum)))))
+
+(define (enum-value name sym)
+  (let1 enum (hash-table-get *enum-table* name #f)
+    (unless enum
+      (errorf "enum ~a not found" enum))
+    (or (hash-table-get (slot-ref enum 'symbol->value-table) sym #f)
+        (errorf "enum symbol ~a not found" sym))))
+
+(define (enum-symbol name jsval)
+  (let1 enum (hash-table-get *enum-table* name #f)
+    (unless enum
+      (errorf "enum ~a not found" enum))
+    (or (hash-table-get (slot-ref enum 'jsvalue->symbol-table) jsval #f)
+        (errorf "enum jsvalue ~a not found" jsval))))
+
+;;;
+
+(define (window-size)
+  (jslet/result ()
+    (result window.innerWidth window.innerHeight)))
+
+;;;
+
 (define-class <audio-node> (<proxy-object>)
   ((type :init-keyword :type)))
 
 (define (set-audio-base-time!)
-  (call-command 'set-audio-base-time '() '()))
+  (jslet ()
+    (set! audioBaseTime audioContext.currentTime)))
 
 (define (start-audio-node! audio-node :optional (delta-when 0) (offset 0) (duration -1))
-  (call-command 'start-audio-node '(proxy f64 f64 f64) (list audio-node delta-when offset duration)))
+  (jslet (audio-node::proxy
+          delta-when::f64
+          offset::f64
+          duration::f64)
+    (let ((absolute-when 0))
+      (when (< 0 delta-when)
+        (set! absolute-when (+ audioBaseTime delta-when)))
+      (if (< duration 0)
+          (audio-node.start delta-when offset)
+          (audio-node.start delta-when offset duration)))))
 
 (define (stop-audio-node! audio-node :optional (delta-when 0))
-  (call-command 'stop-audio-node '(proxy f64) (list audio-node delta-when)))
+  (jslet (audio-node::proxy
+          delta-when::f64)
+    (let ((absolute-when 0))
+      (when (< 0 delta-when)
+        (set! absolute-when (+ audioBaseTime delta-when)))
+      (audio-node.stop absolute-when))))
 
 (define (connect-node! from-node to-node)
-  (call-command 'connect-node '(proxy proxy) (list from-node to-node)))
+  (jslet (from-node::proxy
+          to-node::proxy)
+    (from-node.connect to-node)))
 
 (define (disconnect-node! from-node to-node)
-  (call-command 'disconnect-node '(proxy proxy) (list from-node to-node)))
+  (jslet (from-node::proxy
+          to-node::proxy)
+    (from-node.disconnect to-node)))
 
 (define (audio-node-end audio-node)
-  (let1 future (make <graviton-future>)
-    (call-command 'audio-node-end '(future proxy) (list future audio-node))
-    future))
+  (jslet/result (audio-node::proxy)
+    (set! audio-node.onended (lambda (event)
+                               (result #t)))))
 
 (define (make-audio-context-destination)
-  (let1 audio-node (make <audio-node> :type 'audio-context-destination)
-    (call-command 'make-audio-context-destination '(proxy) (list audio-node))
+  (let* ((audio-node (make <audio-node> :type 'audio-context-destination))
+         (node-id (slot-ref audio-node 'id)))
+    (jslet (node-id::u32)
+      (linkProxyObject node-id audioContext.destination))
     audio-node))
 
+(define-jsvar *audio-param-stack* #())
+
 (define (audio-param-set-value-at-time! val start-time)
-  (call-command 'audio-param-set-value-at-time '(f64 f64) (list val start-time)))
+  (jslet (val::f64
+          start-time::f64)
+    ((ref (vector-ref *audio-param-stack* 0) setValueAtTime) val (+ audioBaseTime start-time))))
 
 (define (audio-param-linear-ramp-to-value-at-time! val end-time)
-  (call-command 'audio-param-linear-ramp-to-value-at-time '(f64 f64) (list val end-time)))
+  (jslet (val::f64
+          end-time::f64)
+    ((ref (vector-ref *audio-param-stack* 0) linearRampToValueAtTime) val (+ audioBaseTime end-time))))
 
 (define (audio-param-exponential-ramp-to-value-at-time! val end-time)
-  (call-command 'audio-param-exponential-ramp-to-value-at-time '(f64 f64) (list val end-time)))
+  (jslet (val::f64
+          end-time::f64)
+    ((ref (vector-ref *audio-param-stack* 0) exponentialRampToValueAtTime) val (+ audioBaseTime end-time))))
 
 (define (audio-param-set-target-at-time! val start-time time-constant)
-  (call-command 'audio-param-set-target-at-time '(f64 f64 f64) (list val start-time time-constant)))
+  (jslet (val::f64
+          start-time::f64
+          time-constant::f64)
+    ((ref (vector-ref *audio-param-stack* 0) setTargetAtTime) val (+ audioBaseTime start-time) time-constant)))
 
 (define (audio-param-set-value-curve-at-time! vals start-time duration)
-  (call-command 'audio-param-set-value-curve-at-time '(json f64 f64) (list vals start-time duration)))
+  (jslet (vals::json
+          start-time::f64
+          duration::f64)
+    ((ref (vector-ref *audio-param-stack* 0) setValueCurveAtTime) vals (+ audioBaseTime start-time) duration)))
 
 (define (audio-param-cancel-scheduled-values! start-time)
-  (call-command 'audio-param-cancel-scheduled-values '(f64) (list start-time)))
+  (jslet (start-time::f64)
+    ((ref (vector-ref *audio-param-stack* 0) cancelScheduledValues) (+ audioBaseTime start-time))))
 
 (define (audio-param-cancel-and-hold-at-time! cancel-time)
-  (call-command 'audio-param-cancel-and-hold-at-time '(f64) (list cancel-time)))
+  (jslet (cancel-time::f64)
+    ((ref (vector-ref *audio-param-stack* 0) cancelAndHoldAtTime) (+ audioBaseTime cancel-time))))
 
 (define (pop-audio-param!)
-  (call-command 'pop-audio-param '() '()))
+  (jslet ()
+    (*audio-param-stack*.shift)))
 
 (define (make-oscillator-node)
-  (let1 oscillator-node (make <audio-node> :type 'oscillator)
-    (call-command 'make-oscillator-node '(proxy) (list oscillator-node))
+  (let* ((oscillator-node (make <audio-node> :type 'oscillator))
+         (node-id (slot-ref oscillator-node 'id)))
+    (jslet (node-id::u32)
+      (let ((node (make OscillatorNode audioContext)))
+        (linkProxyObject node-id node)))
     oscillator-node))
 
-(define oscillator-type-alist
-  '((sine . "sine")
-    (square . "square")
-    (sawtooth . "sawtooth")
-    (triangle . "triangle")))
+(define-jsenum oscillator-type-enum
+  (sine "sine")
+  (square "square")
+  (sawtooth "sawtooth")
+  (triangle "triangle"))
 
 (define (set-oscillator-type! oscillator-node type)
-  (call-command 'set-oscillator-type '(proxy json) (list oscillator-node
-                                                         (or (assoc-ref oscillator-type-alist type #f)
-                                                             (errorf "Invalid oscillator type: ~a" type)))))
+  (jslet (oscillator-node::proxy
+          type::oscillator-type-enum)
+    (set! oscillator-node.type type)))
 
 (define (push-oscillator-frequency-audio-param! oscillator-node)
-  (call-command 'push-oscillator-frequency-audio-param '(proxy) (list oscillator-node)))
+  (jslet (oscillator-node::proxy)
+    (*audio-param-stack*.unshift oscillator-node.frequency)))
 
 (define (push-oscillator-detune-audio-param! oscillator-node)
-  (call-command 'push-oscillator-detune-audio-param '(proxy) (list oscillator-node)))
+  (jslet (oscillator-node::proxy)
+    (*audio-param-stack*.unshift oscillator-node.detune)))
 
 (define (set-oscillator-periodic-wave! oscillator-node real imag :key (disable-nomalization #f))
-  (call-command 'set-oscillator-periodic-wave
-                '(proxy json json json)
-                (list oscillator-node real imag `(("disableNomalization" . ,disable-nomalization)))))
+  (let1 constraints `(("disableNomalization" . ,disable-nomalization))
+    (jslet (oscillator-node::proxy
+            real::json
+            imag::json
+            constraints::json)
+      (oscillator-node.setPeriodicWave (audioContext.createPeriodicWave read imag constraints)))))
 
 (define-class <audio-context> ()
   ((tracks :init-keyword :tracks)
@@ -2019,21 +2237,29 @@
 
 (define (load-audio filename :key (content-type #f))
   (let* ((node (make <audio-media-element-node>))
-         (future (make <graviton-future> :result-maker (lambda (duration)
-                                                         (slot-set! node 'duration duration)
-                                                         node)))
-         (data (call-with-input-file filename port->uvector)))
-    (call-command 'load-audio
-                  '(future proxy (resource ,(or content-type
-                                                (estimate-content-type filename))))
-                  (list future node data))
-    future))
+         (node-id (slot-ref node 'id))
+         (url (resource-url filename :content-type content-type)))
+    (jslet/result:then (lambda (duration)
+                         (slot-set! node 'duration duration)
+                         node)
+        (node-id::u32
+         url::json)
+      (let ((audio (make Audio url)))
+        (set! audio.onloadedmetadata (lambda ()
+                                       (let ((source-node (audioContext.createMediaElementSource audio)))
+                                         (linkProxyObject node-id source-node)
+                                         (source-node.connect audioContext.destination)
+                                         (result audio.duration))))
+        (set! audio.onstalled (lambda ()
+                                (result-error "Load audio failed.")))))))
 
 (define (play-audio audio)
-  (call-command 'play-audio '(proxy) (list audio)))
+  (jslet (audio::proxy)
+    (audio.mediaElement.play)))
 
 (define (pause-audio audio)
-  (call-command 'pause-audio '(proxy) (list audio)))
+  (jslet (audio::proxy)
+    (audio.mediaElement.pause)))
 
 (define-class <audio-buffer> (<proxy-object>)
   ((sample-rate)
@@ -2043,119 +2269,63 @@
 
 (define (load-pcm filename :key (content-type #f))
   (let* ((pcm (make <audio-buffer>))
-         (future (make <graviton-future> :result-maker (lambda (sample-rate len duration num-of-channels)
-                                                         (slot-set! pcm 'sample-rate sample-rate)
-                                                         (slot-set! pcm 'length len)
-                                                         (slot-set! pcm 'duration duration)
-                                                         (slot-set! pcm 'number-of-channels num-of-channels)
-                                                         pcm)))
-         (data (call-with-input-file filename port->uvector)))
-    (call-command 'load-pcm
-                  '(future proxy (resource ,(or content-type
-                                                          (estimate-content-type filename))))
-                  (list future pcm data))
-    future))
+         (object-id (slot-ref pcm 'id))
+         (url (resource-url filename :content-type content-type)))
+    (jslet/result:then (lambda (sample-rate len duration num-of-channels)
+                         (slot-set! pcm 'sample-rate sample-rate)
+                         (slot-set! pcm 'length len)
+                         (slot-set! pcm 'duration duration)
+                         (slot-set! pcm 'number-of-channels num-of-channels)
+                         pcm)
+        (object-id::u32
+         url::json)
+      (let ((req (make XMLHttpRequest)))
+        (req.open "GET" url #t)
+        (set! req.responseType "arraybuffer")
+        (set! req.onload (lambda ()
+                           (cond
+                             ((equal? req.status 200)
+                              (let ((buf req.response))
+                                ((ref (audioContext.decodeAudioData buf) then)
+                                 (lambda (decoded-data)
+                                   (linkProxyObject object-id decoded-data)
+                                   (result decoded-data.sampleRate
+                                           decoded-data.length
+                                           decoded-data.duration
+                                           decoded-data.numberOfChannels))
+                                 (lambda (reason)
+                                   (result-error reason)))))
+                             (else
+                              (result-error (+ "Load PCM failed. (status:" req.status ")"))))))
+        (req.send)))))
 
 (define (make-audio-buffer-source-node pcm-data)
-  (let1 audio-buffer-source-node (make <audio-node> :type 'audio-buffer-source)
-    (call-command 'make-audio-buffer-source-node '(proxy proxy) (list audio-buffer-source-node pcm-data))
+  (let* ((audio-buffer-source-node (make <audio-node> :type 'audio-buffer-source))
+         (node-id (slot-ref audio-buffer-source-node 'id)))
+    (jslet (node-id::u32
+            pcm-data::proxy)
+      (let ((source-node (audioContext.createBufferSource)))
+        (set! source-node.buffer pcm-data)
+        (linkProxyObject node-id source-node)))
     audio-buffer-source-node))
 
 (define (push-audio-buffer-source-node-detune-audio-param audio-buffer-source-node)
-  (call-command 'push-audio-buffer-source-node-detune-audio-param
-                '(proxy)
-                (list audio-buffer-source-node)))
+  (jslet (audio-buffer-source-node::proxy)
+    (*audio-param-stack*.push audio-buffer-source-node.detune)))
 
 (define (push-audio-buffer-source-node-playback-rate-audio-param audio-buffer-source-node)
-  (call-command 'push-audio-buffer-source-node-playback-rate-audio-param
-                '(proxy)
-                (list audio-buffer-source-node)))
+  (jslet (audio-buffer-source-node::proxy)
+    (*audio-param-stack*.push audio-buffer-source-node.playbackRate)))
 
 (define (set-audio-buffer-source-node-loop! audio-buffer-source-node loop? loop-start loop-end)
-  (call-command 'set-audio-buffer-source-node-loop
-                '(proxy boolean f64 f64)
-                (list audio-buffer-source-node loop? loop-start loop-end)))
-
-;;;
-
-(define (parse-var-type spec)
-  (match (map string->symbol (string-split (symbol->string spec) "::"))
-    ((var type)
-     (list var type))
-    ((var)
-     (list var 'json))))
-
-;; TODO: Change start.
-(define binary-command-next-id (make-id-generator #x7fffffff 1000))
-
-(define-class <js-procedure> ()
-  ((types :init-keyword :types)
-   (call-id :init-keyword :call-id)
-   (run-id :init-keyword :run-id)))
-
-(define (compile-jslambda jsmodule-name var-type-list body)
-  (let* ((base-id (binary-command-next-id))
-         (run-id (ash base-id 1))
-         (call-id (+ (ash base-id 1) 1))
-         (name (gensym))
-         (ds (gensym)))
-    (register-js-stmt! jsmodule-name
-                       `(begin
-                          (define (,name ,ds)
-                            (let ,(map (match-lambda
-                                         ((var type)
-                                          `(,var ,(match type
-                                                    ('f32
-                                                     `((,ds .getFloat32)))
-                                                    ('f64
-                                                     `((,ds .getFloat64)))
-                                                    ('s16
-                                                     `((,ds .getInt16)))
-                                                    ('s32
-                                                     `((,ds .getInt32)))
-                                                    ('s8
-                                                     `((,ds .getInt8)))
-                                                    ('u16
-                                                     `((,ds .getUint16)))
-                                                    ('u32
-                                                     `((,ds .getUint32)))
-                                                    ('u8
-                                                     `((,ds .getUint8)))
-                                                    ('u8vector
-                                                     `((,ds .getUint8Array)))
-                                                    ('boolean
-                                                      `((,ds .getBoolean)))
-                                                    ('json
-                                                     `((,ds .getJson)))
-                                                    ('proxy
-                                                     `((,ds .getProxyObject)))))))
-                                       var-type-list)
-                              ,@body)
-                            undefined)
-                          (vector-set! binaryCommands2 ,call-id ,name)
-                          (vector-set! binaryCommands2 ,run-id ,name)))
-    (make <js-procedure> :call-id call-id :run-id run-id :types (map (cut list-ref <> 1) var-type-list))))
-
-(define-macro (jslambda arg-specs :rest body)
-  (compile-jslambda (module-name->path (module-name (current-module))) arg-specs body))
-
-(define (jscall js-proc :key (then #f) :rest args)
-  (let1 future (make <graviton-future>)
-    (when then
-      (slot-set! future 'result-maker then))
-    (call-command (slot-ref js-proc 'call-id)
-                  (cons 'future (slot-ref js-proc 'types))
-                  (cons future args))
-    future))
-
-(define (jsrun js-proc :rest args)
-  (call-command (slot-ref js-proc 'run-id)
-                (slot-ref js-proc 'types)
-                args))
-
-(define (window-size)
-  (jscall (jslambda ()
-            (result window.innerWidth window.innerHeight))))
+  (jslet (audio-buffer-source-node::proxy
+          loop?::boolean
+          loop-start::f64
+          loop-end::f64)
+    (set! audio-buffer-source-node.loop loop?)
+    (when loop?
+      (set! audio-buffer-source-node.loopStart loop-start)
+      (set! audio-buffer-source-node.loopEnd loop-end))))
 
 ;;;
 
