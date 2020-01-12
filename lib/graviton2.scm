@@ -166,32 +166,11 @@
           set-window-event-handler!
           set-canvas-event-handler!
 
-          set-audio-base-time!
-          start-audio-node!
-          stop-audio-node!
-          connect-node!
-          disconnect-node!
-          audio-node-end
-          make-audio-context-destination
-          audio-param-set-value-at-time!
-          audio-param-linear-ramp-to-value-at-time!
-          audio-param-exponential-ramp-to-value-at-time!
-          audio-param-set-target-at-time!
-          audio-param-set-value-curve-at-time!
-          audio-param-cancel-scheduled-values!
-          audio-param-cancel-and-hold-at-time!
-          pop-audio-param!
-          make-oscillator-node
-          set-oscillator-type!
-          push-oscillator-frequency-audio-param!
-          push-oscillator-detune-audio-param!
-          set-oscillator-periodic-wave!
-
-          play-sound
-          play-silent
           load-audio
           play-audio
           pause-audio
+          play-wave
+          play-rest
           load-pcm
           play-pcm
           ))
@@ -800,8 +779,7 @@
    (worker-thread-pool :init-keyword :worker-thread-pool)
    (send-context-atom :init-keyword :send-context-atom)
    (listener-table-atom :init-form (atom (make-hash-table 'equal?)))
-   (future-table-atom :init-form (atom (make-hash-table 'equal?) (make-id-generator #xffffffff)))
-   (audio-context-atom :init-form (atom #f))))
+   (future-table-atom :init-form (atom (make-hash-table 'equal?) (make-id-generator #xffffffff)))))
 
 (define application-context (make-parameter #f))
 (define current-thread-pool (make-parameter #f))
@@ -1097,35 +1075,6 @@
 
                       listen-window-event
                       listen-canvas-event
-
-                      set-audio-base-time
-                      start-audio-node
-                      stop-audio-node
-                      connect-node
-                      disconnect-node
-                      audio-node-end
-                      audio-param-set-value-at-time
-                      audio-param-linear-ramp-to-value-at-time
-                      audio-param-exponential-ramp-to-value-at-time
-                      audio-param-set-target-at-time
-                      audio-param-set-value-curve-at-time
-                      audio-param-cancel-scheduled-values
-                      audio-param-cancel-and-hold-at-time
-                      pop-audio-param
-                      make-audio-context-destination
-                      make-oscillator-node
-                      set-oscillator-type
-                      push-oscillator-frequency-audio-param
-                      push-oscillator-detune-audio-param
-                      set-oscillator-periodic-wave
-                      load-audio
-                      play-audio
-                      pause-audio
-                      load-pcm
-                      make-audio-buffer-source-node
-                      push-audio-buffer-source-node-detune-audio-param
-                      push-audio-buffer-source-node-playback-rate-audio-param
-                      set-audio-buffer-source-node-loop
                       ))
     tbl))
 
@@ -1181,6 +1130,9 @@
                  ('u8vector
                   (write-u32 (u8vector-length arg) out 'little-endian)
                   (write-uvector arg out))
+                 ('f64vector
+                  (write-u32 (f64vector-length arg) out 'little-endian)
+                  (write-uvector arg out 0 -1 'little-endian))
                  ('boolean
                    (write-u8 (if arg 1 0) out 'little-endian))
                  ('json
@@ -1817,6 +1769,8 @@
                                                      `((ref ,ds getUint8)))
                                                     ('u8vector
                                                      `((ref ,ds getUint8Array)))
+                                                    ('f64vector
+                                                     `((ref ,ds getFloat64Array)))
                                                     ('boolean
                                                       `((ref ,ds getBoolean)))
                                                     ('json
@@ -1929,310 +1883,11 @@
 
 ;;;
 
-(define-class <audio-node> (<proxy-object>)
-  ((type :init-keyword :type)))
-
-(define (set-audio-base-time!)
-  (jslet ()
-    (set! audioBaseTime audioContext.currentTime)))
-
-(define (start-audio-node! audio-node :optional (delta-when 0) (offset 0) (duration -1))
-  (jslet (audio-node::proxy
-          delta-when::f64
-          offset::f64
-          duration::f64)
-    (let ((absolute-when 0))
-      (when (< 0 delta-when)
-        (set! absolute-when (+ audioBaseTime delta-when)))
-      (if (< duration 0)
-          (audio-node.start delta-when offset)
-          (audio-node.start delta-when offset duration)))))
-
-(define (stop-audio-node! audio-node :optional (delta-when 0))
-  (jslet (audio-node::proxy
-          delta-when::f64)
-    (let ((absolute-when 0))
-      (when (< 0 delta-when)
-        (set! absolute-when (+ audioBaseTime delta-when)))
-      (audio-node.stop absolute-when))))
-
-(define (connect-node! from-node to-node)
-  (jslet (from-node::proxy
-          to-node::proxy)
-    (from-node.connect to-node)))
-
-(define (disconnect-node! from-node to-node)
-  (jslet (from-node::proxy
-          to-node::proxy)
-    (from-node.disconnect to-node)))
-
-(define (audio-node-end audio-node)
-  (jslet/result (audio-node::proxy)
-    (set! audio-node.onended (lambda (event)
-                               (result #t)))))
-
-(define (make-audio-context-destination)
-  (let* ((audio-node (make <audio-node> :type 'audio-context-destination))
-         (node-id (slot-ref audio-node 'id)))
-    (jslet (node-id::u32)
-      (linkProxyObject node-id audioContext.destination))
-    audio-node))
-
-(define-jsvar *audio-param-stack* #())
-
-(define (audio-param-set-value-at-time! val start-time)
-  (jslet (val::f64
-          start-time::f64)
-    ((ref (vector-ref *audio-param-stack* 0) setValueAtTime) val (+ audioBaseTime start-time))))
-
-(define (audio-param-linear-ramp-to-value-at-time! val end-time)
-  (jslet (val::f64
-          end-time::f64)
-    ((ref (vector-ref *audio-param-stack* 0) linearRampToValueAtTime) val (+ audioBaseTime end-time))))
-
-(define (audio-param-exponential-ramp-to-value-at-time! val end-time)
-  (jslet (val::f64
-          end-time::f64)
-    ((ref (vector-ref *audio-param-stack* 0) exponentialRampToValueAtTime) val (+ audioBaseTime end-time))))
-
-(define (audio-param-set-target-at-time! val start-time time-constant)
-  (jslet (val::f64
-          start-time::f64
-          time-constant::f64)
-    ((ref (vector-ref *audio-param-stack* 0) setTargetAtTime) val (+ audioBaseTime start-time) time-constant)))
-
-(define (audio-param-set-value-curve-at-time! vals start-time duration)
-  (jslet (vals::json
-          start-time::f64
-          duration::f64)
-    ((ref (vector-ref *audio-param-stack* 0) setValueCurveAtTime) vals (+ audioBaseTime start-time) duration)))
-
-(define (audio-param-cancel-scheduled-values! start-time)
-  (jslet (start-time::f64)
-    ((ref (vector-ref *audio-param-stack* 0) cancelScheduledValues) (+ audioBaseTime start-time))))
-
-(define (audio-param-cancel-and-hold-at-time! cancel-time)
-  (jslet (cancel-time::f64)
-    ((ref (vector-ref *audio-param-stack* 0) cancelAndHoldAtTime) (+ audioBaseTime cancel-time))))
-
-(define (pop-audio-param!)
-  (jslet ()
-    (*audio-param-stack*.shift)))
-
-(define (make-oscillator-node)
-  (let* ((oscillator-node (make <audio-node> :type 'oscillator))
-         (node-id (slot-ref oscillator-node 'id)))
-    (jslet (node-id::u32)
-      (let ((node (make OscillatorNode audioContext)))
-        (linkProxyObject node-id node)))
-    oscillator-node))
-
 (define-jsenum oscillator-type-enum
   (sine "sine")
   (square "square")
   (sawtooth "sawtooth")
   (triangle "triangle"))
-
-(define (set-oscillator-type! oscillator-node type)
-  (jslet (oscillator-node::proxy
-          type::oscillator-type-enum)
-    (set! oscillator-node.type type)))
-
-(define (push-oscillator-frequency-audio-param! oscillator-node)
-  (jslet (oscillator-node::proxy)
-    (*audio-param-stack*.unshift oscillator-node.frequency)))
-
-(define (push-oscillator-detune-audio-param! oscillator-node)
-  (jslet (oscillator-node::proxy)
-    (*audio-param-stack*.unshift oscillator-node.detune)))
-
-(define (set-oscillator-periodic-wave! oscillator-node real imag :key (disable-nomalization #f))
-  (let1 constraints `(("disableNomalization" . ,disable-nomalization))
-    (jslet (oscillator-node::proxy
-            real::json
-            imag::json
-            constraints::json)
-      (oscillator-node.setPeriodicWave (audioContext.createPeriodicWave read imag constraints)))))
-
-(define-class <audio-context> ()
-  ((tracks :init-keyword :tracks)
-   (base-start-second :init-keyword :base-start-second)
-   (playing-soundlets :init-value '())
-   (destination-node :init-keyword :destination-node)))
-
-(define-class <audio-track> ()
-  ((queue :init-form (make-queue))
-   (last-sound-second :init-value 0)))
-
-(define-class <soundlet> ()
-  ((length :init-keyword :length)
-   (start-second :init-value 0)
-   (end-second :allocation :virtual
-               :slot-ref (lambda (obj)
-                           (+ (slot-ref obj 'start-second)
-                              (slot-ref obj 'length))))
-   (audio-nodes :init-value '())))
-
-(define-class <oscillator-soundlet> (<soundlet>)
-  ((frequency :init-keyword :frequency)
-   (type :init-keyword :type)))
-
-(define-method soundlet->nodes (ctx (obj <oscillator-soundlet>))
-  (let ((oscillator-node (make-oscillator-node)))
-    (set-oscillator-type! oscillator-node (slot-ref obj 'type))
-    (push-oscillator-frequency-audio-param! oscillator-node)
-    (audio-param-set-value-at-time! (slot-ref obj 'frequency) 0)
-    (pop-audio-param!)
-    (connect-node! oscillator-node (slot-ref ctx 'destination-node))
-    (let1 base-start-second (slot-ref ctx 'base-start-second)
-      (start-audio-node! oscillator-node (- (slot-ref obj 'start-second) base-start-second))
-      (stop-audio-node! oscillator-node (- (slot-ref obj 'end-second) base-start-second)))
-    (list oscillator-node)))
-
-(define (play-sound track-num type freq len)
-  (with-audio-context
-    (lambda (ctx)
-      (let ((track (vector-ref (slot-ref ctx 'tracks) track-num))
-            (soundlet (make <oscillator-soundlet> :frequency freq :type type :length len)))
-        (enqueue-soundlet! track soundlet)))))
-
-(define-class <silent-soundlet> (<soundlet>)
-  ())
-
-(define (play-silent track-num len)
-  (with-audio-context
-    (lambda (ctx)
-      (let ((track (vector-ref (slot-ref ctx 'tracks) track-num))
-            (soundlet (make <silent-soundlet> :length len)))
-        (enqueue-soundlet! track soundlet)))))
-
-(define-method soundlet->nodes (ctx (obj <silent-soundlet>))
-  '())
-
-(define-class <pcm-soundlet> (<soundlet>)
-  ((pcm-data :init-keyword :pcm-data)
-   (detune :init-keyword :detune
-           :init-value 0)
-   (loop? :init-keyword :loop?
-          :init-value #f)
-   (loop-start :init-keyword :loop-start
-               :init-value 0)
-   (loop-end :init-keyword :loop-end
-             :init-value 0)
-   (playback-rate :init-keyword :playback-rate
-                  :init-value 1.0)))
-
-(define-method soundlet->nodes (ctx (obj <pcm-soundlet>))
-  (let ((pcm-node (make-audio-buffer-source-node (slot-ref obj 'pcm-data))))
-    (unless (zero? (slot-ref obj 'detune))
-      (push-audio-buffer-source-node-detune-audio-param pcm-node)
-      (audio-param-set-value-at-time! (slot-ref obj 'detune) 0)
-      (pop-audio-param!))
-    (unless (equal? (slot-ref obj 'playback-rate) 1.0)
-      (push-audio-buffer-source-node-playback-rate-audio-param pcm-node)
-      (audio-param-set-value-at-time! (slot-ref obj 'playback-rate) 0)
-      (pop-audio-param!))
-    (when (slot-ref obj 'loop?)
-      (set-audio-buffer-source-node-loop! pcm-node #t (slot-ref obj 'loop-start) (slot-ref obj 'loop-end)))
-    (connect-node! pcm-node (slot-ref ctx 'destination-node))
-    (let1 base-start-second (slot-ref ctx 'base-start-second)
-      (start-audio-node! pcm-node (- (slot-ref obj 'start-second) base-start-second))
-      (stop-audio-node! pcm-node (- (slot-ref obj 'end-second) base-start-second)))
-    (list pcm-node)))
-
-(define (play-pcm track-num pcm-data detune playback-rate :optional (loop-range #f) (len #f))
-  (with-audio-context
-    (lambda (ctx)
-      (let ((track (vector-ref (slot-ref ctx 'tracks) track-num))
-            (soundlet (make <pcm-soundlet>
-                        :pcm-data pcm-data
-                        :detune detune
-                        :playback-rate playback-rate
-                        :loop? (if loop-range #t #f)
-                        :length (if len
-                                    len
-                                    (slot-ref pcm-data 'duration)))))
-        (when loop-range
-          (slot-set! soundlet 'loop-start (list-ref loop-range 0))
-          (slot-set! soundlet 'loop-end (list-ref loop-range 1)))
-        (enqueue-soundlet! track soundlet)))))
-
-(define (make-audio-context num-tracks)
-  (with-send-context
-    (lambda (send-context)
-      (set-audio-base-time!)
-      (let ((destination-node (make-audio-context-destination))
-            (base-start-second (next-update-second)))
-        (make <audio-context>
-          :tracks (vector-ec (: i num-tracks) (make <audio-track>))
-          :destination-node destination-node
-          :base-start-second base-start-second)))))
-
-(define (initialize-audio)
-  (slot-set! (application-context) 'audio-context-atom (atom (make-audio-context 16)))
-  (add-event-listener! 'update (lambda ()
-                                 (atomic (slot-ref (application-context) 'audio-context-atom)
-                                   (lambda (ctx)
-                                     (update-audio-context! ctx)
-                                     (cleanup-playing-soundlets! ctx))))))
-
-(add-hook! *init-hook* initialize-audio)
-
-(define (with-audio-context proc)
-  (atomic (slot-ref (application-context) 'audio-context-atom)
-    (lambda (ctx)
-      (unless ctx
-        (error "audio isn't available yet."))
-      (proc ctx))))
-
-(define (enqueue-soundlet! track soundlet)
-  (with-send-context
-    (lambda (send-context)
-      (let* ((now (next-update-second))
-             (last-sound-second (slot-ref track 'last-sound-second))
-             (start-second (if (< last-sound-second now)
-                               now
-                               last-sound-second)))
-        (slot-set! soundlet 'start-second start-second)
-        (enqueue! (slot-ref track 'queue) soundlet)
-        (slot-set! track 'last-sound-second (slot-ref soundlet 'end-second))))))
-
-(define (update-audio-context! ctx)
-  (with-send-context
-    (lambda (send-context)
-      (let* ((start-frame-second (next-update-second))
-             (end-frame-second (+ (next-update-second) (refresh-cycle-second))))
-        (for-each (lambda (track)
-                    (let ((queue (slot-ref track 'queue)))
-                      (let loop ((soundlet (queue-front queue #f)))
-                        (cond
-                          ((and soundlet
-                                (<= (slot-ref soundlet 'start-second) end-frame-second))
-                           (let1 nodes (soundlet->nodes ctx soundlet)
-                             (slot-set! soundlet 'audio-nodes nodes)
-                             (push! (slot-ref ctx 'playing-soundlets) soundlet)
-                             (dequeue! queue))
-                           (loop (queue-front queue #f)))
-                          (else
-                           #f)))))
-                  (slot-ref ctx 'tracks))))))
-
-(define (cleanup-playing-soundlets! ctx)
-  (with-send-context
-    (lambda (send-context)
-      (let* ((now (next-update-second))
-             (stopped-soundlets (filter (lambda (soundlet)
-                                          (<= (slot-ref soundlet 'end-second) now))
-                                        (slot-ref ctx 'playing-soundlets))))
-        (for-each (lambda (soundlet)
-                    (for-each (lambda (node)
-                                (unlink-proxy-object! node))
-                              (slot-ref soundlet 'audio-nodes)))
-                  stopped-soundlets)
-        (slot-set! ctx 'playing-soundlets (lset-difference eq?
-                                                           (slot-ref ctx 'playing-soundlets)
-                                                           stopped-soundlets))))))
-
 
 (define-class <audio-media-element-node> (<proxy-object>)
   ((duration :init-value #f)))
@@ -2301,33 +1956,73 @@
                               (result-error (+ "Load PCM failed. (status:" req.status ")"))))))
         (req.send)))))
 
-(define (make-audio-buffer-source-node pcm-data)
-  (let* ((audio-buffer-source-node (make <audio-node> :type 'audio-buffer-source))
-         (node-id (slot-ref audio-buffer-source-node 'id)))
-    (jslet (node-id::u32
-            pcm-data::proxy)
-      (let ((source-node (audioContext.createBufferSource)))
-        (set! source-node.buffer pcm-data)
-        (linkProxyObject node-id source-node)))
-    audio-buffer-source-node))
+(define-method play-wave (channel-num type (freq <real>) len :optional (gain 1.0))
+  (play-wave channel-num type (f64vector freq) len gain))
 
-(define (push-audio-buffer-source-node-detune-audio-param audio-buffer-source-node)
-  (jslet (audio-buffer-source-node::proxy)
-    (*audio-param-stack*.push audio-buffer-source-node.detune)))
+(define-method play-wave (channel-num type (freqs <f64vector>) len :optional (gain 1.0))
+  (jslet (channel-num::u8
+          type::oscillator-type-enum
+          freqs::f64vector
+          len::f64
+          gain::f64)
+    (let ((channel (aref audioChannels channel-num))
+          (start-time (Math.max channel.lastPlaySec audioContext.currentTime))
+          (end-time (+ start-time len)))
+      (dotimes (i freqs.length)
+        (let ((oscillator-node (make OscillatorNode audioContext))
+              (gain-node (audioContext.createGain)))
+          (set! oscillator-node.type type)
+          (set! oscillator-node.frequency.value (aref freqs i))
+          (set! gain-node.gain.value gain)
+          (oscillator-node.connect gain-node)
+          (gain-node.connect audioContext.destination)
+          (oscillator-node.start start-time)
+          (oscillator-node.stop end-time)))
+      (set! channel.lastPlaySec end-time))))
 
-(define (push-audio-buffer-source-node-playback-rate-audio-param audio-buffer-source-node)
-  (jslet (audio-buffer-source-node::proxy)
-    (*audio-param-stack*.push audio-buffer-source-node.playbackRate)))
+(define (play-rest channel-num len)
+  (jslet (channel-num::u8
+          len::f64)
+    (let ((channel (aref audioChannels channel-num))
+          (start-time (Math.max channel.lastPlaySec audioContext.currentTime))
+          (end-time (+ start-time len)))
+      (set! channel.lastPlaySec end-time))))
 
-(define (set-audio-buffer-source-node-loop! audio-buffer-source-node loop? loop-start loop-end)
-  (jslet (audio-buffer-source-node::proxy
+(define (play-pcm channel-num pcm-data :optional (detune 0) (playback-rate 1.0) (loop-range #f) (len #f) (gain 1.0))
+  (let ((loop? (if loop-range #t #f))
+        (loop-start (if loop-range (list-ref loop-range 0) 0))
+        (loop-end (if loop-range (list-ref loop-range 1) 0))
+        (len (or len
+                 (slot-ref pcm-data 'duration))))
+  (jslet (channel-num::u8
+          pcm-data::proxy
+          detune::f64
+          playback-rate::f64
           loop?::boolean
           loop-start::f64
-          loop-end::f64)
-    (set! audio-buffer-source-node.loop loop?)
-    (when loop?
-      (set! audio-buffer-source-node.loopStart loop-start)
-      (set! audio-buffer-source-node.loopEnd loop-end))))
+          loop-end::f64
+          len::f64
+          gain::f64)
+    (let ((channel (aref audioChannels channel-num))
+          (pcm-node (audioContext.createBufferSource))
+          (gain-node (audioContext.createGain))
+          (start-time (Math.max channel.lastPlaySec audioContext.currentTime))
+          (end-time (+ start-time len)))
+      (set! pcm-node.buffer pcm-data)
+      (unless (equal? detune 0)
+        (set! pcm-node.detune.value detune))
+      (unless (equal? playback-rate 1.0)
+        (set! pcm-node.playbackRate.value playback-rate))
+      (when loop?
+        (set! pcm-node.loop loop?)
+        (set! pcm-node.loopStart loop-start)
+        (set! pcm-node.loopEnd loop-end))
+      (set! gain-node.gain.value gain)
+      (pcm-node.connect gain-node)
+      (gain-node.connect audioContext.destination)
+      (pcm-node.start start-time)
+      (pcm-node.stop end-time)
+      (set! channel.lastPlaySec end-time)))))
 
 ;;;
 

@@ -2,8 +2,8 @@
 
 (define (main args)
   (grv-begin
-    (play-sound 0 'square 2000 0.1)
-    (play-sound 0 'square 1000 0.1)
-    (asleep 0.5)
+    (play-wave 0 'square 2000 0.1)
+    (play-wave 0 'square 1000 0.1)
+    (asleep 1.0)
     (app-close))
   0)

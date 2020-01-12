@@ -8,6 +8,7 @@ function connectServer() {
     webSocket.binaryType = 'arraybuffer';
     webSocket.onopen = () => {
         console.log('opened');
+        startApplication();
     };
     webSocket.onclose = () => {
         console.log('closed');
@@ -153,6 +154,15 @@ class DataStream {
         return data;
     }
 
+    getFloat64Array() {
+        let len = this.getUint32();
+        let data = new Float64Array(len);
+        for (let i = 0; i < len; ++i) {
+            data[i] = this.getFloat64();
+        }
+        return data;
+    }
+
     getContext2d() {
         let canvas = this.getProxyObject();
         return canvas.getContext('2d');
@@ -194,6 +204,9 @@ function notifyEvent(eventType, event) {
     webSocket.send(JSON.stringify(["notifyEvent", eventType, event]));
 }
 
+function startApplication() {
+    webSocket.send(JSON.stringify(["startApplication"]));
+}
 
 /**
  * Graviton binary commands
@@ -302,36 +315,7 @@ function initializeBinaryCommands() {
         downloadImageDataCommand,
 
         listenWindowEvent,
-        listenCanvasEvent,
-
-        setAudioBaseTime,
-        startAudioNode,
-        stopAudioNode,
-        connectNode,
-        disconnectNode,
-        audioNodeEnd,
-        audioParamSetValueAtTime,
-        audioParamLinearRampToValueAtTime,
-        audioParamExponentialRampToValueAtTime,
-        audioParamSetTargetAtTime,
-        audioParamSetValueCurveAtTime,
-        audioParamCancelScheduledValues,
-        audioParamCancelAndHoldAtTime,
-        popAudioParam,
-        makeAudioContextDestination,
-        makeOscillatorNode,
-        setOscillatorType,
-        pushOscillatorFrequencyAudioParam,
-        pushOscillatorDetuneAudioParam,
-        setOscillatorPeriodicWave,
-        loadAudio,
-        playAudio,
-        pauseAudio,
-        loadPCM,
-        makeAudioBufferSourceNode,
-        pushAudioBufferSourceNodeDetuneAudioParam,
-        pushAudioBufferSourceNodePlaybackRateAudioParam,
-        setAudioBufferSourceNodeLoop
+        listenCanvasEvent
     ];
 }
 
@@ -911,233 +895,16 @@ function downloadImageDataCommand(ds) {
     notifyBinaryData(futureId, image.data);
 }
 
-
 /**
- * Audio commands
+ * Audio
  */
+let audioChannels = [];
 
-let audioBaseTime = audioContext.currentTime;
-
-function setAudioBaseTime(ds) {
-    audioBaseTime = audioContext.currentTime;
-}
-
-function startAudioNode(ds) {
-    let audioNode = ds.getProxyObject();
-    let deltaWhen = ds.getFloat64();
-    let offset = ds.getFloat64();
-    let duration = ds.getFloat64();
-
-    let when = 0;
-    if (deltaWhen > 0) {
-        when = audioBaseTime + deltaWhen;
-    }
-    if (duration < 0) {
-        audioNode.start(when, offset);
-    } else {
-        audioNode.start(when, offset, duration);
-    }
-}
-
-function stopAudioNode(ds) {
-    let audioNode = ds.getProxyObject();
-    let deltaWhen = ds.getFloat64();
-
-    let when = 0;
-    if (deltaWhen > 0) {
-        when = audioBaseTime + deltaWhen;
-    }
-    audioNode.stop(when);
-}
-
-function connectNode(ds) {
-    let fromAudioNode = ds.getProxyObject();
-    let toAudioNode = ds.getProxyObject();
-    fromAudioNode.connect(toAudioNode);
-}
-
-function disconnectNode(ds) {
-    let fromAudioNode = ds.getProxyObject();
-    let toAudioNode = ds.getProxyObject();
-    fromAudioNode.disconnect(toAudioNode);
-}
-
-function audioNodeEnd(ds) {
-    let futureId = ds.getUint32();
-    let audioNode = ds.getProxyObject();
-
-    audioNode.onended = (event) => {
-        notifyValues(futureId, [true]);
-    };
-}
-
-function makeAudioContextDestination(ds) {
-    let nodeId = ds.getUint32();
-    linkProxyObject(nodeId, audioContext.destination);
-}
-
-let audioParamStack = [];
-
-function audioParamSetValueAtTime(ds) {
-    let value = ds.getFloat64();
-    let startTime = audioBaseTime + ds.getFloat64();
-    audioParamStack[0].setValueAtTime(value, startTime);
-}
-
-function audioParamLinearRampToValueAtTime(ds) {
-    let value = ds.getFloat64();
-    let endTime = audioBaseTime + ds.getFloat64();
-    audioParamStack[0].linearRampToValueAtTime(value, endTime);
-}
-
-function audioParamExponentialRampToValueAtTime(ds) {
-    let value = ds.getFloat64();
-    let endTime = audioBaseTime + ds.getFloat64();
-    audioParamStack[0].exponentialRampToValueAtTime(value, endTime);
-}
-
-function audioParamSetTargetAtTime(ds) {
-    let value = ds.getFloat64();
-    let startTime = audioBaseTime + ds.getFloat64();
-    let timeConstant = ds.getFloat64();
-    audioParamStack[0].setTargetAtTime(value, startTime, timeConstant);
-}
-
-function audioParamSetValueCurveAtTime(ds) {
-    let values = ds.getJson();
-    let startTime = audioBaseTime + ds.getFloat64();
-    let duration = ds.getFloat64();
-    audioParamStack[0].setValueCurveAtTime(values, startTime, duration);
-}
-
-function audioParamCancelScheduledValues(ds) {
-    let startTime = audioBaseTime + ds.getFloat64();
-    audioParamStack[0].cancelScheduledValues(startTime);
-}
-
-function audioParamCancelAndHoldAtTime(ds) {
-    let cancelTime = audioBaseTime + ds.getFloat64();
-    audioParamStack[0].cancelAndHoldAtTime(cancelTime);
-}
-
-function popAudioParam(ds) {
-    audioParamStack.shift();
-}
-
-function makeOscillatorNode(ds) {
-    let nodeId = ds.getUint32();
-
-    let oscillatorNode = new OscillatorNode(audioContext);
-    linkProxyObject(nodeId, oscillatorNode);
-}
-
-function setOscillatorType(ds) {
-    let audioNode = ds.getProxyObject();
-    let type = ds.getJson();
-    audioNode.type = type;
-}
-
-function pushOscillatorFrequencyAudioParam(ds) {
-    let audioNode = ds.getProxyObject();
-    audioParamStack.unshift(audioNode.frequency);
-}
-
-function pushOscillatorDetuneAudioParam(ds) {
-    let audioNode = ds.getProxyObject();
-    audioParamStack.unshift(audioNode.detune);
-}
-
-function setOscillatorPeriodicWave(ds) {
-    let oscillatorNode = ds.getProxyObject();
-    let real = ds.getJson();
-    let imag = ds.getJson();
-    let constraints = ds.getJson();
-    oscillatorNode.setPeriodicWave(audioContext.createPeriodicWave(real, imag, constraints));
-}
-
-function loadAudio(ds) {
-    let futureId = ds.getUint32();
-    let nodeId = ds.getUint32();
-    let url = ds.getJson();
-
-    let audio = new Audio(url);
-    audio.onloadedmetadata = () => {
-        let sourceNode = audioContext.createMediaElementSource(audio);
-        linkProxyObject(nodeId, sourceNode);
-        sourceNode.connect(audioContext.destination);
-        notifyValues(futureId, [audio.duration]);
-    };
-    audio.onstalled = () => {
-        notifyException(futureId, "Load audio failed.");
-    };
-}
-
-function playAudio(ds) {
-    let sourceNode = ds.getProxyObject();
-    sourceNode.mediaElement.play();
-}
-
-function pauseAudio(ds) {
-    let sourceNode = ds.getProxyObject();
-    sourceNode.mediaElement.pause();
-}
-
-function loadPCM(ds) {
-    let futureId = ds.getUint32();
-    let objectId = ds.getUint32();
-    let url = ds.getJson();
-
-    let req = new XMLHttpRequest();
-    req.open('GET', url, true);
-    req.responseType = 'arraybuffer';
-    req.onload = () => {
-        if (req.status === 200) {
-            let buf = req.response;
-            audioContext.decodeAudioData(buf).then(
-                (decodedData) => {
-                    linkProxyObject(objectId, decodedData);
-                    notifyValues(futureId, [decodedData.sampleRate,
-                                            decodedData.length,
-                                            decodedData.duration,
-                                            decodedData.numberOfChannels]);
-                },
-                (reason) => {
-                    notifyException(futureId, reason);
-                });
-        }
-    };
-    req.send();
-}
-
-function makeAudioBufferSourceNode(ds) {
-    let nodeId = ds.getUint32();
-    let pcmData = ds.getProxyObject();
-
-    let sourceNode = audioContext.createBufferSource();
-    sourceNode.buffer = pcmData;
-    linkProxyObject(nodeId, sourceNode);
-}
-
-function pushAudioBufferSourceNodeDetuneAudioParam(ds) {
-    let sourceNode = ds.getProxyObject();
-    audioParamStack.push(sourceNode.detune);
-}
-
-function pushAudioBufferSourceNodePlaybackRateAudioParam(ds) {
-    let sourceNode = ds.getProxyObject();
-    audioParamStack.push(sourceNode.playbackRate);
-}
-
-function setAudioBufferSourceNodeLoop(ds) {
-    let sourceNode = ds.getProxyObject();
-    let loop = ds.getBoolean();
-    let loopStart = ds.getFloat64();
-    let loopEnd = ds.getFloat64();
-
-    sourceNode.loop = loop;
-    if (loop) {
-        sourceNode.loopStart = loopStart;
-        sourceNode.loopEnd = loopEnd;
+function initializeAudioChannels() {
+    for (let i = 0; i < 16; ++i) {
+        audioChannels[i] = {
+            lastPlaySec: 0
+        };
     }
 }
 
@@ -1233,6 +1000,7 @@ window.onload = () => {
     initializeBinaryCommands();
     initializeTextCommandTable();
     initializeWindowEvents();
+    initializeAudioChannels();
     connectServer();
 };
 
@@ -1250,7 +1018,6 @@ function initializeWindowEvents() {
         window.addEventListener(eventName, makeEventHandler(eventName));
     });
 
-    console.log('initial AudioContext: ' + audioContext.state);
     if (audioContext.state !== 'suspended') {
         return;
     }
@@ -1260,7 +1027,6 @@ function initializeWindowEvents() {
         audioContext.resume().then(removeEvents);
     }
     function removeEvents() {
-        console.log('AudioContext: ' + audioContext.state);
         eventNames.forEach((eventName) => {
             window.removeEventListener(eventName, resumeAudioContext);
         });
