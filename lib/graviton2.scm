@@ -591,7 +591,8 @@
   (cond
     ((slot-ref obj 'id) => (lambda (id)
                              (slot-set! obj 'id #f)
-                             (call-command 'unlink-proxy-object '(u32) (list id))))
+                             (jslet (id::u32)
+                               (unlinkProxyObject id))))
     (else
      #t)))
 
@@ -1015,64 +1016,6 @@
                       unlink-proxy-object
                       register-binary
 
-                      make-canvas
-                      load-canvas
-                      set-canvas-visibility
-                      window-size
-
-                      set-fill-style
-                      set-font
-                      set-global-alpha
-                      set-global-composite-operation
-                      set-image-smoothing-enabled
-                      set-line-cap
-                      set-line-dash
-                      set-line-dash-offset
-                      set-line-join
-                      set-line-width
-                      set-miter-limit
-                      set-shadow-blur
-                      set-shadow-color
-                      set-shadow-offset-x
-                      set-shadow-offset-y
-                      set-stroke-style
-                      set-text-align
-                      set-text-baseline
-                      arc
-                      arc-to
-                      begin-path
-                      bezier-curve-to
-                      clear-rect
-                      clip
-                      close-path
-                      draw-canvas
-                      ellipse
-                      fill
-                      fill-rect
-                      fill-text
-                      get-image-data
-                      is-point-in-path
-                      is-point-in-stroke
-                      line-to
-                      measure-text
-                      move-to
-                      put-image-data
-                      quadratic-curve-to
-                      rect
-                      restore
-                      rotate
-                      save
-                      scale
-                      set-transform
-                      stroke
-                      stroke-rect
-                      stroke-text
-                      transform
-                      translate
-                      create-image-data
-                      upload-image-data
-                      download-image-data
-
                       listen-window-event
                       listen-canvas-event
                       ))
@@ -1167,8 +1110,179 @@
       (slot-set! ctx 'json-pair-buffer '())
       (slot-set! ctx 'buffer-output-port (open-output-uvector)))))
 
+;;;
+
+(define (parse-arg-spec spec)
+  (match spec
+    ((? symbol? spec)
+     (parse-arg-spec (map string->symbol (string-split (symbol->string spec) "::"))))
+    ((var type)
+     (list var type))
+    ((var)
+     (list var 'json))))
+
+(define binary-command-next-id (make-id-generator #x7fffffff))
+
+(define *enum-table* (make-hash-table))
+
+(define-class <js-procedure> ()
+  ((types :init-keyword :types)
+   (call-id :init-keyword :call-id)
+   (run-id :init-keyword :run-id)))
+
+(define (compile-jslambda jsmodule-name arg-specs body)
+  (let* ((var-type-list (map parse-arg-spec arg-specs))
+         (base-id (binary-command-next-id))
+         (run-id (ash base-id 1))
+         (call-id (+ (ash base-id 1) 1))
+         (name (gensym))
+         (ds (gensym)))
+    (register-js-stmt! jsmodule-name
+                       `(begin
+                          (define (,name %future-id ,ds)
+                            (let ,(map (match-lambda
+                                         ((var type)
+                                          `(,var ,(match type
+                                                    ('f32
+                                                     `((ref ,ds getFloat32)))
+                                                    ('f64
+                                                     `((ref ,ds getFloat64)))
+                                                    ('s16
+                                                     `((ref ,ds getInt16)))
+                                                    ('s32
+                                                     `((ref ,ds getInt32)))
+                                                    ('s8
+                                                     `((ref ,ds getInt8)))
+                                                    ('u16
+                                                     `((ref ,ds getUint16)))
+                                                    ('u32
+                                                     `((ref ,ds getUint32)))
+                                                    ('u8
+                                                     `((ref ,ds getUint8)))
+                                                    ('u8vector
+                                                     `((ref ,ds getUint8Array)))
+                                                    ('f64vector
+                                                     `((ref ,ds getFloat64Array)))
+                                                    ('boolean
+                                                      `((ref ,ds getBoolean)))
+                                                    ('json
+                                                     `((ref ,ds getJson)))
+                                                    ('proxy
+                                                     `((ref ,ds getProxyObject)))
+                                                    ((? symbol? enum-name)
+                                                     (unless (hash-table-contains? *enum-table* enum-name)
+                                                       (errorf "Invalid type: ~a" type))
+                                                     `((ref ,ds getEnum) ,(symbol->string enum-name)))
+                                                    ))))
+                                       var-type-list)
+                              ,@body)
+                            undefined)
+                          (vector-set! binaryCommands ,call-id ,name)
+                          (vector-set! binaryCommands ,run-id ,name)))
+    (make <js-procedure> :call-id call-id :run-id run-id :types (map (cut list-ref <> 1) var-type-list))))
+
+(define-jsise-macro result
+  ((vals ...)
+   `(notifyValues %future-id ,(list->vector vals))))
+
+(define-jsise-macro result-u8array
+  ((data)
+   `(notifyBinaryData %future-id ,data)))
+
+(define-jsise-macro result-error
+  ((err)
+   `(notifyException %future-id ((ref ,err toString)))))
+
+(define-macro (jslambda arg-specs :rest body)
+  (compile-jslambda (module-name->path (module-name (current-module))) arg-specs body))
+
+(define (jscall js-proc provider :rest args)
+  (let1 future (make <graviton-future>)
+    (when provider
+      (slot-set! future 'result-maker provider))
+    (call-command (slot-ref js-proc 'call-id)
+                  (cons 'future (slot-ref js-proc 'types))
+                  (cons future args))
+    future))
+
+(define (jsrun js-proc :rest args)
+  (call-command (slot-ref js-proc 'run-id)
+                (slot-ref js-proc 'types)
+                args))
+
+(define-macro (jslet var-spec :rest body)
+  `(jsrun (jslambda ,var-spec
+            ,@body)
+          ,@(map (lambda (spec)
+                   (list-ref (parse-arg-spec spec) 0))
+                 var-spec)))
+
+(define-macro (jslet/result var-spec :rest body)
+  `(jscall (jslambda ,var-spec
+             ,@body)
+           #f
+           ,@(map (lambda (spec)
+                    (list-ref (parse-arg-spec spec) 0))
+                  var-spec)))
+
+(define-macro (jslet/result:then provider var-spec :rest body)
+  `(jscall (jslambda ,var-spec
+             ,@body)
+           ,provider
+           ,@(map (lambda (spec)
+                    (list-ref (parse-arg-spec spec) 0))
+                  var-spec)))
+
+(define-class <js-enum> ()
+  ((symbol->value-table :init-form (make-hash-table))
+   (jsvalue->symbol-table :init-form (make-hash-table 'equal?))))
+
+(define (make-enum jsmodule-name enum-name symbol->jsvalue-list)
+  (let ((enum (make <js-enum>))
+        (jsvals '()))
+    (for-each-with-index (lambda (i symbol->jsvalue)
+                           (match symbol->jsvalue
+                             ((sym jsval)
+                              (hash-table-put! (slot-ref enum 'symbol->value-table) sym i)
+                              (hash-table-put! (slot-ref enum 'jsvalue->symbol-table) jsval sym)
+                              (push! jsvals jsval))))
+                         symbol->jsvalue-list)
+    (register-js-stmt! jsmodule-name
+                       `(set! (aref enumTable ,(symbol->string enum-name)) ,(list->vector (reverse jsvals))))
+    enum))
+
+(define-syntax define-jsenum
+  (syntax-rules ()
+    ((_ name symbol->jsvalue ...)
+     (let1 enum (make-enum (module-name->path (module-name (current-module))) 'name '(symbol->jsvalue ...))
+       (hash-table-put! *enum-table* 'name enum)))))
+
+(define (enum-value name sym)
+  (let1 enum (hash-table-get *enum-table* name #f)
+    (unless enum
+      (errorf "enum ~a not found" enum))
+    (or (hash-table-get (slot-ref enum 'symbol->value-table) sym #f)
+        (errorf "enum symbol ~a not found" sym))))
+
+(define (enum-symbol name jsval)
+  (let1 enum (hash-table-get *enum-table* name #f)
+    (unless enum
+      (errorf "enum ~a not found" enum))
+    (or (hash-table-get (slot-ref enum 'jsvalue->symbol-table) jsval #f)
+        (errorf "enum jsvalue ~a not found" jsval))))
+
+;;;
+
+(define (window-size)
+  (jslet/result ()
+    (result window.innerWidth window.innerHeight)))
+
 (define (app-close)
-  (call-command 'app-close '() '()))
+  (jslet ()
+    (when webSocket
+      (webSocket.close 1000))))
+
+;;;
 
 (define current-canvas (make-parameter #f))
 
@@ -1288,32 +1402,74 @@
                   (proxy-object-id image)))
     ("repetition" . ,(slot-ref pattern 'repetition))))
 
+
+(define-jsfn (%make-canvas canvas-id width height z visible?)
+  (let ((canvas (document.createElement "canvas")))
+    (set! canvas.id (+ "canvas" canvas-id))
+    (set! canvas.width width)
+    (set! canvas.height height)
+    (linkProxyObject canvas-id canvas)
+
+    (centralizeCanvas canvas)
+    (set! canvas.style.zIndex z)
+    ((ref (document.getElementById "_on") appendChild) canvas)
+
+    (when window.isElectron
+      (window.showBrowserWindow))
+
+    (if visible?
+        (set! canvas.style.visibility "visible")
+        (set! canvas.style.visibility "hidden"))
+    canvas))
+
 (define (make-canvas width height :key (z 0) (visible? #t))
-  (let1 canvas (make <canvas> :width width :height height :z z :visible? visible?)
-    (call-command 'make-canvas '(proxy u32 u32 u32 boolean) (list canvas width height z visible?))
+  (let* ((canvas (make <canvas> :width width :height height :z z :visible? visible?))
+         (canvas-id (slot-ref canvas 'id)))
+    (jslet (canvas-id::u32
+            width::u32
+            height::u32
+            z::u32
+            visible?::boolean)
+      (%make-canvas canvas-id width height z visible?))
     (when visible?
       (current-canvas canvas))
     canvas))
 
 (define (load-canvas filename :key (z 0) (visible? #t) (content-type #f))
   (let* ((canvas (make <canvas> :z z :visible? visible?))
-         (future (make <graviton-future> :result-maker (lambda (w h)
-                                                         (slot-set! canvas 'width w)
-                                                         (slot-set! canvas 'height h)
-                                                         canvas)))
-         (data (call-with-input-file filename port->uvector)))
-    (call-command 'load-canvas
-                  `(future
-                    proxy
-                    (resource ,(or content-type
-                                   (estimate-content-type filename)))
-                    u32
-                    boolean)
-                  (list future canvas data z visible?))
-    future))
+         (canvas-id (slot-ref canvas 'id))
+         (url (resource-url filename :content-type content-type)))
+    (jslet/result:then (lambda (w h)
+                         (slot-set! canvas 'width w)
+                         (slot-set! canvas 'height h)
+                         canvas)
+        (canvas-id::u32
+         url::json
+         z::u32
+         visible?::boolean)
+      (let ((img (make Image)))
+        (workingImages.add img)
+        (set! img.src url)
+        (set! img.onload (lambda ()
+                           (let* ((canvas (%make-canvas canvas-id img.width img.height z visible?))
+                                  (ctx (canvas.getContext "2d")))
+                             (ctx.drawImage img 0 0)
+                             (workingImages.delete img)
+                             (result canvas.width canvas.height))))
+        (set! img.onerror (lambda ()
+                            (workingImages.delete img)
+                            (result-error "Load image failed.")))))))
 
 (define (set-canvas-visible! canvas visible?)
-  (call-command 'set-canvas-visibility '(proxy boolean) (list canvas visible?))
+  (jslet (canvas::proxy
+          visible?::boolean)
+    (cond
+      (visible?
+       (set! canvas.style.visibility "visible")
+       (when window.isElectron
+         (window.showBrowserWindow)))
+      (else
+       (set! canvas.style.visibility "hidden"))))
   (slot-set! canvas 'visible? visible?))
 
 (define (current-fill-style)
@@ -1321,224 +1477,294 @@
 
 (define (set-fill-style! style)
   (set! (~ (current-canvas) 'context2d 'fill-style) style)
-  (call-command 'set-fill-style '(proxy json) (list (current-canvas) (style->json style))))
+  (let ((canvas (current-canvas))
+        (style-json (style->json style)))
+    (jslet (canvas::proxy
+            style-json::json)
+      (let ((ctx (canvas.getContext "2d")))
+        (set! ctx.fillStyle (obj2style ctx style-json))))))
 
 (define (current-font)
   (~ (current-canvas) 'context2d 'font))
 
 (define (set-font! font)
   (set! (~ (current-canvas) 'context2d 'font) font)
-  (call-command 'set-font '(proxy json) (list (current-canvas) font)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            font::json)
+      (set! (ref (canvas.getContext "2d") font) font))))
 
 (define (current-global-alpha)
   (~ (current-canvas) 'context2d 'global-alpha))
 
 (define (set-global-alpha! alpha)
   (set! (~ (current-canvas) 'context2d 'global-alpha) alpha)
-  (call-command 'set-global-alpha '(proxy f64) (list (current-canvas) alpha)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            alpha::f64)
+      (set! (ref (canvas.getContext "2d") globalAlpha) alpha))))
 
 (define (current-global-composite-operation)
   (~ (current-canvas) 'context2d 'global-composite-operation))
 
-(define-constant global-composite-opration-alist
-  '((source-over . "source-over")
-    (source-in . "source-in")
-    (source-out . "source-out")
-    (source-atop . "source-atop")
-    (destination-over . "destination-over")
-    (destination-in . "destination-in")
-    (destination-out . "destination-out")
-    (destination-atop . "destination-atop")
-    (lighter . "lighter")
-    (copy . "copy")
-    (xor . "xor")
-    (multiply . "multiply")
-    (screen . "screen")
-    (overlay . "overlay")
-    (darken . "darken")
-    (lighten . "lighten")
-    (color-dodge . "color-dodge")
-    (color-burn . "color-burn")
-    (hard-light . "hard-light")
-    (soft-light . "soft-light")
-    (difference . "difference")
-    (exclusion . "exclusion")
-    (hue . "hue")
-    (saturation . "saturation")
-    (color . "color")
-    (luminosity . "luminosity")))
+(define-jsenum global-composite-operation-enum
+  (source-over "source-over")
+  (source-in "source-in")
+  (source-out "source-out")
+  (source-atop "source-atop")
+  (destination-over "destination-over")
+  (destination-in "destination-in")
+  (destination-out "destination-out")
+  (destination-atop "destination-atop")
+  (lighter "lighter")
+  (copy "copy")
+  (xor "xor")
+  (multiply "multiply")
+  (screen "screen")
+  (overlay "overlay")
+  (darken "darken")
+  (lighten "lighten")
+  (color-dodge "color-dodge")
+  (color-burn "color-burn")
+  (hard-light "hard-light")
+  (soft-light "soft-light")
+  (difference "difference")
+  (exclusion "exclusion")
+  (hue "hue")
+  (saturation "saturation")
+  (color "color")
+  (luminosity "luminosity"))
 
 (define (set-global-composite-operation! op)
-  (let1 op-name (assoc-ref global-composite-opration-alist op #f)
-    (unless op-name
-      (errorf "Invalid global composite operation: ~a" op))
-    (set! (~ (current-canvas) 'context2d 'global-composite-opration) op)
-    (call-command 'set-global-composite-operation '(proxy json) (list (current-canvas) op-name))))
+  (set! (~ (current-canvas) 'context2d 'global-composite-opration) op)
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            op::global-composite-operation-enum)
+      (set! (ref (canvas.getContext "2d") globalCompositeOperation) op))))
 
 (define (current-image-smoothing-enabled?)
   (~ (current-canvas) 'context2d 'image-smoothing-enabled))
 
 (define (set-image-smoothing-enabled! flag)
   (set! (~ (current-canvas) 'context2d 'image-smoothing-enabled) flag)
-  (call-command 'set-image-smoothing-enabled '(proxy boolean) (list (current-canvas) flag)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            flag::boolean)
+      (set! (ref (canvas.getContext "2d") imageSmoothingEnabled) flag))))
 
 (define (current-line-cap)
   (~ (current-canvas) 'context2d 'line-cap))
 
-(define-constant line-cap-alist
-  '((butt . "butt")
-    (round . "round")
-    (square . "square")))
+(define-jsenum line-cap-enum
+  (butt "butt")
+  (round "round")
+  (square "square"))
 
 (define (set-line-cap! opt)
-  (let1 opt-name (assoc-ref line-cap-alist opt #f)
-    (unless opt-name
-      (errorf "Invalid line cap option: ~a" opt))
-    (set! (~ (current-canvas) 'context2d 'line-cap) opt)
-    (call-command 'set-line-cap '(proxy json) (list (current-canvas) opt-name))))
+  (set! (~ (current-canvas) 'context2d 'line-cap) opt)
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            opt::line-cap-enum)
+      (set! (ref (canvas.getContext "2d") lineCap) opt))))
 
 (define (current-line-dash)
   (~ (current-canvas) 'context2d 'line-dash))
 
 (define (set-line-dash! segments)
   (set! (~ (current-canvas) 'context2d 'line-dash) segments)
-  (call-command 'set-line-dash '(proxy json) (list (current-canvas) segments)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            segments::json)
+      ((ref (canvas.getContext "2d") setLineDash) segments))))
 
 (define (current-line-dash-offset)
   (~ (current-canvas) 'context2d 'line-dash-offset))
 
 (define (set-line-dash-offset! offset)
   (set! (~ (current-canvas) 'context2d 'line-dash-offset) offset)
-  (call-command 'set-line-dash-offset '(proxy f64) (list (current-canvas) offset)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            offset::f64)
+      (set! (ref (canvas.getContext "2d") lineDashOffset) offset))))
 
 (define (current-line-join)
   (~ (current-canvas) 'context2d 'line-join))
 
-(define-constant line-join-alist
-  '((bevel . "bevel")
-    (round . "round")
-    (miter . "miter")))
+(define-jsenum line-join-enum
+  (bevel "bevel")
+  (round "round")
+  (miter "miter"))
 
 (define (set-line-join! opt)
-  (let1 opt-name (assoc-ref line-join-alist opt #f)
-    (unless opt-name
-      (errorf "Invalid line join option: ~a" opt))
-    (set! (~ (current-canvas) 'context2d 'line-join) opt)
-    (call-command 'set-line-join '(proxy json) (list (current-canvas) offset))))
+  (set! (~ (current-canvas) 'context2d 'line-join) opt)
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            opt::line-join-enum)
+      (set! (ref (canvas.getContext "2d") lineJoin) opt))))
 
 (define (current-line-width)
   (~ (current-canvas) 'context2d 'line-width))
 
 (define (set-line-width! w)
   (set! (~ (current-canvas) 'context2d 'line-width) w)
-  (call-command 'set-line-width '(proxy f64) (list (current-canvas) w)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            w::f64)
+      (set! (ref (canvas.getContext "2d") lineWidth) w))))
 
 (define (current-miter-limit)
   (~ (current-canvas) 'context2d 'miter-limit))
 
 (define (set-miter-limit! limit)
   (set! (~ (current-canvas) 'context2d 'miter-limit) limit)
-  (call-command 'set-miter-limit '(proxy f64) (list (current-canvas) limit)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            limit::f64)
+      (set! (ref (canvas.getContext "2d") miterLimit) limit))))
 
 (define (current-shadow-blur)
   (~ (current-canvas) 'context2d 'shadow-blur))
 
 (define (set-shadow-blur! level)
   (set! (~ (current-canvas) 'context2d 'shadow-blur) level)
-  (call-command 'set-shadow-blur '(proxy f64) (list (current-canvas) level)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            level::f64)
+      (set! (ref (canvas.getContext "2d") shadowBlur) level))))
 
 (define (current-shadow-color)
   (~ (current-canvas) 'context2d 'shadow-color))
 
 (define (set-shadow-color! color)
   (set! (~ (current-canvas) 'context2d 'shadow-color) color)
-  (call-command 'set-shadow-color '(proxy json) (list (current-canvas) color)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            color::json)
+      (set! (ref (canvas.getContext "2d") shadowColor) color))))
 
 (define (current-shadow-offset-x)
   (~ (current-canvas) 'context2d 'shadow-offset-x))
 
 (define (set-shadow-offset-x! offset)
   (set! (~ (current-canvas) 'context2d 'shadow-offset-x) offset)
-  (call-command 'set-shadow-offset-x '(proxy f64) (list (current-canvas) offset)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            offset::f64)
+      (set! (ref (canvas.getContext "2d") shadowOffsetX) offset))))
 
 (define (current-shadow-offset-y)
   (~ (current-canvas) 'context2d 'shadow-offset-y))
 
 (define (set-shadow-offset-y! offset)
   (set! (~ (current-canvas) 'context2d 'shadow-offset-y) offset)
-  (call-command 'set-shadow-offset-y '(proxy f64) (list (current-canvas) offset)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            offset::f64)
+      (set! (ref (canvas.getContext "2d") shadowOffsetY) offset))))
 
 (define (current-stroke-style)
   (~ (current-canvas) 'context2d 'stroke-style))
 
 (define (set-stroke-style! style)
   (set! (~ (current-canvas) 'context2d 'stroke-style) style)
-  (call-command 'set-stroke-style '(proxy json) (list (current-canvas) (style->json style))))
+  (let ((canvas (current-canvas))
+        (style-json (style->json style)))
+    (jslet (canvas::proxy
+            style-json::json)
+      (let ((ctx (canvas.getContext "2d")))
+        (set! ctx.strokeStyle (obj2style ctx style-json))))))
 
 (define (current-text-align)
   (~ (current-canvas) 'context2d 'text-align))
 
-(define-constant text-align-alist
-  '((left . "left")
-    (right . "right")
-    (center . "center")
-    (start . "start")
-    (end . "end")))
+(define-jsenum text-align-enum
+  (left "left")
+  (right "right")
+  (center "center")
+  (start "start")
+  (end "end"))
 
 (define (set-text-align! align)
-  (let1 align-name (assoc-ref text-align-alist align #f)
-    (unless align-name
-      (errorf "Invalid text align option: ~a" align))
-    (set! (~ (current-canvas) 'context2d 'text-align) align)
-    (call-command 'set-text-align '(proxy json) (list (current-canvas) align-name))))
+  (set! (~ (current-canvas) 'context2d 'text-align) align)
+  (let ((canvas (current-canvas)))
+    (set! (ref (canvas.getContext "2d") textAlign) align)))
 
 (define (current-text-baseline)
   (~ (current-canvas) 'context2d 'text-baseline))
 
-(define-constant text-baseline-alist
-  '((top . "top")
-    (hanging . "hanging")
-    (middle . "middle")
-    (alphabetic . "alphabetic")
-    (ideographic . "ideographic")
-    (bottom . "bottom")))
+(define-jsenum text-baseline-enum
+  (top "top")
+  (hanging "hanging")
+  (middle "middle")
+  (alphabetic "alphabetic")
+  (ideographic "ideographic")
+  (bottom "bottom"))
 
 (define (set-text-baseline! opt)
-  (let1 opt-name (assoc-ref text-baseline-alist opt #f)
-    (unless opt-name
-      (errorf "Invalid text baseline option: ~a" opt))
-    (set! (~ (current-canvas) 'context2d 'text-baseline) opt)
-    (call-command 'set-text-baseline '(proxy json) (list (current-canvas) opt-name))))
+  (set! (~ (current-canvas) 'context2d 'text-baseline) opt)
+  (let ((canvas (current-canvas)))
+    (set! (ref (canvas.getContext "2d") textBaseline) opt)))
 
 (define (arc x y radius start-angle end-angle :optional (anti-clockwise #f))
-  (call-command 'arc
-                '(proxy s32 s32 s32 f64 f64 boolean)
-                (list (current-canvas) x y radius start-angle end-angle anti-clockwise)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            x::s32
+            y::s32
+            radius::s32
+            start-angle::f64
+            end-angle::f64
+            anti-clockwise::boolean)
+      ((ref (canvas.getContext "2d") arc) x y radius start-angle end-angle anti-clockwise))))
 
 (define (arc-to x1 y1 x2 y2 radius)
-  (call-command 'arc-to '(proxy s32 s32 s32 s32 s32) (list (current-canvas) x1 y1 x2 y2 radius)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            x1::s32
+            y1::s32
+            x2::s32
+            y2::s32
+            radius::s32)
+      ((ref (canvas.getContext "2d") arcTo) x1 y1 x2 y2 radius))))
 
 (define (begin-path)
-  (call-command 'begin-path '(proxy) (list (current-canvas))))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy)
+      ((ref (canvas.getContext "2d") beginPath)))))
 
 (define (bezier-curve-to cp1x cp1y cp2x cp2y x y)
-  (call-command 'bezier-curve-to '(proxy s32 s32 s32 s32 s32 s32) (list (current-canvas) cp1x cp1y cp2x cp2y x y)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            cp1x::s32
+            cp1y::s32
+            cp2x::s32
+            cp2y::s32
+            x::s32
+            y::s32)
+      ((ref (canvas.getContext "2d") bezierCurveTo) cp1x cp1y cp2x cp2y x y))))
 
 (define (clear-rect x y w h)
-  (call-command 'clear-rect '(proxy s32 s32 s32 s32) (list (current-canvas) x y w h)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            x::s32
+            y::s32
+            w::s32
+            h::s32)
+      ((ref (canvas.getContext "2d") clearRect) x y w h))))
 
-(define fillrule-alist
-  '((nonzero . "nonzero")
-    (evenodd . "evenodd")))
+(define-jsenum fillrule-enum
+  (nonzero "nonzero")
+  (evenodd "evenodd"))
 
 (define (clip :optional (rule 'nonzero))
-  (let1 rule-name (assoc-ref fillrule-alist rule #f)
-    (unless rule-name
-      (errorf "Invalid fillrule: ~a" rule))
-    (call-command 'clip '(proxy json) (list (current-canvas) rule-name))))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            rule::fillrule-enum)
+      ((ref (canvas.getContext "2d") clip) rule))))
 
 (define (close-path)
-  (call-command 'close-path '(proxy) (list (current-canvas))))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy)
+      ((ref (canvas.getContext "2d") closePath)))))
 
 (define (estimate-content-type filename)
   (let1 ext (string-downcase (path-extension filename))
@@ -1564,141 +1790,317 @@
       (else
        #f))))
 
-(define-method draw-canvas ((canvas <canvas>) dx dy)
-  (call-command 'draw-canvas '(proxy proxy u8 s32 s32) (list (current-canvas) canvas 3 dx dy)))
+(define-method draw-canvas ((src-canvas <canvas>) dx dy)
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            src-canvas::proxy
+            dx::s32
+            dy::s32)
+      ((ref (canvas.getContext "2d") drawImage) src-canvas dx dy))))
 
-(define-method draw-canvas ((canvas <canvas>) dx dy dw dh)
-  (call-command 'draw-canvas '(proxy proxy u8 s32 s32 s32 s32) (list (current-canvas) canvas 2 dx dy dw dh)))
+(define-method draw-canvas ((src-canvas <canvas>) dx dy dw dh)
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            src-canvas::proxy
+            dx::s32
+            dy::s32
+            dw::s32
+            dh::s32)
+      ((ref (canvas.getContext "2d") drawImage) src-canvas dx dy dw dh))))
 
-(define-method draw-canvas ((canvas <canvas>) sx sy sw sh dx dy dw dh)
-  (call-command 'draw-canvas
-                '(proxy proxy u8 s32 s32 s32 s32 s32 s32 s32 s32)
-                (list (current-canvas) canvas 1 sx sy sw sh dx dy dw dh)))
+(define-method draw-canvas ((src-canvas <canvas>) sx sy sw sh dx dy dw dh)
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            src-canvas::proxy
+            sx::s32
+            sy::s32
+            sw::s32
+            sh::s32
+            dx::s32
+            dy::s32
+            dw::s32
+            dh::s32)
+      ((ref (canvas.getContext "2d") drawImage) src-canvas sx sy sw sh dx dy dw dh))))
 
-(define (ellipse x y radius-x radius-y rotation start-angle end-angle :optional (anti-clockwise #f))
-  (call-command 'ellipse
-                '(proxy s32 s32 s32 s32 f64 f64 f64 boolean)
-                (list (current-canvas) x y radius-x radius-y rotation start-angle end-angle anti-clockwise)))
+(define (ellipse x y radius-x radius-y rotation start-angle end-angle :optional (anti-clockwise? #f))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            x::s32
+            y::s32
+            radius-x::s32
+            radius-y::s32
+            rotation::f64
+            start-angle::f64
+            end-angle::f64
+            anti-clockwise?::boolean)
+      ((ref (canvas.getContext "2d") ellipse)
+       x y radius-x radius-y rotation start-angle end-angle anti-clockwise?))))
 
 (define (fill :optional (rule 'nonzero))
-  (let1 rule-name (assoc-ref fillrule-alist rule #f)
-    (unless rule-name
-      (errorf "Invalid fillrule: ~a" rule))
-    (call-command 'fill '(proxy json) (list (current-canvas) rule-name))))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            rule::fillrule-enum)
+      ((ref (canvas.getContext "2d") fill) rule))))
 
 (define (fill-rect x y w h)
-  (call-command 'fill-rect '(proxy s32 s32 s32 s32) (list (current-canvas) x y w h)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            x::s32
+            y::s32
+            w::s32
+            h::s32)
+      ((ref (canvas.getContext "2d") fillRect) x y w h))))
 
 (define (fill-text text x y :optional (max-width 0))
-  (call-command 'fill-text '(proxy json s32 s32 s32) (list (current-canvas) text x y max-width)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            text::json
+            x::s32
+            y::s32
+            max-width::s32)
+      (if (< 0 max-width)
+          ((ref (canvas.getContext "2d") fillText) text x y max-width)
+          ((ref (canvas.getContext "2d") fillText) text x y)))))
 
 (define (get-image-data sx sy sw sh)
-  (let1 image (make <graviton-image> :width sw :height sh)
-    (call-command 'get-image-data '(proxy proxy s32 s32 s32 s32) (list (current-canvas) image sx sy sw sh))
+  (let* ((canvas (current-canvas))
+         (image (make <graviton-image> :width sw :height sh))
+         (image-id (slot-ref image 'id)))
+    (jslet (canvas::proxy
+            image-id::u32
+            sx::s32
+            sy::s32
+            sw::s32
+            sh::s32)
+      (let ((image ((ref (canvas.getContext "2d") getImageData) sx sy sw sh)))
+        (linkProxyObject image-id image)))
     image))
 
 (define (is-point-in-path? x y :optional (rule 'nonzero))
-  (let1 rule-name (assoc-ref fillrule-alist rule #f)
-    (unless rule-name
-      (errorf "Invalid fillrule: ~a" rule))
-
-    (let1 future (make <graviton-future>)
-      (call-command 'is-point-in-path '(proxy future s32 s32 json) (list (current-canvas) future x y rule-name))
-      future)))
+  (let ((canvas (current-canvas)))
+    (jslet/result (canvas::proxy
+                   x::s32
+                   y::s32
+                   rule::fillrule-enum)
+      (result ((ref (canvas.getContext "2d") isPointInPath) x y rule)))))
 
 (define (is-point-in-stroke? x y)
-  (let1 future (make <graviton-future>)
-    (call-command 'is-point-in-stroke '(proxy future s32 s32) (list (current-canvas) future x y))
-    future))
+  (let ((canvas (current-canvas)))
+    (jslet/result (canvas::proxy
+                   x::s32
+                   y::s32)
+      (result ((ref (canvas.getContext "2d") isPointInStroke) x y)))))
 
 (define (line-to x y)
-  (call-command 'line-to '(proxy s32 s32) (list (current-canvas) x y)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            x::s32
+            y::s32)
+      ((ref (canvas.getContext "2d") lineTo) x y))))
 
 (define-class <text-metrics> ()
   ((width :init-keyword :width)))
 
 (define (measure-text text)
-  (let1 future (make <graviton-future> :result-maker (lambda (alist)
-                                                       (make <text-metrics> :width (assoc-ref alist "width"))))
-    (call-command 'measure-text '(proxy future json) (list (current-canvas) future text))
-    future))
+  (let ((canvas (current-canvas)))
+    (jslet/result:then (lambda (width)
+                         (make <text-metrics> :width width))
+        (canvas::proxy
+         text::json)
+      (let ((text-metrics ((ref (canvas.getContext "2d") measureText) text)))
+        (result text-metrics.width)))))
 
 (define (move-to x y)
-  (call-command 'move-to '(proxy s32 s32) (list (current-canvas) x y)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            x::s32
+            y::s32)
+      ((ref (canvas.getContext "2d") moveTo) x y))))
 
 (define-method put-image-data ((image <graviton-image>) dx dy)
-  (call-command 'put-image-data '(proxy proxy s32 s32 boolean) (list (current-canvas) image dx dy #f)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            image::proxy
+            dx::s32
+            dy::s32)
+      ((ref (canvas.getContext "2d") putImageData) image dx dy))))
 
 (define-method put-image-data ((image <graviton-image>) dx dy dirty-x dirty-y dirty-width dirty-height)
-  (call-command 'put-image-data
-                '(proxy proxy s32 s32 boolean s32 s32 s32 s32)
-                (list (current-canvas) image #f dx dy dirty-x dirty-y dirty-width dirty-height)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            image::proxy
+            dx::s32
+            dy::s32
+            dirty-x::s32
+            dirty-y::s32
+            dirty-width::s32
+            dirty-height::s32)
+      ((ref (canvas.getContext "2d") putImageData) image dx dy dirty-x dirty-y dirty-width dirty-height))))
 
 (define (quadratic-curve-to cpx cpy x y)
-  (call-command 'quadratic-curve-to '(proxy s32 s32 s32 s32) (list (current-canvas) cpx cpy x y)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            cpx::s32
+            cpy::s32
+            x::s32
+            y::s32)
+      ((ref (canvas.getContext "2d") quadraticCurveTo) cpx cpy x y))))
 
 (define (rect x y w h)
-  (call-command 'rect '(proxy s32 s32 s32 s32) (list (current-canvas) x y w h)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            x::s32
+            y::s32
+            w::s32
+            h::s32)
+      ((ref (canvas.getContext "2d") rect) x y w h))))
 
 (define (restore-context)
-  (call-command 'restore '(proxy) (list (current-canvas)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy)
+      ((ref (canvas.getContext "2d") restore))))
   (pop! (slot-ref (current-canvas) 'context2d-list)))
 
 (define (rotate angle)
-  (call-command 'rotate '(proxy f64) (list (current-canvas) angle)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            angle::f64)
+      ((ref (canvas.getContext "2d") rotate) angle))))
 
 (define (save-context)
-  (call-command 'save '(proxy) (list (current-canvas)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy)
+      ((ref (canvas.getContext "2d") save))))
   (let1 ctx2 (copy-context2d (slot-ref (current-canvas) 'context2d))
     (push! (slot-ref (current-canvas) 'context2d-list) ctx2)))
 
 (define (scale x y)
-  (call-command 'scale '(proxy f64 f64) (list (current-canvas) x y)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            x::f64
+            y::f64)
+      ((ref (canvas.getContext "2d") scale) x y))))
 
 (define (set-transform! a b c d e f)
-  (call-command 'set-transform '(proxy f64 f64 f64 f64 f64 f64) (list (current-canvas) a b c d e f)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            a::f64
+            b::f64
+            c::f64
+            d::f64
+            e::f64
+            f::f64)
+      ((ref (canvas.getContext "2d") setTransform) a b c d e f))))
 
 (define (stroke)
-  (call-command 'stroke '(proxy) (list (current-canvas))))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy)
+      ((ref (canvas.getContext "2d") stroke)))))
 
 (define (stroke-rect x y w h)
-  (call-command 'stroke-rect '(proxy s32 s32 s32 s32) (list (current-canvas) x y w h)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            x::s32
+            y::s32
+            w::s32
+            h::s32)
+      ((ref (canvas.getContext "2d") strokeRect) x y w h))))
 
 (define (stroke-text text x y :optional (max-width 0))
-  (call-command 'stroke-text '(proxy json s32 s32 s32) (list (current-canvas) text x y max-width)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            text::json
+            x::s32
+            y::s32
+            max-width::s32)
+      (if (< 0 max-width)
+          ((ref (canvas.getContext "2d") strokeText) text x y max-width)
+          ((ref (canvas.getContext "2d") strokeText) text x y)))))
 
 (define (transform a b c d e f)
-  (call-command 'transform '(proxy f64 f64 f64 f64 f64 f64) (list (current-canvas) a b c d e f)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            a::f64
+            b::f64
+            c::f64
+            d::f64
+            e::f64
+            f::f64)
+      ((ref (canvas.getContext "2d") transform) a b c d e f))))
 
 (define (translate x y)
-  (call-command 'translate '(proxy s32 s32) (list (current-canvas) x y)))
+  (let ((canvas (current-canvas)))
+    (jslet (canvas::proxy
+            x::s32
+            y::s32)
+      ((ref (canvas.getContext "2d") translate) x y))))
 
 (define (create-image-data w h)
-  (let1 image (make <graviton-image> :width w :height h)
-    (call-command 'create-image-data '(proxy proxy s32 s32) (list (current-canvas) image w h))
+  (let* ((canvas (current-canvas))
+         (image (make <graviton-image> :width w :height h))
+         (image-id (slot-ref image 'id)))
+    (jslet (canvas::proxy
+            image-id::u32
+            w::s32
+            h::s32)
+      (let ((image ((ref (canvas.getContext "2d") createImageData) w h)))
+        (linkProxyObject image-id image)))
     image))
 
 (define (upload-image-data image data)
-  (call-command 'upload-image-data '(proxy u8vector) (list image data)))
+  (jslet (image::proxy
+          data::u8vector)
+    (image.data.set data)))
 
 (define (download-image-data image)
-  (let1 future (make <graviton-future>)
-    (call-command 'download-image-data '(future proxy) (list future image))
-    future))
+  (jslet/result (image::proxy)
+    (result-u8array image.data)))
 
 (define (set-window-event-handler! event-type proc)
-  (call-command 'listen-window-event '(json boolean) (list (symbol->string event-type) (if proc #t #f)))
+  (let ((event-name (symbol->string event-type))
+        (enable? (if proc #t #f)))
+    (jslet (event-name::json
+            enable?::boolean)
+      (set! (aref listenStateTable event-name) enable?)))
   (add-event-listener! event-type proc))
 
 (define (canvas-event-type canvas event-type)
   (string->symbol (format "_canvas_~a_~a" (slot-ref canvas 'id) event-type)))
 
 (define (set-canvas-event-handler! canvas event-type proc)
-  (let1 event-name (symbol->string (canvas-event-type canvas event-type))
-    (call-command 'listen-canvas-event
-                  '(proxy json json boolean)
-                  (list canvas (symbol->string event-type) event-name (if proc #t #f)))
-    (add-event-listener! (string->symbol event-name) proc)))
+  (let ((event-id (symbol->string (canvas-event-type canvas event-type)))
+        (event-name (symbol->string event-type))
+        (enable? (if proc #t #f)))
+    (jslet (canvas::proxy
+            event-id::json
+            event-name::json
+            enable?::boolean)
+      (let ((handler (if enable?
+                         (lambda (e)
+                           (notifyEvent event-id (createMouseEvent canvas e)))
+                         null)))
+        (cond
+          ((equal? event-name "click")
+           (set! canvas.onclick handler))
+          ((equal? event-name "dblclick")
+           (set! canvas.ondblclick handler))
+          ((equal? event-name "contextmenu")
+           (set! canvas.oncontextmenu handler))
+          ((equal? event-name "mousedown")
+           (set! canvas.onmousedown handler))
+          ((equal? event-name "mouseup")
+           (set! canvas.onmouseup handler))
+          ((equal? event-name "mouseover")
+           (set! canvas.onmouseover handler))
+          ((equal? event-name "mouseout")
+           (set! canvas.onmouseout handler))
+          ((equal? event-name "mousemove")
+           (set! canvas.onmousemove handler))
+          ((equal? event-name "wheel")
+           (set! canvas.onwheel handler))
+          (else
+           (throw (+ "Unsupported event: " event-name))))))
+    (add-event-listener! (string->symbol event-id) proc)))
 
 ;;;
 
@@ -1719,167 +2121,6 @@
 
 ;;;
 
-(define (parse-arg-spec spec)
-  (match spec
-    ((? symbol? spec)
-     (parse-arg-spec (map string->symbol (string-split (symbol->string spec) "::"))))
-    ((var type)
-     (list var type))
-    ((var)
-     (list var 'json))))
-
-;; TODO: Change start.
-(define binary-command-next-id (make-id-generator #x7fffffff 1000))
-
-(define *enum-table* (make-hash-table))
-
-(define-class <js-procedure> ()
-  ((types :init-keyword :types)
-   (call-id :init-keyword :call-id)
-   (run-id :init-keyword :run-id)))
-
-(define (compile-jslambda jsmodule-name arg-specs body)
-  (let* ((var-type-list (map parse-arg-spec arg-specs))
-         (base-id (binary-command-next-id))
-         (run-id (ash base-id 1))
-         (call-id (+ (ash base-id 1) 1))
-         (name (gensym))
-         (ds (gensym)))
-    (register-js-stmt! jsmodule-name
-                       `(begin
-                          (define (,name %future-id ,ds)
-                            (let ,(map (match-lambda
-                                         ((var type)
-                                          `(,var ,(match type
-                                                    ('f32
-                                                     `((ref ,ds getFloat32)))
-                                                    ('f64
-                                                     `((ref ,ds getFloat64)))
-                                                    ('s16
-                                                     `((ref ,ds getInt16)))
-                                                    ('s32
-                                                     `((ref ,ds getInt32)))
-                                                    ('s8
-                                                     `((ref ,ds getInt8)))
-                                                    ('u16
-                                                     `((ref ,ds getUint16)))
-                                                    ('u32
-                                                     `((ref ,ds getUint32)))
-                                                    ('u8
-                                                     `((ref ,ds getUint8)))
-                                                    ('u8vector
-                                                     `((ref ,ds getUint8Array)))
-                                                    ('f64vector
-                                                     `((ref ,ds getFloat64Array)))
-                                                    ('boolean
-                                                      `((ref ,ds getBoolean)))
-                                                    ('json
-                                                     `((ref ,ds getJson)))
-                                                    ('proxy
-                                                     `((ref ,ds getProxyObject)))
-                                                    ((? symbol? enum-name)
-                                                     (unless (hash-table-contains? *enum-table* enum-name)
-                                                       (errorf "Invalid type: ~a" type))
-                                                     `((ref ,ds getEnum) ,(symbol->string enum-name)))
-                                                    ))))
-                                       var-type-list)
-                              ,@body)
-                            undefined)
-                          (vector-set! binaryCommands2 ,call-id ,name)
-                          (vector-set! binaryCommands2 ,run-id ,name)))
-    (make <js-procedure> :call-id call-id :run-id run-id :types (map (cut list-ref <> 1) var-type-list))))
-
-(define-jsise-macro result
-  ((vals ...)
-   `(notifyValues %future-id ,(list->vector vals))))
-
-(define-jsise-macro result-error
-  ((err)
-   `(notifyException %future-id (err.toString))))
-
-(define-macro (jslambda arg-specs :rest body)
-  (compile-jslambda (module-name->path (module-name (current-module))) arg-specs body))
-
-(define (jscall js-proc provider :rest args)
-  (let1 future (make <graviton-future>)
-    (when provider
-      (slot-set! future 'result-maker provider))
-    (call-command (slot-ref js-proc 'call-id)
-                  (cons 'future (slot-ref js-proc 'types))
-                  (cons future args))
-    future))
-
-(define (jsrun js-proc :rest args)
-  (call-command (slot-ref js-proc 'run-id)
-                (slot-ref js-proc 'types)
-                args))
-
-(define-macro (jslet var-spec :rest body)
-  `(jsrun (jslambda ,var-spec
-            ,@body)
-          ,@(map (lambda (spec)
-                   (list-ref (parse-arg-spec spec) 0))
-                 var-spec)))
-
-(define-macro (jslet/result var-spec :rest body)
-  `(jscall (jslambda ,var-spec
-             ,@body)
-           #f
-           ,@(map (lambda (spec)
-                    (list-ref (parse-arg-spec spec) 0))
-                  var-spec)))
-
-(define-macro (jslet/result:then provider var-spec :rest body)
-  `(jscall (jslambda ,var-spec
-             ,@body)
-           ,provider
-           ,@(map (lambda (spec)
-                    (list-ref (parse-arg-spec spec) 0))
-                  var-spec)))
-
-(define-class <js-enum> ()
-  ((symbol->value-table :init-form (make-hash-table))
-   (jsvalue->symbol-table :init-form (make-hash-table 'equal?))))
-
-(define (make-enum jsmodule-name enum-name symbol->jsvalue-list)
-  (let ((enum (make <js-enum>))
-        (jsvals '()))
-    (for-each-with-index (lambda (i symbol->jsvalue)
-                           (match symbol->jsvalue
-                             ((sym jsval)
-                              (hash-table-put! (slot-ref enum 'symbol->value-table) sym i)
-                              (hash-table-put! (slot-ref enum 'jsvalue->symbol-table) jsval sym)
-                              (push! jsvals jsval))))
-                         symbol->jsvalue-list)
-    (register-js-stmt! jsmodule-name
-                       `(set! (aref enumTable ,(symbol->string enum-name)) ,(list->vector (reverse jsvals))))
-    enum))
-
-(define-syntax define-jsenum
-  (syntax-rules ()
-    ((_ name symbol->jsvalue ...)
-     (let1 enum (make-enum (module-name->path (module-name (current-module))) 'name '(symbol->jsvalue ...))
-       (hash-table-put! *enum-table* 'name enum)))))
-
-(define (enum-value name sym)
-  (let1 enum (hash-table-get *enum-table* name #f)
-    (unless enum
-      (errorf "enum ~a not found" enum))
-    (or (hash-table-get (slot-ref enum 'symbol->value-table) sym #f)
-        (errorf "enum symbol ~a not found" sym))))
-
-(define (enum-symbol name jsval)
-  (let1 enum (hash-table-get *enum-table* name #f)
-    (unless enum
-      (errorf "enum ~a not found" enum))
-    (or (hash-table-get (slot-ref enum 'jsvalue->symbol-table) jsval #f)
-        (errorf "enum jsvalue ~a not found" jsval))))
-
-;;;
-
-(define (window-size)
-  (jslet/result ()
-    (result window.innerWidth window.innerHeight)))
 
 ;;;
 
