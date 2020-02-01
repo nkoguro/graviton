@@ -1,7 +1,13 @@
 'use strict';
 
+let initializeFunctions = [];
+
+function registerInitializer(func) {
+    initializeFunctions.push(func);
+}
+
 let audioContext = new AudioContext();
-var webSocket;
+let webSocket;
 
 function connectServer() {
     webSocket = new WebSocket('ws://' + location.host + '/s');
@@ -29,6 +35,8 @@ function connectServer() {
         }
     };
 }
+
+registerInitializer(connectServer);
 
 let jsonTable = {};
 let proxyObjectTable = {};
@@ -237,8 +245,6 @@ function dispatchBinaryMessage(abuf) {
 
 let listenStateTable = {};
 
-let workingImages = new Set();
-
 let audioChannels = [];
 
 function initializeAudioChannels() {
@@ -249,6 +255,8 @@ function initializeAudioChannels() {
     }
 }
 
+registerInitializer(initializeAudioChannels);
+
 /**
  * Graviton text commands
  */
@@ -258,6 +266,8 @@ let commandTable = {};
 function initializeTextCommandTable() {
     commandTable['registerArgs'] = registerArgs;
 }
+
+registerInitializer(initializeTextCommandTable);
 
 function dispatchJsonMessage(params) {
     let command = params[0];
@@ -337,21 +347,26 @@ function obj2style(ctx, style) {
  * Window handler
  */
 
-window.onload = () => {
-    initializeTextCommandTable();
-    initializeWindowEvents();
-    initializeAudioChannels();
-    connectServer();
-};
+// (
+//     window.onload = (() => {
+//         console.log("onload");
+//         return console.log(document.readyState);
+//     })
+// )
 
-window.onresize = (e) => {
-    let elements = document.getElementById('_on').children;
-    for (var i = 0; i < elements.length; i++) {
-        if (elements[i].tagName === 'CANVAS') {
-            centralizeCanvas(elements[i]);
-        }
-    }
-};
+// window.onload = () => {
+//     console.log("onload");
+//     console.log(document.readyState);
+// };
+
+// window.onresize = (e) => {
+//     let elements = document.getElementById('_on').children;
+//     for (var i = 0; i < elements.length; i++) {
+//         if (elements[i].tagName === 'CANVAS') {
+//             centralizeCanvas(elements[i]);
+//         }
+//     }
+// };
 
 function initializeWindowEvents() {
     ['keydown', 'keyup', 'keypress'].forEach((eventName) => {
@@ -375,6 +390,8 @@ function initializeWindowEvents() {
         window.addEventListener(eventName, resumeAudioContext);
     });
 }
+
+registerInitializer(initializeWindowEvents);
 
 function createMouseEvent(canvas, e) {
     switch (e.toString()) {

@@ -1273,6 +1273,21 @@
 
 ;;;
 
+(inline-js
+  (set! window.onload (lambda ()
+                        (for-each (lambda (func)
+                                    (func))
+                                  initializeFunctions)))
+
+  (set! window.onresize (lambda (e)
+                          (let1 elements (ref (document.getElementById "_on") children)
+                            (dotimes (i elements.length)
+                              (when (equal? (ref (aref elements i) tagName) "CANVAS")
+                                (centralizeCanvas (aref elements i)))))))
+  )
+
+;;;
+
 (define (window-size)
   (jslet/result ()
     (result window.innerWidth window.innerHeight)))
@@ -1422,6 +1437,8 @@
         (set! canvas.style.visibility "hidden"))
     canvas))
 
+(define-jsvar *working-images* (make Set))
+
 (define (make-canvas width height :key (z 0) (visible? #t))
   (let* ((canvas (make <canvas> :width width :height height :z z :visible? visible?))
          (canvas-id (slot-ref canvas 'id)))
@@ -1448,16 +1465,16 @@
          z::u32
          visible?::boolean)
       (let ((img (make Image)))
-        (workingImages.add img)
+        (*working-images*.add img)
         (set! img.src url)
         (set! img.onload (lambda ()
                            (let* ((canvas (%make-canvas canvas-id img.width img.height z visible?))
                                   (ctx (canvas.getContext "2d")))
                              (ctx.drawImage img 0 0)
-                             (workingImages.delete img)
+                             (*working-images*.delete img)
                              (result canvas.width canvas.height))))
         (set! img.onerror (lambda ()
-                            (workingImages.delete img)
+                            (*working-images*.delete img)
                             (result-error "Load image failed.")))))))
 
 (define (set-canvas-visible! canvas visible?)
@@ -2056,6 +2073,8 @@
   (jslet/result (image::proxy)
     (result-u8array image.data)))
 
+;; (define-jsvar *listen-state-table* (object))
+
 (define (set-window-event-handler! event-type proc)
   (let ((event-name (symbol->string event-type))
         (enable? (if proc #t #f)))
@@ -2079,24 +2098,24 @@
                          (lambda (e)
                            (notifyEvent event-id (createMouseEvent canvas e)))
                          null)))
-        (cond
-          ((equal? event-name "click")
+        (case event-name
+          (("click")
            (set! canvas.onclick handler))
-          ((equal? event-name "dblclick")
+          (("dblclick")
            (set! canvas.ondblclick handler))
-          ((equal? event-name "contextmenu")
+          (("contextmenu")
            (set! canvas.oncontextmenu handler))
-          ((equal? event-name "mousedown")
+          (("mousedown")
            (set! canvas.onmousedown handler))
-          ((equal? event-name "mouseup")
+          (("mouseup")
            (set! canvas.onmouseup handler))
-          ((equal? event-name "mouseover")
+          (("mouseover")
            (set! canvas.onmouseover handler))
-          ((equal? event-name "mouseout")
+          (("mouseout")
            (set! canvas.onmouseout handler))
-          ((equal? event-name "mousemove")
+          (("mousemove")
            (set! canvas.onmousemove handler))
-          ((equal? event-name "wheel")
+          (("wheel")
            (set! canvas.onwheel handler))
           (else
            (throw (+ "Unsupported event: " event-name))))))
