@@ -35,12 +35,14 @@
   (use control.thread-pool)
   (use data.queue)
   (use file.util)
+  (use gauche.config)
   (use gauche.hook)
   (use gauche.logger)
   (use gauche.net)
   (use gauche.parameter)
   (use gauche.partcont)
   (use gauche.process)
+  (use gauche.regexp)
   (use gauche.selector)
   (use gauche.sequence)
   (use gauche.threads)
@@ -56,6 +58,7 @@
   (use srfi-19)
   (use srfi-27)
   (use srfi-42)
+  (use srfi-98)
   (use text.html-lite)
   (use text.tree)
   (use util.match)
@@ -2309,11 +2312,31 @@
 (define (set-graviton-open-dev-tools! flag)
   (set! *graviton-open-dev-tools?* flag))
 
+(define (wsl?)
+  (if (get-environment-variable "WSLENV")
+      #t
+      #f))
+
+(define (player-executable-path)
+  (let1 platform (gauche-config "--arch")
+    (match-let1 (arch os) (string-split platform "-" 1)
+      (cond
+        ((and (#/x86_64/ arch)
+              (#/linux/ os))
+         (if (wsl?)
+             "./player/graviton-player-win32-x64/graviton-player.exe"
+             "./player/graviton-player-linux-x64/graviton-player"))
+        ((and (#/x86_64/ arch)
+              (#/mingw/ os))
+         "./player/graviton-player-win32-x64/graviton-player.exe")
+        (else
+         (errorf "Unsupported platform: ~a" platform))))))
+
 (define (invoke-player sock)
   (let* ((addr (socket-address sock))
          (config `((width . ,(list-ref *graviton-player-window-size* 0))
                    (height . ,(list-ref *graviton-player-window-size* 1))
-                   (url . ,(format "http://~a" (sockaddr-name addr)))
+                   (url . ,(format "http://localhost:~a/" (sockaddr-port addr)))
                    (background-color . ,*background-color*)
                    (open-dev-tools . ,*graviton-open-dev-tools?*)))
          (config-file (receive (out filename) (sys-mkstemp (build-path (temporary-directory) "grvcfg"))
@@ -2321,8 +2344,15 @@
                         (close-port out)
                         (if (absolute-path? filename)
                             filename
-                            (simplify-path (build-path (current-directory) filename))))))
-    (run-process `("npx" "electron" "." "--config" ,config-file) :directory "./player")))
+                            (simplify-path (build-path (current-directory) filename)))))
+         (player-path (player-executable-path)))
+    (when (wsl?)
+      (set! config-file (process-output->string `("wslpath" "-w" ,config-file))))
+    (cond
+      ((file-exists? player-path)
+       (run-process `(,player-path "--config" ,config-file)))
+      (else
+       (run-process `("npx" "electron" "." "--config" ,config-file) :directory "./player/src")))))
 
 (define (grv-main thunk)
   (set! *initial-thunk* thunk)

@@ -2,7 +2,9 @@
 *.log
 .envrc
 VERSION
-player/node_modules
+player/graviton-player-linux-x64/
+player/graviton-player-win32-x64/
+player/src/node_modules
 src/*-lib.c
 src/*.o
 src/*.sci

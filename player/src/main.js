@@ -26,6 +26,7 @@ function createWindow() {
     win = new BrowserWindow({
         width: config['width'],
         height: config['height'],
+        useContentSize: true,
         backgroundColor: config['background-color'],
         resizable: false,
         show: windowInitiallyShown,
