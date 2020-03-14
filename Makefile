@@ -1,11 +1,9 @@
-SCRIPT_GENERATED = src/enum2sym.scm
+.PHONY: all clean maintainer-clean
 
 all:
-	(cd src; make)
+	@echo "Not yet implemented."
 
 clean:
-	(cd src; make clean)
+	@echo "Not yet implemented."
 
 maintainer-clean: clean
-	rm -f $(SCRIPT_GENERATED)
-	(cd src; make maintainer-clean)
