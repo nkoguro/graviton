@@ -4,7 +4,7 @@
 (use gauche.record)
 (use gauche.threads)
 (use gauche.time)
-(use graviton2)
+(use graviton)
 (use math.const)
 (use srfi-27)
 (use srfi-42)

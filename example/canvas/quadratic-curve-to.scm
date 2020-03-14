@@ -1,4 +1,4 @@
-(use graviton2)
+(use graviton)
 (use math.const)
 
 (define (main args)

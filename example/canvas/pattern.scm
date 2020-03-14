@@ -1,4 +1,4 @@
-(use graviton2)
+(use graviton)
 
 (define (main args)
   (set-graviton-open-dev-tools! #f)

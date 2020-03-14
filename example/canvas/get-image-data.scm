@@ -1,6 +1,6 @@
 (use gauche.logger)
 (use gauche.uvector)
-(use graviton2)
+(use graviton)
 (use math.const)
 
 (define (main args)

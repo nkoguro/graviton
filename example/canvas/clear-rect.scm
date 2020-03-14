@@ -1,4 +1,4 @@
-(use graviton2)
+(use graviton)
 
 (define-syntax close-stroke-begin
   (syntax-rules ()

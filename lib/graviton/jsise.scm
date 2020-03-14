@@ -30,7 +30,7 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
-(define-module graviton2.jsise
+(define-module graviton.jsise
   (use gauche.collection)
   (use gauche.threads)
   (use rfc.json)
@@ -48,7 +48,7 @@
           js-module-list
           register-js-stmt!))
 
-(select-module graviton2.jsise)
+(select-module graviton.jsise)
 
 (define env-counter-atom (atom -1))
 

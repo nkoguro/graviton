@@ -1,5 +1,5 @@
 (use gauche.logger)
-(use graviton2)
+(use graviton)
 (use math.const)
 (use util.list)
 

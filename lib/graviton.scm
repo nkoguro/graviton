@@ -1,5 +1,5 @@
 ;;;
-;;; graviton2.scm - Graviton
+;;; graviton.scm - Graviton
 ;;;
 ;;;   Copyright (c) 2019 KOGURO, Naoki (naoki@koguro.net)
 ;;;   All rights reserved.
@@ -30,7 +30,7 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
-(define-module graviton2
+(define-module graviton
   (use binary.io)
   (use control.thread-pool)
   (use data.queue)
@@ -48,7 +48,7 @@
   (use gauche.threads)
   (use gauche.time)
   (use gauche.uvector)
-  (use graviton2.jsise)
+  (use graviton.jsise)
   (use makiki)
   (use rfc.base64)
   (use rfc.json)
@@ -178,7 +178,7 @@
           play-pcm
           ))
 
-(select-module graviton2)
+(select-module graviton)
 
 ;;;
 
