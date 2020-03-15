@@ -25,7 +25,6 @@ function connectServer() {
         try {
             if (typeof event.data === 'string') {
                 let params =JSON.parse(event.data);
-                console.log('received: ' + params);
                 dispatchJsonMessage(params);
             } else {
                 dispatchBinaryMessage(event.data);
@@ -199,7 +198,6 @@ function notifyBinaryData(futureId, data) {
     idData[0] = futureId;
     sendData.set(idData, 0);
     sendData.set(data, 4);
-    console.log('sendData: ' + sendData);
     webSocket.send(sendData.buffer);
     webSocket.send(JSON.stringify(["notifyBinaryResult", futureId]));
 }
@@ -306,11 +304,9 @@ function centralizeCanvas(canvas) {
 }
 
 function obj2style(ctx, style) {
-    console.log(style);
     if (typeof style === 'string') {
         return style;
     } else if (typeof style === 'object') {
-        console.log('object style');
         switch (style['type']) {
         case 'linear-gradient':
             let linearGradient = ctx.createLinearGradient(style['x0'], style['y0'], style['x1'], style['y1']);
@@ -346,27 +342,6 @@ function obj2style(ctx, style) {
 /**
  * Window handler
  */
-
-// (
-//     window.onload = (() => {
-//         console.log("onload");
-//         return console.log(document.readyState);
-//     })
-// )
-
-// window.onload = () => {
-//     console.log("onload");
-//     console.log(document.readyState);
-// };
-
-// window.onresize = (e) => {
-//     let elements = document.getElementById('_on').children;
-//     for (var i = 0; i < elements.length; i++) {
-//         if (elements[i].tagName === 'CANVAS') {
-//             centralizeCanvas(elements[i]);
-//         }
-//     }
-// };
 
 function initializeWindowEvents() {
     ['keydown', 'keyup', 'keypress'].forEach((eventName) => {
