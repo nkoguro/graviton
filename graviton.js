@@ -343,6 +343,12 @@ function obj2style(ctx, style) {
  * Window handler
  */
 
+window.addEventListener('load', () => {
+    initializeFunctions.forEach((func) => {
+        func();
+    });
+});
+
 function initializeWindowEvents() {
     ['keydown', 'keyup', 'keypress'].forEach((eventName) => {
         window.addEventListener(eventName, makeEventHandler(eventName));
@@ -363,6 +369,15 @@ function initializeWindowEvents() {
     }
     eventNames.forEach((eventName) => {
         window.addEventListener(eventName, resumeAudioContext);
+    });
+
+    window.addEventListener('resize', (event) => {
+        let elements = document.getElementById("_on").children;
+        for (let i = 0; i < elements.length; ++i) {
+            if (elements[i].tagName === "CANVAS") {
+                centralizeCanvas(elements[i]);
+            }
+        }
     });
 }
 

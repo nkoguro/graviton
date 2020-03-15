@@ -1276,21 +1276,6 @@
 
 ;;;
 
-(inline-js
-  (set! window.onload (lambda ()
-                        (for-each (lambda (func)
-                                    (func))
-                                  initializeFunctions)))
-
-  (set! window.onresize (lambda (e)
-                          (let1 elements (ref (document.getElementById "_on") children)
-                            (dotimes (i elements.length)
-                              (when (equal? (ref (aref elements i) tagName) "CANVAS")
-                                (centralizeCanvas (aref elements i)))))))
-  )
-
-;;;
-
 (define (window-size)
   (jslet/result ()
     (result window.innerWidth window.innerHeight)))
