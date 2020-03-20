@@ -35,7 +35,6 @@
   (use control.thread-pool)
   (use data.queue)
   (use file.util)
-  (use gauche.config)
   (use gauche.hook)
   (use gauche.logger)
   (use gauche.net)
@@ -48,6 +47,7 @@
   (use gauche.threads)
   (use gauche.time)
   (use gauche.uvector)
+  (use graviton.config)
   (use graviton.jsise)
   (use makiki)
   (use rfc.base64)
@@ -179,17 +179,6 @@
           ))
 
 (select-module graviton)
-
-;;;
-
-(define is-installed?
-  (and (current-load-path)
-       (equal? (gauche-site-library-directory) (sys-dirname (current-load-path)))))
-
-(define *graviton-js-pathname* (build-path (if is-installed?
-                                               (gauche-architecture-directory)
-                                               ".")
-                                           "graviton.js"))
 
 ;;;
 
@@ -614,6 +603,18 @@
 
 ;;;
 
+(define *import-js-list* '())
+(define (import-js js-pathname)
+  (let1 js-name (string-append "/ijs/" (digest-hexify (sha1-digest-string js-pathname)))
+    (add-http-handler! js-name (lambda (req app)
+                                 (respond/ok req `(file ,js-pathname) :content-type "text/javascript")))
+    (push! *import-js-list* js-name)))
+
+(define *graviton-js-dir* (build-path (graviton-config 'graviton-data-dir) "js"))
+(import-js (build-path *graviton-js-dir* "graviton.js"))
+
+;;;
+
 (define *title* #f)
 
 (define (set-graviton-title! title)
@@ -638,16 +639,15 @@
                           (html:title title))
                          (apply html:body :style (format "background-color: ~a" *background-color*)
                                 (html:div :id "_on")
-                                (html:script :src "graviton.js")
-                                (map (lambda (js-mod)
-                                       (html:script :src (format "js/~a" js-mod)))
-                                     (js-module-list)))))))))
+                                (append
+                                  (map (lambda (js-name)
+                                         (html:script :src js-name))
+                                       (reverse *import-js-list*))
+                                  (map (lambda (js-mod)
+                                         (html:script :src (format "/js/~a" js-mod)))
+                                       (js-module-list))))))))))
 
-(define-http-handler "/graviton.js"
-  (lambda (req app)
-    (respond/ok req `(file ,*graviton-js-pathname*))))
-
-(define-http-handler #/js\/(.*)/
+(define-http-handler #/\/js\/(.*)/
   (lambda (req app)
     (respond/ok req
       (get-js-code ((slot-ref req 'path-rxmatch) 1))
@@ -2297,26 +2297,6 @@
 (define (set-graviton-open-dev-tools! flag)
   (set! *graviton-open-dev-tools?* flag))
 
-(define (wsl?)
-  (if (get-environment-variable "WSLENV")
-      #t
-      #f))
-
-(define (player-executable-path)
-  (let1 platform (gauche-config "--arch")
-    (match-let1 (arch os) (string-split platform "-" 1)
-      (cond
-        ((and (#/x86_64/ arch)
-              (#/linux/ os))
-         (if (wsl?)
-             "./player/graviton-player-win32-x64/graviton-player.exe"
-             "./player/graviton-player-linux-x64/graviton-player"))
-        ((and (#/x86_64/ arch)
-              (#/mingw/ os))
-         "./player/graviton-player-win32-x64/graviton-player.exe")
-        (else
-         (errorf "Unsupported platform: ~a" platform))))))
-
 (define (invoke-player sock)
   (let* ((addr (socket-address sock))
          (config `((width . ,(list-ref *graviton-player-window-size* 0))
@@ -2330,8 +2310,8 @@
                         (if (absolute-path? filename)
                             filename
                             (simplify-path (build-path (current-directory) filename)))))
-         (player-path (player-executable-path)))
-    (when (wsl?)
+         (player-path (graviton-config 'graviton-player-path)))
+    (when (graviton-config 'wsl?)
       (set! config-file (process-output->string `("wslpath" "-w" ,config-file))))
     (cond
       ((file-exists? player-path)

@@ -40,5 +40,5 @@
   ; :homepage "http://example.com/foo/"
 
   ;; Repository URL, e.g. github
-  ; :repository "http://example.com/foo.git"
+  :repository "https://github.com/nkoguro/graviton.git"
   )

@@ -2,7 +2,10 @@
 ;; Configuring graviton
 ;; Run ./configure (or gosh ./configure) to generate Makefiles.
 
+(use gauche.config)
 (use gauche.configure)
+(use srfi-98)
+(use util.match)
 
 ;; Here you can define handlers of configure arguments by cf-arg-enable
 ;; and cf-arg-with.  Note that --with-local is handled implicitly if you use
@@ -15,8 +18,43 @@
 
 ;; Here you can add feature tests and other cf-define's.
 
+(define wsl?
+  (if (get-environment-variable "WSLENV")
+      #t
+      #f))
+
+(cf-subst 'WSL (if wsl? "true" "false"))
+
+(cf-subst 'GRAVITON_PLAYER_ARCH
+          (let1 platform (gauche-config "--arch")
+            (match-let1 (arch os) (string-split platform "-" 1)
+              (cond
+                (wsl?
+                 "win32-x64")
+                ((and (#/x86_64/i arch)
+                      (#/linux/i os))
+                 "linux-x64")
+                ((and (#/x86_64/i arch)
+                      (#/mingw/i os))
+                 "win32-x64")
+                ((and (#/x86/i arch)
+                      (#/mingw/i os))
+                 "win32-ia32")
+                ((and (#/x86_64/i arch)
+                      (#/darwin|macos/i os))
+                 "darwin-x64")
+                (else
+                 "")))))
+
+(cf-subst 'GRAVITON_PLAYER_EXECUTABLE
+          (cond
+            (wsl?
+             "graviton-player.exe")
+            (else
+             (string-join "graviton-player" (gauche-config 'executable-suffix) "."))))
+
 ;; Output
-(cf-output-default)
+(cf-output-default "lib/graviton/config-alist.scm")
 
 ;; Local variables:
 ;; mode: scheme

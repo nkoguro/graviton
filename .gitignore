@@ -1,7 +1,9 @@
 *.gpd
 *.log
 .envrc
+Makefile
 VERSION
+lib/graviton/config-alist.scm
 player/graviton-player-linux-x64/
 player/graviton-player-win32-x64/
 player/src/node_modules
