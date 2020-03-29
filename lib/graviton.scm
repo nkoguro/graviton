@@ -80,6 +80,8 @@
           await-canvas-event
           asleep
 
+          command-buffering?
+          set-command-buffering?
           flush-commands
           app-close
           window-size
@@ -300,6 +302,7 @@
   (let ((lock (slot-ref future 'lock))
         (result-values #f)
         (result-exception #f))
+    (flush-commands)
     (mutex-lock! lock)
     (cond
       ((slot-ref future 'result-values)
@@ -775,8 +778,7 @@
    (json-pair-buffer :init-value '())
    (json-next-id-generator :init-form (make-id-generator #xffffffff))
    (proxy-object-id-generator :init-form (make-id-generator #xffffffff))
-   (refresh-cycle-second :init-value (/. 1 30))
-   (next-update-time :init-form (current-time))))
+   (command-buffering? :init-value #f)))
 
 (define-class <application-context> ()
   ((main-thread-pool :init-keyword :main-thread-pool)
@@ -816,20 +818,15 @@
          (parameterize ((current-send-context ctx))
            (proc ctx)))))))
 
-(define (refresh-cycle-second)
+(define (command-buffering?)
   (with-send-context
     (lambda (ctx)
-      (slot-ref ctx 'refresh-cycle-second))))
+      (slot-ref ctx 'command-buffering?))))
 
-(define (next-update-second)
+(define (set-command-buffering? val)
   (with-send-context
     (lambda (ctx)
-      (time->seconds (slot-ref ctx 'next-update-time)))))
-
-(define (set-next-update-time! next-update-time)
-  (with-send-context
-    (lambda (ctx)
-      (slot-set! ctx 'next-update-time next-update-time))))
+      (slot-set! ctx 'command-buffering? val))))
 
 (define (proxy-object-next-id)
   (with-send-context (lambda (ctx)
@@ -906,21 +903,8 @@
                                                           :close-handler close-websocket)))
                              '(r))
 
-              (let1 now (time->seconds (current-time))
-                (let loop ((now now)
-                           (next-update-sec (+ now (refresh-cycle-second))))
-                  (set-next-update-time! (make-time-from-second time-utc next-update-sec))
-                  (cond
-                    ((port-closed? in)
-                     #f)
-                    ((<= next-update-sec now)
-                     (flush-commands)
-                     (invoke-event-handler 'update)
-                     (let1 now (time->seconds (current-time))
-                       (loop now (+ now (refresh-cycle-second)))))
-                    (else
-                     (selector-select sel (* (- next-update-sec now) 1000))
-                     (loop (time->seconds (current-time)) next-update-sec)))))
+              (while (not (port-closed? in))
+                (selector-select sel))
 
               (for-each (lambda (pool)
                           (terminate-all! pool :cancel-queued-jobs #t))
@@ -1099,7 +1083,9 @@
                   (unless (hash-table-contains? *enum-table* enum-name)
                     (errorf "Invalid type: ~a" type))
                   (write-u8 (enum-value enum-name arg) out 'little-endian))))
-             types args)))))
+             types args))
+      (unless (command-buffering?)
+        (flush-commands)))))
 
 (define (flush-commands)
   (with-send-context
@@ -2111,20 +2097,26 @@
 
 ;;;
 
-(define (loop-frame proc)
-  (let ((exit? #f))
+(define (loop-frame proc :key (fps 30))
+  (let ((exit? #f)
+        (frame-sec (/. 1 fps))
+        (current-buffering-mode (command-buffering?))
+        (prev-sec 0))
     (define (break)
       (set! exit? #t))
-    (while (not exit?)
-      (let1 start-sec (time->seconds (current-time))
-        (proc break)
-        (let* ((frame-sec (refresh-cycle-second))
-               (elapse-sec (- (time->seconds (current-time)) start-sec)))
-          (when (< frame-sec elapse-sec)
-            (log-debug "Frame dropped. renderer procedure consumes ~a sec. It exceeds one frame sec: ~a"
-                       elapse-sec
-                       frame-sec))
-          (await-window-event 'update))))))
+    (set-command-buffering? #t)
+    (unwind-protect
+        (while (not exit?)
+          (let1 start-sec (time->seconds (current-time))
+            (proc break)
+            (flush-commands)
+            (let* ((elapse-sec (- (time->seconds (current-time)) start-sec)))
+              (when (< frame-sec elapse-sec)
+                (log-debug "Frame dropped. renderer procedure consumes ~a sec. It exceeds one frame sec: ~a"
+                           elapse-sec
+                           frame-sec))
+              (asleep (max 0 (- frame-sec elapse-sec))))))
+      (set-command-buffering? current-buffering-mode))))
 
 ;;;
 
