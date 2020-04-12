@@ -35,7 +35,8 @@
   (use gauche.regexp)
   (use util.list)
 
-  (export graviton-config))
+  (export graviton-config
+          graviton-js-directory))
 
 (select-module graviton.config)
 
@@ -67,3 +68,5 @@
     (else
      (replace-param (assoc-ref *config-alist* param)))))
 
+(define (graviton-js-directory)
+  (build-path (graviton-config 'graviton-data-dir) "js"))

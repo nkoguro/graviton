@@ -1,4 +1,5 @@
 (use graviton)
+(use graviton.audio)
 
 (define (main args)
   (grv-begin

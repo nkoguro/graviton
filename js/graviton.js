@@ -243,18 +243,6 @@ function dispatchBinaryMessage(abuf) {
 
 let listenStateTable = {};
 
-let audioChannels = [];
-
-function initializeAudioChannels() {
-    for (let i = 0; i < 16; ++i) {
-        audioChannels[i] = {
-            lastPlaySec: 0
-        };
-    }
-}
-
-registerInitializer(initializeAudioChannels);
-
 /**
  * Graviton text commands
  */

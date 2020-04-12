@@ -1,5 +1,6 @@
 (use gauche.logger)
 (use graviton)
+(use graviton.audio)
 
 (define (main args)
   (grv-begin
