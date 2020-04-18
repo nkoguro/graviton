@@ -1,5 +1,6 @@
 (use gauche.logger)
 (use graviton)
+(use graviton.canvas)
 (use math.const)
 (use util.list)
 

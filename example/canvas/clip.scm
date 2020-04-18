@@ -1,8 +1,12 @@
 (use graviton)
+(use graviton.canvas)
 (use math.const)
 
 (define (main args)
   (grv-begin
+    (set-window-event-handler! 'keyup (lambda (event)
+                                        (when (equal? (slot-ref event 'code) "Escape")
+                                          (app-close))))
     (let1 canvas (make-canvas 300 150)
       (begin-path)
       (arc 100 75 50 0 (* 2 pi))

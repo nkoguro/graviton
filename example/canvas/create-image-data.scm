@@ -1,10 +1,13 @@
 (use gauche.uvector)
 (use graviton)
+(use graviton.canvas)
 (use math.const)
 
 (define (main args)
-  ;; (set-graviton-port! 8080)
   (grv-begin
+    (set-window-event-handler! 'keyup (lambda (event)
+                                        (when (equal? (slot-ref event 'code) "Escape")
+                                          (app-close))))
     (let1 canvas (make-canvas 300 150)
       (let ((image (create-image-data 100 100))
             (data (make-u8vector (* 100 100 4))))

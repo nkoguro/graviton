@@ -5,6 +5,7 @@
 (use gauche.threads)
 (use gauche.time)
 (use graviton)
+(use graviton.canvas)
 (use math.const)
 (use srfi-27)
 (use srfi-42)
@@ -15,6 +16,26 @@
 (define *canvas-width* 1024)
 (define *canvas-height* 768)
 (define *tick* (/. 1 30))
+
+(define-macro (trace name)
+  (let ((args (gensym))
+        (start-time (gensym))
+        (end-time (gensym))
+        (filename (format "~a.perf.csv" name))
+        (out (gensym))
+        (proc (global-variable-ref (current-module) name)))
+    (sys-unlink filename)
+    `(define ,name (lambda ,args
+                     (profiler-start)
+                     (unwind-protect
+                         (let ((,start-time (time->seconds (current-time))))
+                           (apply ,proc ,args)
+                           (let ((,end-time (time->seconds (current-time))))
+                             (call-with-output-file ,filename
+                               (lambda (,out)
+                                 (format ,out "~a,~a~%" ,start-time (- ,end-time ,start-time)))
+                               :if-exists :append)))
+                       (profiler-stop))))))
 
 (define-record-type ball
   #t #t
@@ -68,6 +89,14 @@
                            *sprite-height*))
             balls))
 
+(define (update-frame canvas sprite balls)
+  (draw-balls sprite balls)
+  (update-balls! balls))
+
+;; (trace update-frame)
+;; (trace draw-balls)
+;; (trace update-balls!)
+
 (define (main args)
   ;; (set-graviton-open-dev-tools! #t)
   ;; (set-graviton-use-player! #f)
@@ -77,6 +106,7 @@
     (grv-begin
       (set-window-event-handler! 'keyup (lambda (event)
                                           (when (equal? (slot-ref event 'code) "Escape")
+                                            (profiler-show)
                                             (app-close))))
       (let ((sprite (make-canvas (* *sprite-width* *num-patterns*) *sprite-height* :visible? #f))
             (canvas (make-canvas *canvas-width* *canvas-height*))
@@ -87,9 +117,12 @@
                                        (- (* (random-real) 400) 200)
                                        (- (* (random-real) 400) 200)))))
         (prepare-ball-images sprite *sprite-width* *sprite-height* *num-patterns*)
+        (parameterize ((current-canvas canvas))
         (loop-frame
           (lambda (break)
-            (parameterize ((current-canvas canvas))
-              (draw-balls sprite balls)
-              (update-balls! balls)))))))
+            (update-frame canvas sprite balls)
+            ;; (parameterize ((current-canvas canvas))
+            ;;   (draw-balls sprite balls)
+            ;;   (update-balls! balls))
+            ))))))
   0)
