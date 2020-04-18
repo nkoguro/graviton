@@ -6,7 +6,6 @@ function registerInitializer(func) {
     initializeFunctions.push(func);
 }
 
-let audioContext = new AudioContext();
 let webSocket;
 
 function connectServer() {

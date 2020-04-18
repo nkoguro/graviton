@@ -1,3 +1,4 @@
+let audioContext = new AudioContext();
 let audioChannels = [];
 
 function initAudioChannels() {
