@@ -286,7 +286,7 @@
                          (slot-set! canvas 'height h)
                          canvas)
         (canvas-id::u32
-         url::json
+         url::string
          z::u32
          visible?::boolean)
       (let ((img (make Image)))
@@ -333,7 +333,7 @@
   (set! (~ (current-canvas) 'context2d 'font) font)
   (let ((canvas (current-canvas)))
     (jslet (canvas::proxy
-            font::json)
+            font::string)
       (set! (ref (canvas.getContext "2d") font) font))))
 
 (define (current-global-alpha)
@@ -481,7 +481,7 @@
   (set! (~ (current-canvas) 'context2d 'shadow-color) color)
   (let ((canvas (current-canvas)))
     (jslet (canvas::proxy
-            color::json)
+            color::string)
       (set! (ref (canvas.getContext "2d") shadowColor) color))))
 
 (define (current-shadow-offset-x)
@@ -672,7 +672,7 @@
 (define (fill-text text x y :optional (max-width 0))
   (let ((canvas (current-canvas)))
     (jslet (canvas::proxy
-            text::json
+            text::string
             x::s32
             y::s32
             max-width::s32)
@@ -724,7 +724,7 @@
     (jslet/result:then (lambda (width)
                          (make <text-metrics> :width width))
         (canvas::proxy
-         text::json)
+         text::string)
       (let ((text-metrics ((ref (canvas.getContext "2d") measureText) text)))
         (result text-metrics.width)))))
 
@@ -827,7 +827,7 @@
 (define (stroke-text text x y :optional (max-width 0))
   (let ((canvas (current-canvas)))
     (jslet (canvas::proxy
-            text::json
+            text::string
             x::s32
             y::s32
             max-width::s32)

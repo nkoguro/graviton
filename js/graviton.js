@@ -23,8 +23,7 @@ function connectServer() {
     webSocket.onmessage = (event) => {
         try {
             if (typeof event.data === 'string') {
-                let params =JSON.parse(event.data);
-                dispatchJsonMessage(params);
+                notifyException(false, "Can't handle string data: " + event.data);
             } else {
                 dispatchBinaryMessage(event.data);
             }
@@ -66,6 +65,7 @@ class DataStream {
     constructor(buf) {
         this.dataView = new DataView(buf);
         this.position = 0;
+        this.textDecoder = new TextDecoder('utf-8');
     }
 
     hasData() {
@@ -147,10 +147,14 @@ class DataStream {
         return v !== 0;
     }
 
+    getString() {
+        let data = this.getUint8Array();
+        return this.textDecoder.decode(data);
+    }
+
     getJson() {
-        let index = this.dataView.getUint32(this.position, true);
-        this.position += 4;
-        return fetchJson(index);
+        let str = this.getString();
+        return JSON.parse(str)[0];
     }
 
     getUint8Array() {
@@ -237,34 +241,11 @@ function dispatchBinaryMessage(abuf) {
 
 let listenStateTable = {};
 
-/**
- * Graviton text commands
- */
 
-let commandTable = {};
 
-function initializeTextCommandTable() {
-    commandTable['registerArgs'] = registerArgs;
-}
 
-registerInitializer(initializeTextCommandTable);
 
-function dispatchJsonMessage(params) {
-    let command = params[0];
-    let args = params.slice(1);
-    let func = commandTable[command];
-    if (func) {
-        func.apply(null, args);
-    } else {
-        console.log('Invalid parameters: ' + params);
-    }
-}
 
-function registerArgs(pairs) {
-    pairs.forEach((pair) => {
-        registerJson(pair[0], pair[1]);
-    });
-}
 
 /**
  * Window handler

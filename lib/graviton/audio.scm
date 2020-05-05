@@ -65,7 +65,7 @@
                          (slot-set! node 'duration duration)
                          node)
         (node-id::u32
-         url::json)
+         url::string)
       (let ((audio (make Audio url)))
         (set! audio.onloadedmetadata (lambda ()
                                        (let ((source-node (audioContext.createMediaElementSource audio)))
@@ -100,7 +100,7 @@
                          (slot-set! pcm 'number-of-channels num-of-channels)
                          pcm)
         (object-id::u32
-         url::json)
+         url::string)
       (let ((req (make XMLHttpRequest)))
         (req.open "GET" url #t)
         (set! req.responseType "arraybuffer")

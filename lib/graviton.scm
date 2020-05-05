@@ -35,6 +35,8 @@
   (use control.thread-pool)
   (use data.queue)
   (use file.util)
+  (use gauche.charconv)
+  (use gauche.collection)
   (use gauche.hook)
   (use gauche.logger)
   (use gauche.net)
@@ -700,8 +702,6 @@
 (define-class <send-context> ()
   ((websocket-output-port :init-keyword :websocket-output-port)
    (buffer-output-port :init-keyword :buffer-output-port)
-   (json-pair-buffer :init-value '())
-   (json-next-id-generator :init-form (make-id-generator #xffffffff))
    (proxy-object-id-generator :init-form (make-id-generator #xffffffff))
    (command-buffering? :init-value #f)))
 
@@ -756,10 +756,6 @@
 (define (proxy-object-next-id)
   (with-send-context (lambda (ctx)
                        ((slot-ref ctx 'proxy-object-id-generator)))))
-
-(define (json-next-id)
-  (with-send-context (lambda (ctx)
-                       ((slot-ref ctx 'json-next-id-generator)))))
 
 (define (with-future-table proc)
   (atomic (slot-ref (application-context) 'future-table-atom) proc))
@@ -1014,20 +1010,20 @@
                   (write-uvector arg out 0 -1 'little-endian))
                  ('boolean
                    (write-u8 (if arg 1 0) out 'little-endian))
-                 ('json
-                  (let1 id (json-next-id)
-                    (push! (slot-ref ctx 'json-pair-buffer) (vector id arg))
-                    (write-u32 id out 'little-endian)))
                  ('future
                   (let1 id (register-future! arg)
                     (write-u32 id out 'little-endian)))
                  ('proxy
                   (write-u32 (proxy-object-id arg) out 'little-endian))
-                 (('resource content-type)
-                  (let* ((url (register-resource! content-type arg))
-                         (id (json-next-id)))
-                    (push! (slot-ref ctx 'json-pair-buffer) (vector id url))
-                    (write-u32 id out 'little-endian)))
+                 ('string
+                   (let1 data (ces-convert-to <u8vector> arg 'utf-8)
+                     (write-u32 (u8vector-length data) out 'little-endian)
+                     (write-uvector data out )))
+                 ('json
+                  ;; Make a vector to make JSON to satisfy RFC4627.
+                  (let1 data (ces-convert-to <u8vector> (construct-json-string (vector arg)) 'utf-8)
+                    (write-u32 (u8vector-length data) out 'little-endian)
+                    (write-uvector data out)))
                  ((? symbol? enum-name)
                   (unless (hash-table-contains? *enum-table* enum-name)
                     (errorf "Invalid type: ~a" type))
@@ -1039,13 +1035,9 @@
 (define (flush-commands)
   (with-send-context
     (lambda (ctx)
-      (let ((json-pair-buffer (slot-ref ctx 'json-pair-buffer))
-            (output-data (get-output-uvector (slot-ref ctx 'buffer-output-port))))
-        (unless (null? json-pair-buffer)
-          (call-text-command "registerArgs" (list->vector json-pair-buffer)))
+      (let1 output-data (get-output-uvector (slot-ref ctx 'buffer-output-port))
         (unless (= (uvector-length output-data) 0)
           (send-binary-frame (slot-ref ctx 'websocket-output-port) output-data)))
-      (slot-set! ctx 'json-pair-buffer '())
       (slot-set! ctx 'buffer-output-port (open-output-uvector)))))
 
 ;;;
@@ -1103,6 +1095,8 @@
                                                      `((ref ,ds getFloat64Array)))
                                                     ('boolean
                                                       `((ref ,ds getBoolean)))
+                                                    ('string
+                                                      `((ref ,ds getString)))
                                                     ('json
                                                      `((ref ,ds getJson)))
                                                     ('proxy
