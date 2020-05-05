@@ -35,25 +35,20 @@ function connectServer() {
 
 registerInitializer(connectServer);
 
-let jsonTable = {};
 let proxyObjectTable = {};
+let reverseProxyObjectTable = {};
 let enumTable = {};
-
-function registerJson(index, json) {
-    jsonTable[index] = json;
-}
-
-function fetchJson(index) {
-    let json = jsonTable[index];
-    jsonTable[index] = null;
-    return json;
-}
 
 function linkProxyObject(index, obj) {
     proxyObjectTable[index] = obj;
+    reverseProxyObjectTable[obj] = index;
 }
 
 function unlinkProxyObject(index) {
+    let obj = proxyObjectTable[index];
+    if (obj != null) {
+        reverseProxyObjectTable[obj] = null;
+    }
     proxyObjectTable[index] = null;
 }
 
@@ -204,8 +199,8 @@ function notifyException(futureId, exception) {
     webSocket.send(JSON.stringify(["notifyResult", futureId, false, exception.toString()]));
 }
 
-function notifyEvent(eventType, event) {
-    webSocket.send(JSON.stringify(["notifyEvent", eventType, event]));
+function notifyEvent(proxyId, eventType, event) {
+    webSocket.send(JSON.stringify(["notifyEvent", proxyId, eventType, event]));
 }
 
 function startApplication() {
@@ -239,13 +234,45 @@ function dispatchBinaryMessage(abuf) {
     }
 }
 
-let listenStateTable = {};
+/**
+ * Event
+ */
 
+let eventHandlerTable = {};
 
+function extractEventValues(event, props) {
+    let vals = [];
+    props.forEach((propSpec) => {
+        var v = event;
+        propSpec.forEach((key) => {
+            v = v[key];
+        });
+        vals.push(v);
+    });
+    return vals;
+}
 
+function eventHandlerKey(proxyId, eventName) {
+    return `${proxyId}_${eventName}`;
+}
 
+function registerEventHandler(proxyId, eventTarget, eventName, props) {
+    unregisterEventHandler(proxyId, eventTarget, eventName);
+    let handler = (e) => {
+        notifyEvent(proxyId, eventName, extractEventValues(e, props));
+    };
+    eventHandlerTable[eventHandlerKey(proxyId, eventName)] = handler;
+    eventTarget.addEventListener(eventName, handler);
+}
 
-
+function unregisterEventHandler(proxyId, eventTarget, eventName) {
+    let key = eventHandlerKey(proxyId, eventName);
+    let handler = eventHandlerTable[key];
+    if (handler) {
+        eventTarget.removeEventListener(eventName, handler);
+    }
+    eventHandlerTable[key] = null;
+}
 
 /**
  * Window handler
@@ -256,91 +283,3 @@ window.addEventListener('load', () => {
         func();
     });
 });
-
-function initializeWindowEvents() {
-    ['keydown', 'keyup', 'keypress'].forEach((eventName) => {
-        window.addEventListener(eventName, makeEventHandler(eventName));
-    });
-}
-
-registerInitializer(initializeWindowEvents);
-
-function createMouseEvent(canvas, e) {
-    switch (e.toString()) {
-    case '[object MouseEvent]':
-        return {
-            'type': 'MouseEvent',
-            'altKey': e.altKey,
-            'button': e.button,
-            'buttons': e.buttons,
-            'clientX': e.clientX,
-            'clientY': e.clientY,
-            'ctrlKey': e.ctrlKey,
-            'metaKey': e.metaKey,
-            'movementX': e.movementX,
-            'movementY': e.movementY,
-            'offsetX': e.offsetX,
-            'offsetY': e.offsetY,
-            'screenX': e.screenX,
-            'screenY': e.screenY,
-            'shiftKey': e.shiftKey,
-            'canvasX': Math.floor(canvas.width * e.offsetX / canvas.clientWidth),
-            'canvasY': Math.floor(canvas.height * e.offsetY / canvas.clientHeight)
-        };
-    case '[object WheelEvent]':
-        return {
-            'type': 'WheelEvent',
-            'altKey': e.altKey,
-            'button': e.button,
-            'buttons': e.buttons,
-            'clientX': e.clientX,
-            'clientY': e.clientY,
-            'ctrlKey': e.ctrlKey,
-            'metaKey': e.metaKey,
-            'movementX': e.movementX,
-            'movementY': e.movementY,
-            'offsetX': e.offsetX,
-            'offsetY': e.offsetY,
-            'screenX': e.screenX,
-            'screenY': e.screenY,
-            'shiftKey': e.shiftKey,
-            'deltaX': e.deltaX,
-            'deltaY': e.deltaY,
-            'deltaZ': e.deltaZ,
-            'deltaMode': e.deltaMode,
-            'canvasX': Math.floor(canvas.width * e.offsetX / canvas.clientWidth),
-            'canvasY': Math.floor(canvas.height * e.offsetY / canvas.clientHeight)
-        };
-    default:
-        throw new Error('Unsupported mouse event: ' + e);
-    }
-}
-
-function createEvent(e) {
-    switch (e.toString()) {
-    case '[object KeyboardEvent]':
-        return {
-            'type': 'KeyboardEvent',
-            'altKey': e.altKey,
-            'code': e.code,
-            'ctrlKey': e.ctrlKey,
-            'isComposing': e.isComposing,
-            'key': e.key,
-            'locale': e.locale,
-            'location': e.location,
-            'metaKey': e.metaKey,
-            'repeat': e.repeat,
-            'shiftKey': e.shiftKey
-        };
-    default:
-        throw new Error('Unsupported event: ' + e);
-    }
-}
-
-function makeEventHandler(eventName) {
-    return (e) => {
-        if (listenStateTable[eventName]) {
-            notifyEvent(eventName, createEvent(e));
-        }
-    };
-}

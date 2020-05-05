@@ -78,8 +78,6 @@
           async-apply-main
           async-main
           await
-          await-window-event
-          await-canvas-event
           asleep
 
           command-buffering?
@@ -88,6 +86,12 @@
           app-close
           window-size
           unlink-proxy-object!
+
+          application-context-slot-atomic-update!
+          application-context-slot-ref
+          application-context-slot-set!
+
+          browser-window
 
           <proxy-object>
           proxy-object-id
@@ -104,9 +108,9 @@
 
           loop-frame
 
+          <jsevent>
           add-event-listener!
-          delete-event-listener!
-          set-window-event-handler!
+          remove-event-listener!
           ))
 
 (select-module graviton)
@@ -141,55 +145,20 @@
   (let1 app-context (application-context)
     (add-job! pool (make-pool-thunk app-context pool thunk error-handler))))
 
-(define (add-event-listener! event-type proc-or-future)
-  (let ((app-context (application-context))
-        (pool (current-thread-pool)))
-    (atomic (slot-ref app-context 'listener-table-atom)
-      (lambda (tbl)
-        (hash-table-push! tbl
-                          event-type
-                          (cond
-                            ((procedure? proc-or-future)
-                             (list pool proc-or-future))
-                            ((is-a? proc-or-future <graviton-future>)
-                             proc-or-future)
-                            (else
-                             (errorf "<procedure> or <graviton-future> required, but got ~s" proc-or-future))))))))
-
-(define (delete-event-listener! event-type proc-or-future)
+(define (invoke-event-handler id event-type event-values)
   (atomic (slot-ref (application-context) 'listener-table-atom)
     (lambda (tbl)
-      (let loop ((vals '())
-                 (rest (hash-table-get tbl event-type)))
-        (match rest
-          (()
-           (hash-table-put! tbl event-type vals))
-          (((_ (? (cut equal? proc-or-future <>) proc)) rest ...)
-           (loop vals rest))
-          (((? (cut equal? proc-or-future <>)) rest ...)
-           (loop vals rest))
-          ((v rest ...)
-           (loop (cons v vals) rest)))))))
-
-(define (invoke-event-handler event-type :rest args)
-  (atomic (slot-ref (application-context) 'listener-table-atom)
-    (lambda (tbl)
-      (let1 vals (hash-table-get tbl event-type '())
-        (hash-table-put! tbl
-                         event-type
-                         (fold (lambda (val new-vals)
-                                 (match val
-                                   ((pool proc)
-                                    (add-job! pool (make-pool-thunk (application-context)
-                                                       pool
-                                                     (lambda ()
-                                                       (apply proc args))))
-                                    (cons val new-vals))
-                                   (future
-                                    (set-future-result-values&exception! future args #f)
-                                    new-vals)))
-                               '()
-                               (hash-table-get tbl event-type '())))))))
+      (let1 args (vector->list event-values)
+        (for-each (match-lambda
+                    ((pool event-class proc)
+                     (let1 args (if event-class
+                                    (list (apply make event-class args))
+                                    args)
+                       (add-job! pool (make-pool-thunk (application-context)
+                                          pool
+                                        (lambda ()
+                                          (apply proc args)))))))
+                  (hash-table-get tbl (cons id event-type) '()))))))
 
 ;;;
 
@@ -260,17 +229,6 @@
        (raise result-exception))
       (else
        (error "[BUG] Invalid future state")))))
-
-(define (await-event event-type :optional (timeout #f) :rest timeout-vals)
-  (let1 future (make <graviton-future>)
-    (add-event-listener! event-type future)
-    (apply await future timeout timeout-vals)))
-
-(define (await-window-event event-type :optional (timeout #f) :rest timeout-vals)
-  (apply await-event event-type timeout timeout-vals))
-
-(define (await-canvas-event canvas event-type :optional (timeout #f) :rest timeout-vals)
-  (apply await-event (canvas-event-type canvas event-type) timeout timeout-vals))
 
 (define (asleep sec)
   (let1 future (make <graviton-future>)
@@ -343,101 +301,8 @@
           (else
            (errorf "[BUG] Invalid future ID: ~a" id)))))))
 
-(define-class <key-event> ()
-  ((alt? :init-keyword :alt?)
-   (code :init-keyword :code)
-   (ctrl? :init-keyword :ctrl?)
-   (composing? :init-keyword :composing?)
-   (key :init-keyword :key)
-   (locale :init-keyword :locale)
-   (location :init-keyword :location)
-   (meta? :init-keyword :meta?)
-   (repeat? :init-keyword :repeat?)
-   (shift? :init-keyword :shift?)))
-
-(define-class <mouse-event> ()
-  ((alt? :init-keyword :alt?)
-   (button :init-keyword :button)
-   (buttons :init-keyword :buttons)
-   (client-x :init-keyword :client-x)
-   (client-y :init-keyword :client-y)
-   (ctrl? :init-keyword :ctrl?)
-   (meta? :init-keyword :meta?)
-   (movement-x :init-keyword :movement-x)
-   (movement-y :init-keyword :movement-y)
-   (offset-x :init-keyword :offset-x)
-   (offset-y :init-keyword :offset-y)
-   (screen-x :init-keyword :screen-x)
-   (screen-y :init-keyword :screen-y)
-   (shift? :init-keyword :shift?)
-   (canvas-x :init-keyword :canvas-x)
-   (canvas-y :init-keyword :canvas-y)))
-
-(define-class <wheel-event> (<mouse-event>)
-  ((delta-x :init-keyword :delta-x)
-   (delta-y :init-keyword :delta-y)
-   (delta-z :init-keyword :delta-z)
-   (delta-mode :init-keyword :delta-mode)))
-
-(define (alist->event alist)
-  (let1 event-type (assoc-ref alist "type")
-    (cond
-      ((equal? event-type "KeyboardEvent")
-       (make <key-event>
-         :alt? (assoc-ref alist "altKey" #f)
-         :code (assoc-ref alist "code" #f)
-         :ctrl? (assoc-ref alist "ctrlKey" #f)
-         :composing? (assoc-ref alist "isComposing" #f)
-         :key (assoc-ref alist "key" #f)
-         :locale (assoc-ref alist "locale" #f)
-         :meta? (assoc-ref alist "metaKey" #f)
-         :repeat? (assoc-ref alist "repeat" #f)
-         :shift? (assoc-ref alist "shiftKey" #f)))
-      ((equal? event-type "MouseEvent")
-       (make <mouse-event>
-         :alt? (assoc-ref alist "altKey" #f)
-         :button (assoc-ref alist "button" #f)
-         :buttons (assoc-ref alist "buttons" #())
-         :client-x (assoc-ref alist "clientX" #f)
-         :client-y (assoc-ref alist "clientY" #f)
-         :ctrl? (assoc-ref alist "ctrlKey" #f)
-         :meta? (assoc-ref alist "metaKey" #f)
-         :movement-x (assoc-ref alist "movementX" #f)
-         :movement-y (assoc-ref alist "movementY" #f)
-         :offset-x (assoc-ref alist "offsetX" #f)
-         :offset-y (assoc-ref alist "offsetY" #f)
-         :screen-x (assoc-ref alist "screenX" #f)
-         :screen-y (assoc-ref alist "screenY" #f)
-         :shift? (assoc-ref alist "shiftKey" #f)
-         :canvas-x (assoc-ref alist "canvasX" #f)
-         :canvas-y (assoc-ref alist "canvasY" #f)))
-      ((equal? event-type "WheelEvent")
-       (make <wheel-event>
-         :alt? (assoc-ref alist "altKey" #f)
-         :button (assoc-ref alist "button" #f)
-         :buttons (assoc-ref alist "buttons" #f)
-         :client-x (assoc-ref alist "clientX" #f)
-         :client-y (assoc-ref alist "clientY" #f)
-         :ctrl? (assoc-ref alist "ctrlKey" #f)
-         :meta? (assoc-ref alist "metaKey" #f)
-         :movement-x (assoc-ref alist "movementX" #f)
-         :movement-y (assoc-ref alist "movementY" #f)
-         :offset-x (assoc-ref alist "offsetX" #f)
-         :offset-y (assoc-ref alist "offsetY" #f)
-         :screen-x (assoc-ref alist "screenX" #f)
-         :screen-y (assoc-ref alist "screenY" #f)
-         :shift? (assoc-ref alist "shiftKey" #f)
-         :canvas-x (assoc-ref alist "canvasX" #f)
-         :canvas-y (assoc-ref alist "canvasY" #f)
-         :delta-x (assoc-ref alist "deltaX" #f)
-         :delta-y (assoc-ref alist "deltaY" #f)
-         :delta-z (assoc-ref alist "deltaZ" #f)
-         :delta-mode (assoc-ref alist "deltaMode" #f)))
-      (else
-       (errorf "Unsupported event: ~a" event-type)))))
-
-(define (notify-client-event event-type-str event-alist)
-  (invoke-event-handler (string->symbol event-type-str) (alist->event event-alist)))
+(define (notify-client-event proxy-id event-type event-values)
+  (invoke-event-handler proxy-id event-type event-values))
 
 ;;;
 
@@ -710,7 +575,8 @@
    (worker-thread-pool :init-keyword :worker-thread-pool)
    (send-context-atom :init-keyword :send-context-atom)
    (listener-table-atom :init-form (atom (make-hash-table 'equal?)))
-   (future-table-atom :init-form (atom (make-hash-table 'equal?) (make-id-generator #xffffffff)))))
+   (future-table-atom :init-form (atom (make-hash-table 'equal?) (make-id-generator #xffffffff)))
+   (slot-table-atom :init-form (atom (make-hash-table 'eq?)))))
 
 (define application-context (make-parameter #f))
 (define current-thread-pool (make-parameter #f))
@@ -730,6 +596,21 @@
 
 (define (worker-thread-pool)
   (slot-ref (application-context) 'worker-thread-pool))
+
+(define (application-context-slot-ref name)
+  (atomic (slot-ref (application-context) 'slot-table-atom)
+    (lambda (tbl)
+      (hash-table-get tbl name #f))))
+
+(define (application-context-slot-atomic-update! name proc)
+  (atomic (slot-ref (application-context) 'slot-table-atom)
+    (lambda (tbl)
+      (let1 val (proc (hash-table-get tbl name #f))
+        (hash-table-put! tbl name val)
+        val))))
+
+(define (application-context-slot-set! name val)
+  (application-context-slot-atomic-update! name (lambda _ val)))
 
 (define current-send-context (make-parameter #f))
 
@@ -1125,7 +1006,6 @@
   ((err)
    `(notifyException %future-id ((ref ,err toString)))))
 
-;; FIXME: Reconsider how to pass current-module.
 (define-macro (jslambda arg-specs :rest body)
   (compile-jslambda (module-name->path (module-name ((with-module gauche.internal vm-current-module)))) arg-specs body))
 
@@ -1206,6 +1086,99 @@
 
 ;;;
 
+(define-class <jsevent> ()
+  ())
+
+(define (js-property-slot-names+props event-class)
+  (sort (fold (lambda (slot-def js-prop-slots)
+                (match-let1 (slot-name . slot-opts) slot-def
+                  (or (and-let1 prop (get-keyword :js-property slot-opts #f)
+                        (acons slot-name prop js-prop-slots))
+                      js-prop-slots)))
+              '()
+              (compute-slots event-class))
+        (lambda (s1 s2)
+          (string<? (cdr s1) (cdr s2)))))
+
+(define (js-property-slot-names event-class)
+  (map car (js-property-slot-names+props event-class)))
+
+(define (js-property-slot-props event-class)
+  (map cdr (js-property-slot-names+props event-class)))
+
+(define-method initialize ((event <jsevent>) args)
+  (next-method)
+  (for-each (lambda (name val)
+              (slot-set! event name val))
+            (js-property-slot-names (class-of event))
+            args))
+
+(define (parse-prop str)
+  (list->vector (reverse (fold (lambda (str result)
+                                 (rxmatch-if (#/(.*)\[(\d+)\]/ str)
+                                     (_ name index)
+                                   (cons (string->number index) (cons name result))
+                                   (cons str result)))
+                               '()
+                               (string-split str ".")))))
+
+(define (add-event-listener! event-target event-type event-class-or-props proc)
+  (let ((app-context (application-context))
+        (pool (current-thread-pool))
+        (proxy-id (proxy-object-id event-target))
+        (prop-vec (map-to <vector> parse-prop (cond
+                                                ((and (is-a? event-class-or-props <class>)
+                                                      (member <jsevent> (class-precedence-list event-class-or-props)))
+                                                 (js-property-slot-props event-class-or-props))
+                                                ((is-a? event-class-or-props <collection>)
+                                                 event-class-or-props)
+                                                (else
+                                                 (errorf "a class which inherits <jsevent> or a collection of property spec is required, but got ~s" event-class-or-props))))))
+    (atomic (slot-ref app-context 'listener-table-atom)
+      (lambda (tbl)
+        (hash-table-push! tbl
+                          (cons (proxy-object-id event-target) event-type)
+                          (list pool
+                                (if (is-a? event-class-or-props <class>)
+                                    event-class-or-props
+                                    #f)
+                                proc))))
+    (jslet (proxy-id::u32
+            event-target::proxy
+            event-type::json
+            prop-vec::json)
+      (registerEventHandler proxy-id event-target event-type prop-vec))))
+
+(define (remove-event-listener! event-target event-type proc)
+  (atomic (slot-ref (application-context) 'listener-table-atom)
+    (lambda (tbl)
+      (let* ((proxy-id (proxy-object-id event-target))
+             (key (cons proxy-id event-type)))
+        (hash-table-update! tbl key (lambda (vals)
+                                      (remove (match-lambda
+                                                ((_ _ handler)
+                                                 (eq? proc handler)))
+                                              vals)))
+        (jslet (proxy-id::u32
+                event-target::proxy
+                event-type::json)
+          (unregisterEventHandler proxy-id event-target event-type))))))
+
+;;;
+
+(define-class <browser-window> (<proxy-object>)
+  ())
+
+(define (browser-window)
+  (application-context-slot-atomic-update! 'browser-window
+    (lambda (win)
+      (unless win
+        (set! win (make <browser-window>))
+        (let1 proxy-id (proxy-object-id win)
+          (jslet (proxy-id::u32)
+            (linkProxyObject proxy-id window))))
+      win)))
+
 (define (window-size)
   (jslet/result ()
     (result window.innerWidth window.innerHeight)))
@@ -1214,16 +1187,6 @@
   (jslet ()
     (when webSocket
       (webSocket.close 1000))))
-
-;;;
-
-(define (set-window-event-handler! event-type proc)
-  (let ((event-name (symbol->string event-type))
-        (enable? (if proc #t #f)))
-    (jslet (event-name::json
-            enable?::boolean)
-      (set! (aref listenStateTable event-name) enable?)))
-  (add-event-listener! event-type proc))
 
 ;;;
 

@@ -116,9 +116,7 @@
           translate
           create-image-data
           upload-image-data
-          download-image-data
-
-          set-canvas-event-handler!))
+          download-image-data))
 
 (select-module graviton.canvas)
 
@@ -873,44 +871,3 @@
 (define (download-image-data image)
   (jslet/result (image::proxy)
     (result-u8array image.data)))
-
-;; (define-jsvar *listen-state-table* (object))
-
-(define (canvas-event-type canvas event-type)
-  (string->symbol (format "_canvas_~a_~a" (slot-ref canvas 'id) event-type)))
-
-(define (set-canvas-event-handler! canvas event-type proc)
-  (let ((event-id (symbol->string (canvas-event-type canvas event-type)))
-        (event-name (symbol->string event-type))
-        (enable? (if proc #t #f)))
-    (jslet (canvas::proxy
-            event-id::json
-            event-name::json
-            enable?::boolean)
-      (let ((handler (if enable?
-                         (lambda (e)
-                           (notifyEvent event-id (createMouseEvent canvas e)))
-                         null)))
-        (case event-name
-          (("click")
-           (set! canvas.onclick handler))
-          (("dblclick")
-           (set! canvas.ondblclick handler))
-          (("contextmenu")
-           (set! canvas.oncontextmenu handler))
-          (("mousedown")
-           (set! canvas.onmousedown handler))
-          (("mouseup")
-           (set! canvas.onmouseup handler))
-          (("mouseover")
-           (set! canvas.onmouseover handler))
-          (("mouseout")
-           (set! canvas.onmouseout handler))
-          (("mousemove")
-           (set! canvas.onmousemove handler))
-          (("wheel")
-           (set! canvas.onwheel handler))
-          (else
-           (throw (+ "Unsupported event: " event-name))))))
-    (add-event-listener! (string->symbol event-id) proc)))
-

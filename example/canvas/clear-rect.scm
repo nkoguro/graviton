@@ -12,9 +12,12 @@
 
 (define (main args)
   (grv-begin
-    (set-window-event-handler! 'keyup (lambda (event)
-                                        (when (equal? (slot-ref event 'code) "Escape")
-                                          (app-close))))
+    (add-event-listener! (browser-window) "keyup"
+                         '("key")
+      (lambda (key)
+        (when (equal? key "Escape")
+          (app-close))))
+
     (make-canvas 400 200)
     (close-stroke-begin
       (move-to 20 20)

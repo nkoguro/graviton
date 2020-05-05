@@ -104,10 +104,12 @@
   (set-graviton-background-color! "black")
   (let-args (cdr args) ((num-sprites "s|sprites=i" 100))
     (grv-begin
-      (set-window-event-handler! 'keyup (lambda (event)
-                                          (when (equal? (slot-ref event 'code) "Escape")
-                                            (profiler-show)
-                                            (app-close))))
+      (add-event-listener! (browser-window) "keyup"
+                           '("key")
+        (lambda (key)
+          (when (equal? key "Escape")
+            (app-close))))
+
       (let ((sprite (make-canvas (* *sprite-width* *num-patterns*) *sprite-height* :visible? #f))
             (canvas (make-canvas *canvas-width* *canvas-height*))
             (balls (list-ec (: i num-sprites)
@@ -118,11 +120,7 @@
                                        (- (* (random-real) 400) 200)))))
         (prepare-ball-images sprite *sprite-width* *sprite-height* *num-patterns*)
         (parameterize ((current-canvas canvas))
-        (loop-frame
-          (lambda (break)
-            (update-frame canvas sprite balls)
-            ;; (parameterize ((current-canvas canvas))
-            ;;   (draw-balls sprite balls)
-            ;;   (update-balls! balls))
-            ))))))
+          (loop-frame
+            (lambda (break)
+              (update-frame canvas sprite balls)))))))
   0)

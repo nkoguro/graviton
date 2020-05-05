@@ -3,9 +3,12 @@
 
 (define (main args)
   (grv-begin
-    (set-window-event-handler! 'keyup (lambda (event)
-                                        (when (equal? (slot-ref event 'code) "Escape")
-                                          (app-close))))
+    (add-event-listener! (browser-window) "keyup"
+                         '("key")
+      (lambda (key)
+        (when (equal? key "Escape")
+          (app-close))))
+
     (let1 pat (load-canvas "example/canvas/Canvas_createpattern.png" :visible? #f)
       (make-canvas 300 300)
       (set-fill-style! (pattern (await pat)))

@@ -4,6 +4,22 @@
 (use math.const)
 (use util.list)
 
+(define-class <mouse-event> (<jsevent>)
+  ((width :js-property "target.width")
+   (height :js-property "target.height")
+   (client-width :js-property "target.clientWidth")
+   (client-height :js-property "target.clientHeight")
+   (offset-x :js-property "offsetX")
+   (offset-y :js-property "offsetY")
+   (x :allocation :virtual
+      :slot-ref (lambda (obj)
+                  (floor->exact (/. (* (slot-ref obj 'width) (slot-ref obj 'offset-x))
+                                    (slot-ref obj 'client-width)))))
+   (y :allocation :virtual
+      :slot-ref (lambda (obj)
+                  (floor->exact (/. (* (slot-ref obj 'height) (slot-ref obj 'offset-y))
+                                    (slot-ref obj 'client-height)))))))
+
 (define (main args)
   ;; (set-graviton-open-dev-tools! #t)
   ;; (set-graviton-port! 8080)
@@ -11,13 +27,18 @@
   (grv-begin
     (receive (w h) (await (window-size))
       (log-format "window width=~a, height=~a" w h))
-    (set-window-event-handler! 'keyup (lambda (event)
-                                        (when (equal? (slot-ref event 'code) "Escape")
-                                          (app-close))))
+    (add-event-listener! (browser-window) "keyup"
+                         '("key")
+      (lambda (key)
+        (when (equal? key "Escape")
+          (app-close))))
+
     (let1 canvas (make-canvas 150 200)
-      (set-canvas-event-handler! canvas 'click (lambda (event)
-                                                 #?=(slot-ref event 'canvas-x)
-                                                 #?=(slot-ref event 'canvas-y)))
+      (add-event-listener! canvas "click" <mouse-event>
+        (lambda (event)
+          #?=(slot-ref event 'x)
+          #?=(slot-ref event 'y)))
+
       (dotimes (i 4)
         (dotimes (j 3)
           (let ((x (+ 25 (* j 50)))
