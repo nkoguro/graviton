@@ -179,32 +179,39 @@ class DataStream {
     }
 }
 
-function notifyValues(futureId, vals) {
-    if (futureId) {
-        webSocket.send(JSON.stringify(["notifyResult", futureId, vals, false]));
-    }
+function callAction(name, ...args) {
+    webSocket.send(JSON.stringify([name].concat(args)));
 }
 
-function notifyBinaryData(futureId, data) {
+function uploadBinaryData(futureId, data) {
     let sendData = new Uint8Array(data.length + 4);
     let idData = new Uint32Array(1);
     idData[0] = futureId;
     sendData.set(idData, 0);
     sendData.set(data, 4);
     webSocket.send(sendData.buffer);
-    webSocket.send(JSON.stringify(["notifyBinaryResult", futureId]));
+}
+
+function notifyValues(futureId, vals) {
+    if (futureId) {
+        callAction("notifyResult", futureId, vals, false);
+    }
+}
+
+function notifyBinaryData(futureId, data) {
+    uploadBinaryData(futureId, data);
 }
 
 function notifyException(futureId, exception) {
-    webSocket.send(JSON.stringify(["notifyResult", futureId, false, exception.toString()]));
+    callAction("notifyResult", futureId, false, exception.toString());
 }
 
 function notifyEvent(proxyId, eventType, event) {
-    webSocket.send(JSON.stringify(["notifyEvent", proxyId, eventType, event]));
+    callAction("notifyEvent", proxyId, eventType, event);
 }
 
 function startApplication() {
-    webSocket.send(JSON.stringify(["startApplication"]));
+    callAction("startApplication");
 }
 
 /**

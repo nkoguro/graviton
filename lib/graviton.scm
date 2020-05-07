@@ -87,9 +87,12 @@
           window-size
           unlink-proxy-object!
 
+          application-context
+          application-context-slot-atomic-ref
           application-context-slot-atomic-update!
           application-context-slot-ref
           application-context-slot-set!
+          define-application-context-slot
 
           browser-window
 
@@ -144,21 +147,6 @@
 (define (submit-thunk pool thunk :optional (error-handler #f))
   (let1 app-context (application-context)
     (add-job! pool (make-pool-thunk app-context pool thunk error-handler))))
-
-(define (invoke-event-handler id event-type event-values)
-  (atomic (slot-ref (application-context) 'listener-table-atom)
-    (lambda (tbl)
-      (let1 args (vector->list event-values)
-        (for-each (match-lambda
-                    ((pool event-class proc)
-                     (let1 args (if event-class
-                                    (list (apply make event-class args))
-                                    args)
-                       (add-job! pool (make-pool-thunk (application-context)
-                                          pool
-                                        (lambda ()
-                                          (apply proc args)))))))
-                  (hash-table-get tbl (cons id event-type) '()))))))
 
 ;;;
 
@@ -283,26 +271,7 @@
           (else
            (errorf "[BUG] Invalid future ID: ~a" id)))))))
 
-(define (notify-binary-result id)
-  (with-future-table
-    (lambda (tbl future-next-id)
-      (let1 future (hash-table-get tbl id #f)
-        (cond
-          (future
-           (let1 data (atomic *binary-data-table-atom*
-                        (lambda (tbl)
-                          (begin0
-                            (hash-table-get tbl id #f)
-                            (hash-table-delete! tbl id))))
-             (unless data
-               (errorf "[BUG] No binary data found for ID: ~a" id))
-             (set-future-result-values&exception! future (list data) #f))
-           (hash-table-delete! tbl id))
-          (else
-           (errorf "[BUG] Invalid future ID: ~a" id)))))))
 
-(define (notify-client-event proxy-id event-type event-values)
-  (invoke-event-handler proxy-id event-type event-values))
 
 ;;;
 
@@ -570,13 +539,24 @@
    (proxy-object-id-generator :init-form (make-id-generator #xffffffff))
    (command-buffering? :init-value #f)))
 
+(define *application-context-slot-initials* '())
+
+(define-syntax define-application-context-slot
+  (syntax-rules ()
+    ((_ name val)
+     (push! *application-context-slot-initials* (cons 'name val)))))
+
 (define-class <application-context> ()
   ((main-thread-pool :init-keyword :main-thread-pool)
    (worker-thread-pool :init-keyword :worker-thread-pool)
    (send-context-atom :init-keyword :send-context-atom)
-   (listener-table-atom :init-form (atom (make-hash-table 'equal?)))
    (future-table-atom :init-form (atom (make-hash-table 'equal?) (make-id-generator #xffffffff)))
-   (slot-table-atom :init-form (atom (make-hash-table 'eq?)))))
+   (slot-table-atom :init-form (atom (let1 tbl (make-hash-table 'eq?)
+                                       (for-each (match-lambda
+                                                   ((name . val)
+                                                    (hash-table-put! tbl name val)))
+                                                 *application-context-slot-initials*)
+                                       tbl)))))
 
 (define application-context (make-parameter #f))
 (define current-thread-pool (make-parameter #f))
@@ -596,6 +576,11 @@
 
 (define (worker-thread-pool)
   (slot-ref (application-context) 'worker-thread-pool))
+
+(define (application-context-slot-atomic-ref name proc)
+  (atomic (slot-ref (application-context) 'slot-table-atom)
+    (lambda (tbl)
+      (proc (hash-table-get tbl name #f)))))
 
 (define (application-context-slot-ref name)
   (atomic (slot-ref (application-context) 'slot-table-atom)
@@ -641,22 +626,36 @@
 (define (with-future-table proc)
   (atomic (slot-ref (application-context) 'future-table-atom) proc))
 
-(define (start-application)
+(define json-command-table
+  (alist->hash-table
+    `(("notifyResult" . ,notify-result))
+    'equal?))
+
+(define-syntax define-action
+  (syntax-rules ()
+    ((_ action-name args body ...)
+     (hash-table-put! json-command-table action-name (lambda args body ...)))))
+
+(define-action "startApplication" ()
   (when *initial-thunk*
     (submit-thunk (main-thread-pool)
       (lambda ()
         (run-hook *init-hook*)
         (*initial-thunk*)))))
 
-(define json-command-table
-  (alist->hash-table
-    `(("notifyResult" . ,notify-result)
-      ("notifyBinaryResult" . ,notify-binary-result)
-      ("notifyEvent" . ,notify-client-event)
-      ("startApplication" . ,start-application))
-    'equal?))
-
 (define *binary-data-table-atom* (atom (make-hash-table 'equal?)))
+
+(define (notify-binary-result id data)
+  (with-future-table
+    (lambda (tbl future-next-id)
+      (let1 future (begin0
+                     (hash-table-get tbl id #f)
+                     (hash-table-delete! tbl id))
+        (cond
+          (future
+           (set-future-result-values&exception! future (list data) #f))
+          (else
+           (errorf "[BUG] Invalid future ID: ~a" id)))))))
 
 (define (start-websocket-dispatcher! sock in out)
   (thread-start!
@@ -684,10 +683,9 @@
                   (else
                    (log-error "Invalid data received: ~s" params)))))
             (define (receive-binary data)
-              (let1 id (get-u32 data 0)
-                (atomic *binary-data-table-atom*
-                  (lambda (tbl)
-                    (hash-table-put! tbl id (uvector-alias <u8vector> data 4))))))
+              (let* ((id (get-u32 data 0))
+                     (result (uvector-alias <u8vector> data 4)))
+                (notify-binary-result id result)))
 
             (parameterize ((json-special-handler (lambda (sym)
                                                    (case sym
@@ -926,11 +924,22 @@
 (define (parse-arg-spec spec)
   (match spec
     ((? symbol? spec)
-     (parse-arg-spec (map string->symbol (string-split (symbol->string spec) "::"))))
-    ((var type)
-     (list var type))
-    ((var)
-     (list var 'json))))
+     (parse-arg-spec (list (map string->symbol (string-split (symbol->string spec) "::")))))
+    (((? symbol? spec))
+     (let1 parts (map string->symbol (string-split (symbol->string spec) "::"))
+       (cond
+         ((= (length parts) 1)
+          (parse-arg-spec (append parts '(json))))
+         (else
+          (parse-arg-spec (list parts))))))
+    (((? symbol? spec) init-val)
+     (parse-arg-spec (list (map string->symbol (string-split (symbol->string spec) "::")) init-val)))
+    (((var type) init-val)
+     (list var type init-val))
+    (((var type))
+     (list var type var))
+    (((var) init-val)
+     (list var 'json init-val))))
 
 (define binary-command-next-id (make-id-generator #x7fffffff))
 
@@ -952,7 +961,7 @@
                        `(begin
                           (define (,name %future-id ,ds)
                             (let ,(map (match-lambda
-                                         ((var type)
+                                         ((var type _)
                                           `(,var ,(match type
                                                     ('f32
                                                      `((ref ,ds getFloat32)))
@@ -1027,7 +1036,7 @@
   `(jsrun (jslambda ,var-spec
             ,@body)
           ,@(map (lambda (spec)
-                   (list-ref (parse-arg-spec spec) 0))
+                   (list-ref (parse-arg-spec spec) 2))
                  var-spec)))
 
 (define-macro (jslet/result var-spec :rest body)
@@ -1035,7 +1044,7 @@
              ,@body)
            #f
            ,@(map (lambda (spec)
-                    (list-ref (parse-arg-spec spec) 0))
+                    (list-ref (parse-arg-spec spec) 2))
                   var-spec)))
 
 (define-macro (jslet/result:then provider var-spec :rest body)
@@ -1043,7 +1052,7 @@
              ,@body)
            ,provider
            ,@(map (lambda (spec)
-                    (list-ref (parse-arg-spec spec) 0))
+                    (list-ref (parse-arg-spec spec) 2))
                   var-spec)))
 
 (define-class <js-enum> ()
@@ -1122,47 +1131,62 @@
                                '()
                                (string-split str ".")))))
 
+(define-application-context-slot listener-table (make-hash-table 'equal?))
+
 (define (add-event-listener! event-target event-type event-class-or-props proc)
-  (let ((app-context (application-context))
-        (pool (current-thread-pool))
-        (proxy-id (proxy-object-id event-target))
-        (prop-vec (map-to <vector> parse-prop (cond
-                                                ((and (is-a? event-class-or-props <class>)
-                                                      (member <jsevent> (class-precedence-list event-class-or-props)))
-                                                 (js-property-slot-props event-class-or-props))
-                                                ((is-a? event-class-or-props <collection>)
-                                                 event-class-or-props)
-                                                (else
-                                                 (errorf "a class which inherits <jsevent> or a collection of property spec is required, but got ~s" event-class-or-props))))))
-    (atomic (slot-ref app-context 'listener-table-atom)
+  (let1 proxy-id (proxy-object-id event-target)
+    (application-context-slot-atomic-ref 'listener-table
       (lambda (tbl)
         (hash-table-push! tbl
-                          (cons (proxy-object-id event-target) event-type)
-                          (list pool
+                          (cons proxy-id event-type)
+                          (list (current-thread-pool)
                                 (if (is-a? event-class-or-props <class>)
                                     event-class-or-props
                                     #f)
                                 proc))))
-    (jslet (proxy-id::u32
-            event-target::proxy
-            event-type::json
-            prop-vec::json)
+    (jslet ((proxy-id::u32)
+            (event-target::proxy)
+            (event-type::json)
+            (prop-vec::json (map-to <vector> parse-prop (cond
+                                                          ((and (is-a? event-class-or-props <class>)
+                                                                (member <jsevent> (class-precedence-list event-class-or-props)))
+                                                           (js-property-slot-props event-class-or-props))
+                                                          ((is-a? event-class-or-props <collection>)
+                                                           event-class-or-props)
+                                                          (else
+                                                           (errorf "a class which inherits <jsevent> or a collection of property spec is required, but got ~s" event-class-or-props))))))
       (registerEventHandler proxy-id event-target event-type prop-vec))))
 
 (define (remove-event-listener! event-target event-type proc)
-  (atomic (slot-ref (application-context) 'listener-table-atom)
+  (let1 proxy-id (proxy-object-id event-target)
+    (application-context-slot-atomic-ref 'listener-table
+      (lambda (tbl)
+        (let1 key (cons proxy-id event-type)
+          (hash-table-update! tbl key (lambda (vals)
+                                        (remove (match-lambda
+                                                  ((_ _ handler)
+                                                   (eq? proc handler)))
+                                                vals))))))
+    (jslet ((proxy-id::u32)
+            (event-target::proxy)
+            (event-type::json))
+      (unregisterEventHandler proxy-id event-target event-type))))
+
+
+(define-action "notifyEvent" (id event-type event-values)
+  (application-context-slot-atomic-ref 'listener-table
     (lambda (tbl)
-      (let* ((proxy-id (proxy-object-id event-target))
-             (key (cons proxy-id event-type)))
-        (hash-table-update! tbl key (lambda (vals)
-                                      (remove (match-lambda
-                                                ((_ _ handler)
-                                                 (eq? proc handler)))
-                                              vals)))
-        (jslet (proxy-id::u32
-                event-target::proxy
-                event-type::json)
-          (unregisterEventHandler proxy-id event-target event-type))))))
+      (let1 args (vector->list event-values)
+        (for-each (match-lambda
+                    ((pool event-class proc)
+                     (let1 args (if event-class
+                                    (list (apply make event-class args))
+                                    args)
+                       (add-job! pool (make-pool-thunk (application-context)
+                                          pool
+                                        (lambda ()
+                                          (apply proc args)))))))
+                  (hash-table-get tbl (cons id event-type) '()))))))
 
 ;;;
 
