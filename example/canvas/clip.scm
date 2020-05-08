@@ -1,5 +1,6 @@
 (use graviton)
 (use graviton.canvas)
+(use graviton.event)
 (use math.const)
 
 (define (main args)

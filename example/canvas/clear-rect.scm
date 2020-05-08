@@ -1,5 +1,6 @@
 (use graviton)
 (use graviton.canvas)
+(use graviton.event)
 
 (define-syntax close-stroke-begin
   (syntax-rules ()

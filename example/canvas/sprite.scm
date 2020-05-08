@@ -6,6 +6,7 @@
 (use gauche.time)
 (use graviton)
 (use graviton.canvas)
+(use graviton.event)
 (use math.const)
 (use srfi-27)
 (use srfi-42)

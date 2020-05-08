@@ -1,7 +1,11 @@
+(use file.util)
 (use gauche.uvector)
 (use graviton)
 (use graviton.canvas)
+(use graviton.event)
 (use math.const)
+
+(define *program-dir* (sys-dirname (current-load-path)))
 
 (define (main args)
   (set-graviton-background-color! "#000")
@@ -13,6 +17,6 @@
           (app-close))))
 
     (let ((canvas (make-canvas 300 300))
-          (loaded-image (load-canvas "example/font_16x16.png" :visible? #f)))
+          (loaded-image (load-canvas (build-path *program-dir* "../font_16x16.png") :visible? #f)))
       (draw-canvas (await loaded-image) 0 0)))
   0)

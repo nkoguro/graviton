@@ -1,6 +1,7 @@
 (use gauche.logger)
 (use graviton)
 (use graviton.canvas)
+(use graviton.event)
 
 (define (main args)
   (grv-begin
