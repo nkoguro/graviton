@@ -85,7 +85,6 @@
           flush-commands
           app-close
           window-size
-          unlink-proxy-object!
 
           current-thread-pool
           submit-thunk
@@ -103,13 +102,12 @@
 
           <proxy-object>
           proxy-object-id
+          unlink-proxy-object!
           define-jsenum
-          jsrun
-          jscall
-          jslambda
           jslet
           jslet/result
           jslet/result:then
+
           estimate-content-type
           resource-url
 
@@ -331,27 +329,6 @@
 (define (cancel-schedule! future)
   (enqueue! *scheduler-command-queue* (list 'cancel future)))
 
-;;;
-
-(define-class <proxy-object> ()
-  ((id :init-value #f)))
-
-(define-method initialize ((obj <proxy-object>) :rest args)
-  (next-method)
-  (slot-set! obj 'id (proxy-object-next-id)))
-
-(define (proxy-object-id obj)
-  (or (slot-ref obj 'id)
-      (errorf "~s was unlinked" obj)))
-
-(define (unlink-proxy-object! obj)
-  (cond
-    ((slot-ref obj 'id) => (lambda (id)
-                             (slot-set! obj 'id #f)
-                             (jslet (id::u32)
-                               (Graviton.unlinkProxyObject id))))
-    (else
-     #t)))
 
 ;;;
 
@@ -647,15 +624,15 @@
 (define (with-future-table proc)
   (atomic (slot-ref (application-context) 'future-table-atom) proc))
 
-(define json-command-table
-  (alist->hash-table
-    `(("notifyResult" . ,notify-result))
-    'equal?))
+(define json-command-table (make-hash-table 'equal?))
 
 (define-syntax define-action
   (syntax-rules ()
     ((_ action-name args body ...)
      (hash-table-put! json-command-table action-name (lambda args body ...)))))
+
+(define-action "notifyResult" (id vals err)
+  (notify-result id vals err))
 
 (define-action "startApplication" ()
   (when *initial-thunk*
@@ -835,26 +812,6 @@
 
 ;;;
 
-(define (call-text-command command-name :rest args)
-  (with-send-context
-    (lambda (ctx)
-      (send-text-frame (slot-ref ctx 'websocket-output-port)
-                       (construct-json-string (apply vector command-name args))))))
-
-(define binary-command-table
-  (let1 tbl (make-hash-table 'eq?)
-    (map-with-index (lambda (i cmd)
-                      (hash-table-put! tbl cmd i))
-                    '(
-                      app-close
-                      unlink-proxy-object
-                      register-binary
-
-                      listen-window-event
-                      listen-canvas-event
-                      ))
-    tbl))
-
 (define (write-variant n out)
   (cond
     ((zero? n)
@@ -870,13 +827,11 @@
           (write-u8 (logior (logand n #x7f) #x80) out)
           (loop (ash n -7))))))))
 
-(define (call-command cmd types args)
+(define (call-command command-id types args)
   (with-send-context
     (lambda (ctx)
       (let1 out (slot-ref ctx 'buffer-output-port)
-        (write-u16 (if (symbol? cmd)
-                       (hash-table-get binary-command-table cmd)
-                       cmd)
+        (write-u16 command-id
                    out
                    'little-endian)
         (map (lambda (type arg)
@@ -973,8 +928,9 @@
    (call-id :init-keyword :call-id)
    (run-id :init-keyword :run-id)))
 
-(define (compile-jslambda jsmodule-name arg-specs body)
-  (let* ((var-type-list (map parse-arg-spec arg-specs))
+(define (compile-jslet arg-specs body)
+  (let* ((jsmodule-name (js-vm-current-main-module))
+         (var-type-list (map parse-arg-spec arg-specs))
          (base-id (binary-command-next-id))
          (run-id (ash base-id 1))
          (call-id (+ (ash base-id 1) 1))
@@ -1038,9 +994,6 @@
   ((err)
    `(Graviton.notifyException %future-id ((ref ,err toString)))))
 
-(define-macro (jslambda arg-specs :rest body)
-  (compile-jslambda (js-vm-current-main-module) arg-specs body))
-
 (define (jscall js-proc provider :rest args)
   (let1 future (make <graviton-future>)
     (when provider
@@ -1056,27 +1009,27 @@
                 args))
 
 (define-macro (jslet var-spec :rest body)
-  `(jsrun (jslambda ,var-spec
-            ,@body)
-          ,@(map (lambda (spec)
-                   (list-ref (parse-arg-spec spec) 2))
-                 var-spec)))
+  (let1 jsrun jsrun
+    `(,jsrun ,(compile-jslet var-spec body)
+             ,@(map (lambda (spec)
+                      (list-ref (parse-arg-spec spec) 2))
+                    var-spec))))
 
 (define-macro (jslet/result var-spec :rest body)
-  `(jscall (jslambda ,var-spec
-             ,@body)
-           #f
-           ,@(map (lambda (spec)
-                    (list-ref (parse-arg-spec spec) 2))
-                  var-spec)))
+  (let1 jscall jscall
+    `(,jscall ,(compile-jslet var-spec body)
+              #f
+              ,@(map (lambda (spec)
+                       (list-ref (parse-arg-spec spec) 2))
+                     var-spec))))
 
 (define-macro (jslet/result:then provider var-spec :rest body)
-  `(jscall (jslambda ,var-spec
-             ,@body)
-           ,provider
-           ,@(map (lambda (spec)
-                    (list-ref (parse-arg-spec spec) 2))
-                  var-spec)))
+  (let1 jscall jscall
+    `(,jscall ,(compile-jslet var-spec body)
+              ,provider
+              ,@(map (lambda (spec)
+                       (list-ref (parse-arg-spec spec) 2))
+                     var-spec))))
 
 (define-class <js-enum> ()
   ((symbol->value-table :init-form (make-hash-table))
@@ -1115,6 +1068,28 @@
       (errorf "enum ~a not found" enum))
     (or (hash-table-get (slot-ref enum 'jsvalue->symbol-table) jsval #f)
         (errorf "enum jsvalue ~a not found" jsval))))
+
+;;;
+
+(define-class <proxy-object> ()
+  ((id :init-value #f)))
+
+(define-method initialize ((obj <proxy-object>) :rest args)
+  (next-method)
+  (slot-set! obj 'id (proxy-object-next-id)))
+
+(define (proxy-object-id obj)
+  (or (slot-ref obj 'id)
+      (errorf "~s was unlinked" obj)))
+
+(define (unlink-proxy-object! obj)
+  (cond
+    ((slot-ref obj 'id) => (lambda (id)
+                             (slot-set! obj 'id #f)
+                             (jslet ((id::u32))
+                               (Graviton.unlinkProxyObject id))))
+    (else
+     #t)))
 
 ;;;
 
