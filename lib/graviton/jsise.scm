@@ -31,10 +31,13 @@
 ;;;
 
 (define-module graviton.jsise
+  (use file.util)
   (use gauche.collection)
   (use gauche.threads)
   (use rfc.json)
+  (use rfc.sha)
   (use text.tree)
+  (use util.digest)
   (use util.list)
   (use util.match)
 
@@ -45,8 +48,13 @@
           inline-js
           write-js-code
           get-js-code
-          js-module-list
-          register-js-stmt!))
+          js-main-module-absolute-paths
+          register-js-stmt!
+          import-js
+          load-js
+          load-js-list
+          js-current-main-module
+          js-vm-current-main-module))
 
 (select-module graviton.jsise)
 
@@ -423,20 +431,84 @@
     (_
      (errorf "Invalid expression: ~s" expr))))
 
+(define (scheme->js-main-module-name scheme-module-name)
+  (string-append (digest-hexify (sha1-digest-string (x->string scheme-module-name))) ".mjs"))
+
+(define (js-vm-current-main-module)
+  (scheme->js-main-module-name (module-name ((with-module gauche.internal vm-current-module)))))
+
+(define-syntax js-current-main-module
+  (syntax-rules ()
+    ((_)
+     (scheme->js-main-module-name (module-name (current-module))))))
+
 (define-syntax define-jsvar
   (syntax-rules ()
     ((_ name val)
-     (register-js-stmt! (module-name->path (module-name (current-module))) '(define name val)))))
+     (register-js-stmt! (js-current-main-module) '(define name val)))))
 
 (define-syntax define-jsfn
   (syntax-rules ()
     ((_ (name args ...) body ...)
-     (register-js-stmt! (module-name->path (module-name (current-module))) '(define (name args ...) body ...)))))
+     (register-js-stmt! (js-current-main-module) '(define (name args ...) body ...)))))
 
 (define-syntax inline-js
   (syntax-rules ()
     ((_ body ...)
-     (register-js-stmt! (module-name->path (module-name (current-module))) '(begin body ...)))))
+     (register-js-stmt! (js-current-main-module) '(begin body ...)))))
+
+;;;
+
+(define (absolute-js-path js-path)
+  (cond
+    ((absolute-path? js-path)
+     js-path)
+    (else
+     (build-path "/js" js-path))))
+
+(define (compile-import-option import-options)
+  (let ((as-param (get-keyword :as import-options #f))
+        (only-params (map x->string (get-keyword :only import-options '())))
+        (rename-params (map (match-lambda
+                             ((from-sym to-sym)
+                              (list (x->string from-sym) " as " (x->string to-sym))))
+                           (get-keyword :rename import-options '()))))
+    (cond
+      ((and as-param
+            (null? only-params)
+            (null? rename-params))
+       (list "* as " (x->string as-param)))
+      ((and (not as-param)
+            (not (and (null? only-params) (null? rename-params))))
+       (list "{" (intersperse "," (append only-params rename-params)) "}"))
+      (else
+       (errorf "import-js spec must have either :as or :only/:rename, but got ~s" import-options)))))
+
+(define (compile-import-spec import-spec)
+  (match import-spec
+    (((? string? module-path) import-options ...)
+     `(js-code "import " ,(compile-import-option import-options) " from '" ,(absolute-js-path module-path) "';"))
+    (_
+     (errorf "Invalid import-spec: ~s" import-spec))))
+
+(define-syntax import-js
+  (syntax-rules ()
+    ((_)
+     (begin))
+    ((_ import-spec rest ...)
+     (begin
+       (register-js-stmt! (js-current-main-module) (compile-import-spec 'import-spec))
+       (import-js rest ...)))))
+
+;;;
+
+(define *load-js-list* '())
+
+(define (load-js js-path)
+  (push! *load-js-list* (absolute-js-path js-path)))
+
+(define (load-js-list)
+  (reverse *load-js-list*))
 
 ;;;
 
@@ -447,13 +519,18 @@
     (hash-table-push! *js-code-table* name (compile-jsise-stmt env stmt))))
 
 (define (write-js-code name out)
+  (display "import * as Graviton from '/js/graviton/graviton.mjs';" out)
   (write-tree (reverse (hash-table-get *js-code-table* name)) out))
 
 (define (get-js-code name)
-  (call-with-output-string
-    (lambda (out)
-      (write-js-code name out))))
+  (cond
+    ((hash-table-exists? *js-code-table* name)
+     (call-with-output-string
+       (lambda (out)
+         (write-js-code name out))))
+    (else
+     #f)))
 
-(define (js-module-list)
-  (hash-table-keys *js-code-table*))
+(define (js-main-module-absolute-paths)
+  (map absolute-js-path (hash-table-keys *js-code-table*)))
 

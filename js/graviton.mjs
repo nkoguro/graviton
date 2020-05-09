@@ -2,7 +2,7 @@
 
 let initializeFunctions = [];
 
-function registerInitializer(func) {
+export function registerInitializer(func) {
     initializeFunctions.push(func);
 }
 
@@ -13,7 +13,7 @@ function connectServer() {
     webSocket.binaryType = 'arraybuffer';
     webSocket.onopen = () => {
         console.log('opened');
-        startApplication();
+        callAction("startApplication");
     };
     webSocket.onclose = () => {
         console.log('closed');
@@ -35,16 +35,22 @@ function connectServer() {
 
 registerInitializer(connectServer);
 
+export function closeConnection() {
+    if (webSocket) {
+        webSocket.close(1000);
+    }
+}
+
 let proxyObjectTable = {};
 let reverseProxyObjectTable = {};
 let enumTable = {};
 
-function linkProxyObject(index, obj) {
+export function linkProxyObject(index, obj) {
     proxyObjectTable[index] = obj;
     reverseProxyObjectTable[obj] = index;
 }
 
-function unlinkProxyObject(index) {
+export function unlinkProxyObject(index) {
     let obj = proxyObjectTable[index];
     if (obj != null) {
         reverseProxyObjectTable[obj] = null;
@@ -52,8 +58,12 @@ function unlinkProxyObject(index) {
     proxyObjectTable[index] = null;
 }
 
-function getProxyObject(index) {
+export function getProxyObject(index) {
     return proxyObjectTable[index];
+}
+
+export function registerEnum(enumName, vals) {
+    enumTable[enumName] = vals;
 }
 
 class DataStream {
@@ -179,7 +189,7 @@ class DataStream {
     }
 }
 
-function callAction(name, ...args) {
+export function callAction(name, ...args) {
     webSocket.send(JSON.stringify([name].concat(args)));
 }
 
@@ -192,22 +202,18 @@ function uploadBinaryData(futureId, data) {
     webSocket.send(sendData.buffer);
 }
 
-function notifyValues(futureId, vals) {
+export function notifyValues(futureId, vals) {
     if (futureId) {
         callAction("notifyResult", futureId, vals, false);
     }
 }
 
-function notifyBinaryData(futureId, data) {
+export function notifyBinaryData(futureId, data) {
     uploadBinaryData(futureId, data);
 }
 
-function notifyException(futureId, exception) {
+export function notifyException(futureId, exception) {
     callAction("notifyResult", futureId, false, exception.toString());
-}
-
-function startApplication() {
-    callAction("startApplication");
 }
 
 /**
@@ -215,6 +221,10 @@ function startApplication() {
  */
 
 let binaryCommands = [];
+
+export function registerBinaryCommand(commandId, func) {
+    binaryCommands[commandId] = func;
+}
 
 function dispatchBinaryMessage(abuf) {
     let ds = new DataStream(abuf);

@@ -1,5 +1,7 @@
-let audioContext = new AudioContext();
-let audioChannels = [];
+import {registerInitializer} from '/js/graviton/graviton.mjs';
+
+export let audioContext = new AudioContext();
+export let audioChannels = [];
 
 function initAudioChannels() {
     for (let i = 0; i < 16; ++i) {

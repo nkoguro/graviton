@@ -1,4 +1,6 @@
-function centralizeCanvas(canvas) {
+import * as Graviton from '/js/graviton/graviton.mjs';
+
+export function centralizeCanvas(canvas) {
     let winWidth = window.innerWidth;
     let winHeight = window.innerHeight;
 
@@ -17,7 +19,7 @@ function centralizeCanvas(canvas) {
     canvas.style.height = scaledHeight + 'px';
 }
 
-function obj2style(ctx, style) {
+export function obj2style(ctx, style) {
     if (typeof style === 'string') {
         return style;
     } else if (typeof style === 'object') {
@@ -37,9 +39,9 @@ function obj2style(ctx, style) {
         case 'pattern':
             var image = null;
             if (style['canvas']) {
-                image = getProxyObject(style['canvas']);
+                image = Graviton.getProxyObject(style['canvas']);
             } else if (style['image']) {
-                image = createImageBitmap(getProxyObject(style['image']));
+                image = createImageBitmap(Graviton.getProxyObject(style['image']));
             } else {
                 throw new Error('Neither canvas nor image specified for pattern');
             }
@@ -67,4 +69,4 @@ function initCanvas() {
     });
 }
 
-registerInitializer(initCanvas);
+Graviton.registerInitializer(initCanvas);

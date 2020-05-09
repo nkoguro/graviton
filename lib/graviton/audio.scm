@@ -35,6 +35,7 @@
   (use gauche.uvector)
   (use graviton)
   (use graviton.config)
+  (use graviton.jsise)
 
   (export load-audio
           play-audio
@@ -46,7 +47,7 @@
 
 (select-module graviton.audio)
 
-(import-js (build-path (graviton-js-directory) "audio.js"))
+(import-js ("graviton/audio.mjs" :only (audioContext audioChannels)))
 
 (define-jsenum oscillator-type-enum
   (sine "sine")
@@ -69,7 +70,7 @@
       (let ((audio (make Audio url)))
         (set! audio.onloadedmetadata (lambda ()
                                        (let ((source-node (audioContext.createMediaElementSource audio)))
-                                         (linkProxyObject node-id source-node)
+                                         (Graviton.linkProxyObject node-id source-node)
                                          (source-node.connect audioContext.destination)
                                          (result audio.duration))))
         (set! audio.onstalled (lambda ()
@@ -110,7 +111,7 @@
                               (let ((buf req.response))
                                 ((ref (audioContext.decodeAudioData buf) then)
                                  (lambda (decoded-data)
-                                   (linkProxyObject object-id decoded-data)
+                                   (Graviton.linkProxyObject object-id decoded-data)
                                    (result decoded-data.sampleRate
                                            decoded-data.length
                                            decoded-data.duration

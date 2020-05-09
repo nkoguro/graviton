@@ -120,7 +120,7 @@
 
 (select-module graviton.canvas)
 
-(import-js (build-path (graviton-js-directory) "canvas.js"))
+(import-js ("graviton/canvas.mjs" :as Canvas))
 
 (define current-canvas (make-parameter #f))
 
@@ -246,9 +246,9 @@
     (set! canvas.id (+ "canvas" canvas-id))
     (set! canvas.width width)
     (set! canvas.height height)
-    (linkProxyObject canvas-id canvas)
+    (Graviton.linkProxyObject canvas-id canvas)
 
-    (centralizeCanvas canvas)
+    (Canvas.centralizeCanvas canvas)
     (set! canvas.style.zIndex z)
     ((ref (document.getElementById "_on") appendChild) canvas)
 
@@ -322,7 +322,7 @@
     (jslet (canvas::proxy
             style-json::json)
       (let ((ctx (canvas.getContext "2d")))
-        (set! ctx.fillStyle (obj2style ctx style-json))))))
+        (set! ctx.fillStyle (Canvas.obj2style ctx style-json))))))
 
 (define (current-font)
   (~ (current-canvas) 'context2d 'font))
@@ -512,7 +512,7 @@
     (jslet (canvas::proxy
             style-json::json)
       (let ((ctx (canvas.getContext "2d")))
-        (set! ctx.strokeStyle (obj2style ctx style-json))))))
+        (set! ctx.strokeStyle (Canvas.obj2style ctx style-json))))))
 
 (define (current-text-align)
   (~ (current-canvas) 'context2d 'text-align))
@@ -689,7 +689,7 @@
             sw::s32
             sh::s32)
       (let ((image ((ref (canvas.getContext "2d") getImageData) sx sy sw sh)))
-        (linkProxyObject image-id image)))
+        (Graviton.linkProxyObject image-id image)))
     image))
 
 (define (is-point-in-path? x y :optional (rule 'nonzero))
@@ -860,7 +860,7 @@
             w::s32
             h::s32)
       (let ((image ((ref (canvas.getContext "2d") createImageData) w h)))
-        (linkProxyObject image-id image)))
+        (Graviton.linkProxyObject image-id image)))
     image))
 
 (define (upload-image-data image data)

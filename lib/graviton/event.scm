@@ -37,6 +37,7 @@
   (use gauche.regexp)
   (use graviton)
   (use graviton.config)
+  (use graviton.jsise)
   (use util.match)
 
   (export <jsevent>
@@ -45,7 +46,7 @@
 
 (select-module graviton.event)
 
-(import-js (build-path (graviton-js-directory) "event.js"))
+(import-js ("graviton/event.mjs" :as Event))
 
 (define-class <jsevent> ()
   ())
@@ -107,7 +108,7 @@
                                                            event-class-or-props)
                                                           (else
                                                            (errorf "a class which inherits <jsevent> or a collection of property spec is required, but got ~s" event-class-or-props))))))
-      (registerEventHandler proxy-id event-target event-type prop-vec))))
+      (Event.registerEventHandler proxy-id event-target event-type prop-vec))))
 
 (define (remove-event-listener! event-target event-type proc)
   (let1 proxy-id (proxy-object-id event-target)
@@ -122,7 +123,7 @@
     (jslet ((proxy-id::u32)
             (event-target::proxy)
             (event-type::json))
-      (unregisterEventHandler proxy-id event-target event-type))))
+      (Event.unregisterEventHandler proxy-id event-target event-type))))
 
 
 (define-action "notifyEvent" (id event-type event-values)

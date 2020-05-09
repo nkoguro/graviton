@@ -1,3 +1,5 @@
+import {callAction} from '/js/graviton/graviton.mjs';
+
 let eventHandlerTable = {};
 
 function notifyEvent(proxyId, eventType, event) {
@@ -20,7 +22,7 @@ function eventHandlerKey(proxyId, eventName) {
     return `${proxyId}_${eventName}`;
 }
 
-function registerEventHandler(proxyId, eventTarget, eventName, props) {
+export function registerEventHandler(proxyId, eventTarget, eventName, props) {
     unregisterEventHandler(proxyId, eventTarget, eventName);
     let handler = (e) => {
         notifyEvent(proxyId, eventName, extractEventValues(e, props));
@@ -29,7 +31,7 @@ function registerEventHandler(proxyId, eventTarget, eventName, props) {
     eventTarget.addEventListener(eventName, handler);
 }
 
-function unregisterEventHandler(proxyId, eventTarget, eventName) {
+export function unregisterEventHandler(proxyId, eventTarget, eventName) {
     let key = eventHandlerKey(proxyId, eventName);
     let handler = eventHandlerTable[key];
     if (handler) {

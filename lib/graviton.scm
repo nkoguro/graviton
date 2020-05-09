@@ -112,7 +112,6 @@
           jslet/result:then
           estimate-content-type
           resource-url
-          import-js
 
           loop-frame))
 
@@ -350,7 +349,7 @@
     ((slot-ref obj 'id) => (lambda (id)
                              (slot-set! obj 'id #f)
                              (jslet (id::u32)
-                               (unlinkProxyObject id))))
+                               (Graviton.unlinkProxyObject id))))
     (else
      #t)))
 
@@ -369,14 +368,42 @@
 
 ;;;
 
-(define *import-js-list* '())
-(define (import-js js-pathname)
-  (let1 js-name (string-append "/ijs/" (digest-hexify (sha1-digest-string js-pathname)))
-    (add-http-handler! js-name (lambda (req app)
-                                 (respond/ok req `(file ,js-pathname) :content-type "text/javascript")))
-    (push! *import-js-list* js-name)))
+(define *js-path-map-alist* '())
 
-(import-js (build-path (graviton-js-directory) "graviton.js"))
+(define (register-js-path-map file-path url-path)
+  (set! *js-path-map-alist* (append *js-path-map-alist*
+                                    (list
+                                      (cons (simplify-path (string-append "/" url-path "/"))
+                                            file-path)))))
+
+(register-js-path-map (graviton-js-directory) "graviton")
+
+(define (resolve-js-path js-path)
+  (let1 js-path (simplify-path js-path)
+    (let loop ((path-map-alist *js-path-map-alist*))
+      (match path-map-alist
+        (()
+         #f)
+        (((url-path . file-path) rest ...)
+         (or (and-let1 path (and (string-prefix? url-path js-path)
+                                 (build-path file-path (string-drop js-path (string-length url-path))))
+               (and (file-is-readable? path)
+                    path))
+             (loop rest)))))))
+
+(define-http-handler #/\/js(\/.*)/
+  (lambda (req app)
+    (let1 js-path ((slot-ref req 'path-rxmatch) 1)
+      (cond
+        ((resolve-js-path js-path)
+         => (lambda (file-path)
+              (respond/ok req `(file ,file-path) :content-type (estimate-content-type js-path))))
+        ((and (equal? (sys-dirname js-path) "/")
+              (get-js-code (sys-basename js-path)))
+         => (lambda (js-code)
+              (respond/ok req js-code :content-type (estimate-content-type js-path))))
+        (else
+         (respond/ng req 404))))))
 
 ;;;
 
@@ -404,18 +431,12 @@
                           (html:title title))
                          (apply html:body :style (format "background-color: ~a" *background-color*)
                                 (append
-                                  (map (lambda (js-name)
-                                         (html:script :src js-name))
-                                       (reverse *import-js-list*))
+                                  (map (lambda (js-path)
+                                         (html:script :src js-path))
+                                       (load-js-list))
                                   (map (lambda (js-mod)
-                                         (html:script :src (format "/js/~a" js-mod)))
-                                       (js-module-list))))))))))
-
-(define-http-handler #/\/js\/(.*)/
-  (lambda (req app)
-    (respond/ok req
-      (get-js-code ((slot-ref req 'path-rxmatch) 1))
-      :content-type "text/javascript")))
+                                         (html:script :type "module" :src js-mod))
+                                       (js-main-module-absolute-paths))))))))))
 
 (define-class <websocket-server-context> ()
   ((continuation-opcode :init-value 0)
@@ -788,6 +809,8 @@
        "audio/midi")
       ((member ext '("wav"))
        "audio/wav")
+      ((member ext '("js" "mjs"))
+       "text/javascript")
       (else
        #f))))
 
@@ -999,24 +1022,24 @@
                                        var-type-list)
                               ,@body)
                             undefined)
-                          (vector-set! binaryCommands ,call-id ,name)
-                          (vector-set! binaryCommands ,run-id ,name)))
+                          (Graviton.registerBinaryCommand ,call-id ,name)
+                          (Graviton.registerBinaryCommand ,run-id ,name)))
     (make <js-procedure> :call-id call-id :run-id run-id :types (map (cut list-ref <> 1) var-type-list))))
 
 (define-jsise-macro result
   ((vals ...)
-   `(notifyValues %future-id ,(list->vector vals))))
+   `(Graviton.notifyValues %future-id ,(list->vector vals))))
 
 (define-jsise-macro result-u8array
   ((data)
-   `(notifyBinaryData %future-id ,data)))
+   `(Graviton.notifyBinaryData %future-id ,data)))
 
 (define-jsise-macro result-error
   ((err)
-   `(notifyException %future-id ((ref ,err toString)))))
+   `(Graviton.notifyException %future-id ((ref ,err toString)))))
 
 (define-macro (jslambda arg-specs :rest body)
-  (compile-jslambda (module-name->path (module-name ((with-module gauche.internal vm-current-module)))) arg-specs body))
+  (compile-jslambda (js-vm-current-main-module) arg-specs body))
 
 (define (jscall js-proc provider :rest args)
   (let1 future (make <graviton-future>)
@@ -1070,13 +1093,13 @@
                               (push! jsvals jsval))))
                          symbol->jsvalue-list)
     (register-js-stmt! jsmodule-name
-                       `(set! (aref enumTable ,(symbol->string enum-name)) ,(list->vector (reverse jsvals))))
+                       `(Graviton.registerEnum ,(symbol->string enum-name) ,(list->vector (reverse jsvals))))
     enum))
 
 (define-syntax define-jsenum
   (syntax-rules ()
     ((_ name symbol->jsvalue ...)
-     (let1 enum (make-enum (module-name->path (module-name (current-module))) 'name '(symbol->jsvalue ...))
+     (let1 enum (make-enum (js-current-main-module) 'name '(symbol->jsvalue ...))
        (hash-table-put! *enum-table* 'name enum)))))
 
 (define (enum-value name sym)
@@ -1105,7 +1128,7 @@
         (set! win (make <browser-window>))
         (let1 proxy-id (proxy-object-id win)
           (jslet (proxy-id::u32)
-            (linkProxyObject proxy-id window))))
+            (Graviton.linkProxyObject proxy-id window))))
       win)))
 
 (define (window-size)
@@ -1114,8 +1137,7 @@
 
 (define (app-close)
   (jslet ()
-    (when webSocket
-      (webSocket.close 1000))))
+    (Graviton.closeConnection)))
 
 ;;;
 
