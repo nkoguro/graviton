@@ -263,30 +263,27 @@
 (define-jsvar *working-images* (make Set))
 
 (define (make-canvas width height :key (z 0) (visible? #t))
-  (let* ((canvas (make <canvas> :width width :height height :z z :visible? visible?))
-         (canvas-id (proxy-object-id canvas)))
-    (jslet (canvas-id::u32
-            width::u32
-            height::u32
-            z::u32
-            visible?::boolean)
+  (let1 canvas (make <canvas> :width width :height height :z z :visible? visible?)
+    (jslet ((canvas-id::u32 (proxy-object-id canvas))
+            (width::u32)
+            (height::u32)
+            (z::u32)
+            (visible?::boolean))
       (%make-canvas canvas-id width height z visible?))
     (when visible?
       (current-canvas canvas))
     canvas))
 
 (define (load-canvas filename :key (z 0) (visible? #t) (content-type #f))
-  (let* ((canvas (make <canvas> :z z :visible? visible?))
-         (canvas-id (proxy-object-id canvas))
-         (url (resource-url filename :content-type content-type)))
+  (let1 canvas (make <canvas> :z z :visible? visible?)
     (jslet/result:then (lambda (w h)
                          (slot-set! canvas 'width w)
                          (slot-set! canvas 'height h)
                          canvas)
-        (canvas-id::u32
-         url::string
-         z::u32
-         visible?::boolean)
+        ((canvas-id::u32 (proxy-object-id canvas))
+         (url::string (resource-url filename :content-type content-type))
+         (z::u32)
+         (visible?::boolean))
       (let ((img (make Image)))
         (*working-images*.add img)
         (set! img.src url)
@@ -301,8 +298,8 @@
                             (result-error "Load image failed.")))))))
 
 (define (set-canvas-visible! canvas visible?)
-  (jslet (canvas::proxy
-          visible?::boolean)
+  (jslet ((canvas::proxy)
+          (visible?::boolean))
     (cond
       (visible?
        (set! canvas.style.visibility "visible")
@@ -317,32 +314,28 @@
 
 (define (set-fill-style! style)
   (set! (~ (current-canvas) 'context2d 'fill-style) style)
-  (let ((canvas (current-canvas))
-        (style-json (style->json style)))
-    (jslet (canvas::proxy
-            style-json::json)
-      (let ((ctx (canvas.getContext "2d")))
-        (set! ctx.fillStyle (Canvas.obj2style ctx style-json))))))
+  (jslet ((canvas::proxy (current-canvas))
+          (style-json::json (style->json style)))
+    (let ((ctx (canvas.getContext "2d")))
+      (set! ctx.fillStyle (Canvas.obj2style ctx style-json)))))
 
 (define (current-font)
   (~ (current-canvas) 'context2d 'font))
 
 (define (set-font! font)
   (set! (~ (current-canvas) 'context2d 'font) font)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            font::string)
-      (set! (ref (canvas.getContext "2d") font) font))))
+  (jslet ((canvas::proxy (current-canvas))
+          (font::string))
+    (set! (ref (canvas.getContext "2d") font) font)))
 
 (define (current-global-alpha)
   (~ (current-canvas) 'context2d 'global-alpha))
 
 (define (set-global-alpha! alpha)
   (set! (~ (current-canvas) 'context2d 'global-alpha) alpha)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            alpha::f64)
-      (set! (ref (canvas.getContext "2d") globalAlpha) alpha))))
+  (jslet ((canvas::proxy (current-canvas))
+          (alpha::f64))
+    (set! (ref (canvas.getContext "2d") globalAlpha) alpha)))
 
 (define (current-global-composite-operation)
   (~ (current-canvas) 'context2d 'global-composite-operation))
@@ -377,20 +370,18 @@
 
 (define (set-global-composite-operation! op)
   (set! (~ (current-canvas) 'context2d 'global-composite-opration) op)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            op::global-composite-operation-enum)
-      (set! (ref (canvas.getContext "2d") globalCompositeOperation) op))))
+  (jslet ((canvas::proxy (current-canvas))
+          (op::global-composite-operation-enum))
+    (set! (ref (canvas.getContext "2d") globalCompositeOperation) op)))
 
 (define (current-image-smoothing-enabled?)
   (~ (current-canvas) 'context2d 'image-smoothing-enabled))
 
 (define (set-image-smoothing-enabled! flag)
   (set! (~ (current-canvas) 'context2d 'image-smoothing-enabled) flag)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            flag::boolean)
-      (set! (ref (canvas.getContext "2d") imageSmoothingEnabled) flag))))
+  (jslet ((canvas::proxy (current-canvas))
+          (flag::boolean))
+    (set! (ref (canvas.getContext "2d") imageSmoothingEnabled) flag)))
 
 (define (current-line-cap)
   (~ (current-canvas) 'context2d 'line-cap))
@@ -402,30 +393,27 @@
 
 (define (set-line-cap! opt)
   (set! (~ (current-canvas) 'context2d 'line-cap) opt)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            opt::line-cap-enum)
-      (set! (ref (canvas.getContext "2d") lineCap) opt))))
+  (jslet ((canvas::proxy (current-canvas))
+          (opt::line-cap-enum))
+    (set! (ref (canvas.getContext "2d") lineCap) opt)))
 
 (define (current-line-dash)
   (~ (current-canvas) 'context2d 'line-dash))
 
 (define (set-line-dash! segments)
   (set! (~ (current-canvas) 'context2d 'line-dash) segments)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            segments::json)
-      ((ref (canvas.getContext "2d") setLineDash) segments))))
+  (jslet ((canvas::proxy (current-canvas))
+          (segments::json))
+    ((ref (canvas.getContext "2d") setLineDash) segments)))
 
 (define (current-line-dash-offset)
   (~ (current-canvas) 'context2d 'line-dash-offset))
 
 (define (set-line-dash-offset! offset)
   (set! (~ (current-canvas) 'context2d 'line-dash-offset) offset)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            offset::f64)
-      (set! (ref (canvas.getContext "2d") lineDashOffset) offset))))
+  (jslet ((canvas::proxy (current-canvas))
+          (offset::f64))
+    (set! (ref (canvas.getContext "2d") lineDashOffset) offset)))
 
 (define (current-line-join)
   (~ (current-canvas) 'context2d 'line-join))
@@ -437,82 +425,73 @@
 
 (define (set-line-join! opt)
   (set! (~ (current-canvas) 'context2d 'line-join) opt)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            opt::line-join-enum)
-      (set! (ref (canvas.getContext "2d") lineJoin) opt))))
+  (jslet ((canvas::proxy (current-canvas))
+          (opt::line-join-enum))
+    (set! (ref (canvas.getContext "2d") lineJoin) opt)))
 
 (define (current-line-width)
   (~ (current-canvas) 'context2d 'line-width))
 
 (define (set-line-width! w)
   (set! (~ (current-canvas) 'context2d 'line-width) w)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            w::f64)
-      (set! (ref (canvas.getContext "2d") lineWidth) w))))
+  (jslet ((canvas::proxy (current-canvas))
+          (w::f64))
+    (set! (ref (canvas.getContext "2d") lineWidth) w)))
 
 (define (current-miter-limit)
   (~ (current-canvas) 'context2d 'miter-limit))
 
 (define (set-miter-limit! limit)
   (set! (~ (current-canvas) 'context2d 'miter-limit) limit)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            limit::f64)
-      (set! (ref (canvas.getContext "2d") miterLimit) limit))))
+  (jslet ((canvas::proxy (current-canvas))
+          (limit::f64))
+    (set! (ref (canvas.getContext "2d") miterLimit) limit)))
 
 (define (current-shadow-blur)
   (~ (current-canvas) 'context2d 'shadow-blur))
 
 (define (set-shadow-blur! level)
   (set! (~ (current-canvas) 'context2d 'shadow-blur) level)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            level::f64)
-      (set! (ref (canvas.getContext "2d") shadowBlur) level))))
+  (jslet ((canvas::proxy (current-canvas))
+          (level::f64))
+    (set! (ref (canvas.getContext "2d") shadowBlur) level)))
 
 (define (current-shadow-color)
   (~ (current-canvas) 'context2d 'shadow-color))
 
 (define (set-shadow-color! color)
   (set! (~ (current-canvas) 'context2d 'shadow-color) color)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            color::string)
-      (set! (ref (canvas.getContext "2d") shadowColor) color))))
+  (jslet ((canvas::proxy (current-canvas))
+          (color::string))
+    (set! (ref (canvas.getContext "2d") shadowColor) color)))
 
 (define (current-shadow-offset-x)
   (~ (current-canvas) 'context2d 'shadow-offset-x))
 
 (define (set-shadow-offset-x! offset)
   (set! (~ (current-canvas) 'context2d 'shadow-offset-x) offset)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            offset::f64)
-      (set! (ref (canvas.getContext "2d") shadowOffsetX) offset))))
+  (jslet ((canvas::proxy (current-canvas))
+          (offset::f64))
+    (set! (ref (canvas.getContext "2d") shadowOffsetX) offset)))
 
 (define (current-shadow-offset-y)
   (~ (current-canvas) 'context2d 'shadow-offset-y))
 
 (define (set-shadow-offset-y! offset)
   (set! (~ (current-canvas) 'context2d 'shadow-offset-y) offset)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            offset::f64)
-      (set! (ref (canvas.getContext "2d") shadowOffsetY) offset))))
+  (jslet ((canvas::proxy (current-canvas))
+          (offset::f64))
+    (set! (ref (canvas.getContext "2d") shadowOffsetY) offset)))
 
 (define (current-stroke-style)
   (~ (current-canvas) 'context2d 'stroke-style))
 
 (define (set-stroke-style! style)
   (set! (~ (current-canvas) 'context2d 'stroke-style) style)
-  (let ((canvas (current-canvas))
-        (style-json (style->json style)))
-    (jslet (canvas::proxy
-            style-json::json)
-      (let ((ctx (canvas.getContext "2d")))
-        (set! ctx.strokeStyle (Canvas.obj2style ctx style-json))))))
+  (jslet ((canvas::proxy (current-canvas))
+          (style-json::json (style->json style)))
+    (let ((ctx (canvas.getContext "2d")))
+      (set! ctx.strokeStyle (Canvas.obj2style ctx style-json)))))
 
 (define (current-text-align)
   (~ (current-canvas) 'context2d 'text-align))
@@ -546,328 +525,291 @@
     (set! (ref (canvas.getContext "2d") textBaseline) opt)))
 
 (define (arc x y radius start-angle end-angle :optional (anti-clockwise #f))
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            x::s32
-            y::s32
-            radius::s32
-            start-angle::f64
-            end-angle::f64
-            anti-clockwise::boolean)
-      ((ref (canvas.getContext "2d") arc) x y radius start-angle end-angle anti-clockwise))))
+  (jslet ((canvas::proxy (current-canvas))
+          (x::s32)
+          (y::s32)
+          (radius::s32)
+          (start-angle::f64)
+          (end-angle::f64)
+          (anti-clockwise::boolean))
+    ((ref (canvas.getContext "2d") arc) x y radius start-angle end-angle anti-clockwise)))
 
 (define (arc-to x1 y1 x2 y2 radius)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            x1::s32
-            y1::s32
-            x2::s32
-            y2::s32
-            radius::s32)
-      ((ref (canvas.getContext "2d") arcTo) x1 y1 x2 y2 radius))))
+  (jslet ((canvas::proxy (current-canvas))
+          (x1::s32)
+          (y1::s32)
+          (x2::s32)
+          (y2::s32)
+          (radius::s32))
+    ((ref (canvas.getContext "2d") arcTo) x1 y1 x2 y2 radius)))
 
 (define (begin-path)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy)
-      ((ref (canvas.getContext "2d") beginPath)))))
+  (jslet ((canvas::proxy (current-canvas)))
+    ((ref (canvas.getContext "2d") beginPath))))
 
 (define (bezier-curve-to cp1x cp1y cp2x cp2y x y)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            cp1x::s32
-            cp1y::s32
-            cp2x::s32
-            cp2y::s32
-            x::s32
-            y::s32)
-      ((ref (canvas.getContext "2d") bezierCurveTo) cp1x cp1y cp2x cp2y x y))))
+  (jslet ((canvas::proxy (current-canvas))
+          (cp1x::s32)
+          (cp1y::s32)
+          (cp2x::s32)
+          (cp2y::s32)
+          (x::s32)
+          (y::s32))
+    ((ref (canvas.getContext "2d") bezierCurveTo) cp1x cp1y cp2x cp2y x y)))
 
 (define (clear-rect x y w h)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            x::s32
-            y::s32
-            w::s32
-            h::s32)
-      ((ref (canvas.getContext "2d") clearRect) x y w h))))
+  (jslet ((canvas::proxy (current-canvas))
+          (x::s32)
+          (y::s32)
+          (w::s32)
+          (h::s32))
+    ((ref (canvas.getContext "2d") clearRect) x y w h)))
 
 (define-jsenum fillrule-enum
   (nonzero "nonzero")
   (evenodd "evenodd"))
 
 (define (clip :optional (rule 'nonzero))
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            rule::fillrule-enum)
-      ((ref (canvas.getContext "2d") clip) rule))))
+  (jslet ((canvas::proxy (current-canvas))
+          (rule::fillrule-enum))
+    ((ref (canvas.getContext "2d") clip) rule)))
 
 (define (close-path)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy)
-      ((ref (canvas.getContext "2d") closePath)))))
+  (jslet ((canvas::proxy (current-canvas)))
+    ((ref (canvas.getContext "2d") closePath))))
 
 (define-method draw-canvas ((src-canvas <canvas>) dx dy)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            src-canvas::proxy
-            dx::s32
-            dy::s32)
-      ((ref (canvas.getContext "2d") drawImage) src-canvas dx dy))))
+  (jslet ((canvas::proxy (current-canvas))
+          (src-canvas::proxy)
+          (dx::s32)
+          (dy::s32))
+    ((ref (canvas.getContext "2d") drawImage) src-canvas dx dy)))
 
 (define-method draw-canvas ((src-canvas <canvas>) dx dy dw dh)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            src-canvas::proxy
-            dx::s32
-            dy::s32
-            dw::s32
-            dh::s32)
-      ((ref (canvas.getContext "2d") drawImage) src-canvas dx dy dw dh))))
+  (jslet ((canvas::proxy (current-canvas))
+          (src-canvas::proxy)
+          (dx::s32)
+          (dy::s32)
+          (dw::s32)
+          (dh::s32))
+    ((ref (canvas.getContext "2d") drawImage) src-canvas dx dy dw dh)))
 
 (define-method draw-canvas ((src-canvas <canvas>) sx sy sw sh dx dy dw dh)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            src-canvas::proxy
-            sx::s32
-            sy::s32
-            sw::s32
-            sh::s32
-            dx::s32
-            dy::s32
-            dw::s32
-            dh::s32)
-      ((ref (canvas.getContext "2d") drawImage) src-canvas sx sy sw sh dx dy dw dh))))
+  (jslet ((canvas::proxy (current-canvas))
+          (src-canvas::proxy)
+          (sx::s32)
+          (sy::s32)
+          (sw::s32)
+          (sh::s32)
+          (dx::s32)
+          (dy::s32)
+          (dw::s32)
+          (dh::s32))
+    ((ref (canvas.getContext "2d") drawImage) src-canvas sx sy sw sh dx dy dw dh)))
 
 (define (ellipse x y radius-x radius-y rotation start-angle end-angle :optional (anti-clockwise? #f))
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            x::s32
-            y::s32
-            radius-x::s32
-            radius-y::s32
-            rotation::f64
-            start-angle::f64
-            end-angle::f64
-            anti-clockwise?::boolean)
-      ((ref (canvas.getContext "2d") ellipse)
-       x y radius-x radius-y rotation start-angle end-angle anti-clockwise?))))
+  (jslet ((canvas::proxy (current-canvas))
+          (x::s32)
+          (y::s32)
+          (radius-x::s32)
+          (radius-y::s32)
+          (rotation::f64)
+          (start-angle::f64)
+          (end-angle::f64)
+          (anti-clockwise?::boolean))
+    ((ref (canvas.getContext "2d") ellipse)
+     x y radius-x radius-y rotation start-angle end-angle anti-clockwise?)))
 
 (define (fill :optional (rule 'nonzero))
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            rule::fillrule-enum)
-      ((ref (canvas.getContext "2d") fill) rule))))
+  (jslet ((canvas::proxy (current-canvas))
+          (rule::fillrule-enum))
+    ((ref (canvas.getContext "2d") fill) rule)))
 
 (define (fill-rect x y w h)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            x::s32
-            y::s32
-            w::s32
-            h::s32)
-      ((ref (canvas.getContext "2d") fillRect) x y w h))))
+  (jslet ((canvas::proxy (current-canvas))
+          (x::s32)
+          (y::s32)
+          (w::s32)
+          (h::s32))
+    ((ref (canvas.getContext "2d") fillRect) x y w h)))
 
 (define (fill-text text x y :optional (max-width 0))
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            text::string
-            x::s32
-            y::s32
-            max-width::s32)
-      (if (< 0 max-width)
-          ((ref (canvas.getContext "2d") fillText) text x y max-width)
-          ((ref (canvas.getContext "2d") fillText) text x y)))))
+  (jslet ((canvas::proxy (current-canvas))
+          (text::string)
+          (x::s32)
+          (y::s32)
+          (max-width::s32))
+    (if (< 0 max-width)
+        ((ref (canvas.getContext "2d") fillText) text x y max-width)
+        ((ref (canvas.getContext "2d") fillText) text x y))))
 
 (define (get-image-data sx sy sw sh)
-  (let* ((canvas (current-canvas))
-         (image (make <graviton-image> :width sw :height sh))
-         (image-id (slot-ref image 'id)))
-    (jslet (canvas::proxy
-            image-id::u32
-            sx::s32
-            sy::s32
-            sw::s32
-            sh::s32)
+  (let1 image (make <graviton-image> :width sw :height sh)
+    (jslet ((canvas::proxy (current-canvas))
+            (image-id::u32 (proxy-object-id image))
+            (sx::s32)
+            (sy::s32)
+            (sw::s32)
+            (sh::s32))
       (let ((image ((ref (canvas.getContext "2d") getImageData) sx sy sw sh)))
         (Graviton.linkProxyObject image-id image)))
     image))
 
 (define (is-point-in-path? x y :optional (rule 'nonzero))
-  (let ((canvas (current-canvas)))
-    (jslet/result (canvas::proxy
-                   x::s32
-                   y::s32
-                   rule::fillrule-enum)
-      (result ((ref (canvas.getContext "2d") isPointInPath) x y rule)))))
+  (jslet/result ((canvas::proxy (current-canvas))
+                 (x::s32)
+                 (y::s32)
+                 (rule::fillrule-enum))
+    (result ((ref (canvas.getContext "2d") isPointInPath) x y rule))))
 
 (define (is-point-in-stroke? x y)
-  (let ((canvas (current-canvas)))
-    (jslet/result (canvas::proxy
-                   x::s32
-                   y::s32)
-      (result ((ref (canvas.getContext "2d") isPointInStroke) x y)))))
+  (jslet/result ((canvas::proxy (current-canvas))
+                 (x::s32)
+                 (y::s32))
+    (result ((ref (canvas.getContext "2d") isPointInStroke) x y))))
 
 (define (line-to x y)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            x::s32
-            y::s32)
-      ((ref (canvas.getContext "2d") lineTo) x y))))
+  (jslet ((canvas::proxy (current-canvas))
+          (x::s32)
+          (y::s32))
+    ((ref (canvas.getContext "2d") lineTo) x y)))
 
 (define-class <text-metrics> ()
   ((width :init-keyword :width)))
 
 (define (measure-text text)
-  (let ((canvas (current-canvas)))
-    (jslet/result:then (lambda (width)
-                         (make <text-metrics> :width width))
-        (canvas::proxy
-         text::string)
-      (let ((text-metrics ((ref (canvas.getContext "2d") measureText) text)))
-        (result text-metrics.width)))))
+  (jslet/result:then (lambda (width)
+                       (make <text-metrics> :width width))
+      ((canvas::proxy (current-canvas))
+       (text::string))
+    (let ((text-metrics ((ref (canvas.getContext "2d") measureText) text)))
+      (result text-metrics.width))))
 
 (define (move-to x y)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            x::s32
-            y::s32)
-      ((ref (canvas.getContext "2d") moveTo) x y))))
+  (jslet ((canvas::proxy (current-canvas))
+          (x::s32)
+          (y::s32))
+    ((ref (canvas.getContext "2d") moveTo) x y)))
 
 (define-method put-image-data ((image <graviton-image>) dx dy)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            image::proxy
-            dx::s32
-            dy::s32)
-      ((ref (canvas.getContext "2d") putImageData) image dx dy))))
+  (jslet ((canvas::proxy (current-canvas))
+          (image::proxy)
+          (dx::s32)
+          (dy::s32))
+    ((ref (canvas.getContext "2d") putImageData) image dx dy)))
 
 (define-method put-image-data ((image <graviton-image>) dx dy dirty-x dirty-y dirty-width dirty-height)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            image::proxy
-            dx::s32
-            dy::s32
-            dirty-x::s32
-            dirty-y::s32
-            dirty-width::s32
-            dirty-height::s32)
-      ((ref (canvas.getContext "2d") putImageData) image dx dy dirty-x dirty-y dirty-width dirty-height))))
+  (jslet ((canvas::proxy (current-canvas))
+          (image::proxy)
+          (dx::s32)
+          (dy::s32)
+          (dirty-x::s32)
+          (dirty-y::s32)
+          (dirty-width::s32)
+          (dirty-height::s32))
+    ((ref (canvas.getContext "2d") putImageData) image dx dy dirty-x dirty-y dirty-width dirty-height)))
 
 (define (quadratic-curve-to cpx cpy x y)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            cpx::s32
-            cpy::s32
-            x::s32
-            y::s32)
-      ((ref (canvas.getContext "2d") quadraticCurveTo) cpx cpy x y))))
+  (jslet ((canvas::proxy (current-canvas))
+          (cpx::s32)
+          (cpy::s32)
+          (x::s32)
+          (y::s32))
+    ((ref (canvas.getContext "2d") quadraticCurveTo) cpx cpy x y)))
 
 (define (rect x y w h)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            x::s32
-            y::s32
-            w::s32
-            h::s32)
-      ((ref (canvas.getContext "2d") rect) x y w h))))
+  (jslet ((canvas::proxy (current-canvas))
+          (x::s32)
+          (y::s32)
+          (w::s32)
+          (h::s32))
+    ((ref (canvas.getContext "2d") rect) x y w h)))
 
 (define (restore-context)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy)
-      ((ref (canvas.getContext "2d") restore))))
+  (jslet ((canvas::proxy (current-canvas)))
+    ((ref (canvas.getContext "2d") restore)))
   (pop! (slot-ref (current-canvas) 'context2d-list)))
 
 (define (rotate angle)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            angle::f64)
-      ((ref (canvas.getContext "2d") rotate) angle))))
+  (jslet ((canvas::proxy (current-canvas))
+          (angle::f64))
+    ((ref (canvas.getContext "2d") rotate) angle)))
 
 (define (save-context)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy)
-      ((ref (canvas.getContext "2d") save))))
+  (jslet ((canvas::proxy (current-canvas)))
+    ((ref (canvas.getContext "2d") save)))
   (let1 ctx2 (copy-context2d (slot-ref (current-canvas) 'context2d))
     (push! (slot-ref (current-canvas) 'context2d-list) ctx2)))
 
 (define (scale x y)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            x::f64
-            y::f64)
-      ((ref (canvas.getContext "2d") scale) x y))))
+  (jslet ((canvas::proxy (current-canvas))
+          (x::f64)
+          (y::f64))
+    ((ref (canvas.getContext "2d") scale) x y)))
 
 (define (set-transform! a b c d e f)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            a::f64
-            b::f64
-            c::f64
-            d::f64
-            e::f64
-            f::f64)
-      ((ref (canvas.getContext "2d") setTransform) a b c d e f))))
+  (jslet ((canvas::proxy (current-canvas))
+          (a::f64)
+          (b::f64)
+          (c::f64)
+          (d::f64)
+          (e::f64)
+          (f::f64))
+    ((ref (canvas.getContext "2d") setTransform) a b c d e f)))
 
 (define (stroke)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy)
-      ((ref (canvas.getContext "2d") stroke)))))
+  (jslet ((canvas::proxy (current-canvas)))
+    ((ref (canvas.getContext "2d") stroke))))
 
 (define (stroke-rect x y w h)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            x::s32
-            y::s32
-            w::s32
-            h::s32)
-      ((ref (canvas.getContext "2d") strokeRect) x y w h))))
+  (jslet ((canvas::proxy (current-canvas))
+          (x::s32)
+          (y::s32)
+          (w::s32)
+          (h::s32))
+    ((ref (canvas.getContext "2d") strokeRect) x y w h)))
 
 (define (stroke-text text x y :optional (max-width 0))
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            text::string
-            x::s32
-            y::s32
-            max-width::s32)
-      (if (< 0 max-width)
-          ((ref (canvas.getContext "2d") strokeText) text x y max-width)
-          ((ref (canvas.getContext "2d") strokeText) text x y)))))
+  (jslet ((canvas::proxy (current-canvas))
+          (text::string)
+          (x::s32)
+          (y::s32)
+          (max-width::s32))
+    (if (< 0 max-width)
+        ((ref (canvas.getContext "2d") strokeText) text x y max-width)
+        ((ref (canvas.getContext "2d") strokeText) text x y))))
 
 (define (transform a b c d e f)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            a::f64
-            b::f64
-            c::f64
-            d::f64
-            e::f64
-            f::f64)
-      ((ref (canvas.getContext "2d") transform) a b c d e f))))
+  (jslet ((canvas::proxy (current-canvas))
+          (a::f64)
+          (b::f64)
+          (c::f64)
+          (d::f64)
+          (e::f64)
+          (f::f64))
+    ((ref (canvas.getContext "2d") transform) a b c d e f)))
 
 (define (translate x y)
-  (let ((canvas (current-canvas)))
-    (jslet (canvas::proxy
-            x::s32
-            y::s32)
-      ((ref (canvas.getContext "2d") translate) x y))))
+  (jslet ((canvas::proxy (current-canvas))
+          (x::s32)
+          (y::s32))
+    ((ref (canvas.getContext "2d") translate) x y)))
 
 (define (create-image-data w h)
-  (let* ((canvas (current-canvas))
-         (image (make <graviton-image> :width w :height h))
-         (image-id (slot-ref image 'id)))
-    (jslet (canvas::proxy
-            image-id::u32
-            w::s32
-            h::s32)
+  (let1 image (make <graviton-image> :width w :height h)
+    (jslet ((canvas::proxy (current-canvas))
+            (image-id::u32 (proxy-object-id image))
+            (w::s32)
+            (h::s32))
       (let ((image ((ref (canvas.getContext "2d") createImageData) w h)))
         (Graviton.linkProxyObject image-id image)))
     image))
 
 (define (upload-image-data image data)
-  (jslet (image::proxy
-          data::u8vector)
+  (jslet ((image::proxy)
+          (data::u8vector))
     (image.data.set data)))
 
 (define (download-image-data image)
-  (jslet/result (image::proxy)
+  (jslet/result ((image::proxy))
     (result-u8array image.data)))

@@ -59,14 +59,12 @@
   ((duration :init-value #f)))
 
 (define (load-audio filename :key (content-type #f))
-  (let* ((node (make <audio-media-element-node>))
-         (node-id (proxy-object-id node))
-         (url (resource-url filename :content-type content-type)))
+  (let1 node (make <audio-media-element-node>)
     (jslet/result:then (lambda (duration)
                          (slot-set! node 'duration duration)
                          node)
-        (node-id::u32
-         url::string)
+        ((node-id::u32 (proxy-object-id node))
+         (url::string (resource-url filename :content-type content-type)))
       (let ((audio (make Audio url)))
         (set! audio.onloadedmetadata (lambda ()
                                        (let ((source-node (audioContext.createMediaElementSource audio)))
@@ -77,11 +75,11 @@
                                 (result-error "Load audio failed.")))))))
 
 (define (play-audio audio)
-  (jslet (audio::proxy)
+  (jslet ((audio::proxy))
     (audio.mediaElement.play)))
 
 (define (pause-audio audio)
-  (jslet (audio::proxy)
+  (jslet ((audio::proxy))
     (audio.mediaElement.pause)))
 
 (define-class <audio-buffer> (<proxy-object>)
@@ -91,17 +89,15 @@
    (number-of-channels)))
 
 (define (load-pcm filename :key (content-type #f))
-  (let* ((pcm (make <audio-buffer>))
-         (object-id (proxy-object-id pcm))
-         (url (resource-url filename :content-type content-type)))
+  (let1 pcm (make <audio-buffer>)
     (jslet/result:then (lambda (sample-rate len duration num-of-channels)
                          (slot-set! pcm 'sample-rate sample-rate)
                          (slot-set! pcm 'length len)
                          (slot-set! pcm 'duration duration)
                          (slot-set! pcm 'number-of-channels num-of-channels)
                          pcm)
-        (object-id::u32
-         url::string)
+        ((object-id::u32 (proxy-object-id pcm))
+         (url::string (resource-url filename :content-type content-type)))
       (let ((req (make XMLHttpRequest)))
         (req.open "GET" url #t)
         (set! req.responseType "arraybuffer")
@@ -126,11 +122,11 @@
   (play-wave channel-num type (f64vector freq) len gain))
 
 (define-method play-wave (channel-num type (freqs <f64vector>) len :optional (gain 1.0))
-  (jslet (channel-num::u8
-          type::oscillator-type-enum
-          freqs::f64vector
-          len::f64
-          gain::f64)
+  (jslet ((channel-num::u8)
+          (type::oscillator-type-enum)
+          (freqs::f64vector)
+          (len::f64)
+          (gain::f64))
     (let ((channel (aref audioChannels channel-num))
           (start-time (Math.max channel.lastPlaySec audioContext.currentTime))
           (end-time (+ start-time len)))
@@ -147,28 +143,24 @@
       (set! channel.lastPlaySec end-time))))
 
 (define (play-rest channel-num len)
-  (jslet (channel-num::u8
-          len::f64)
+  (jslet ((channel-num::u8)
+          (len::f64))
     (let ((channel (aref audioChannels channel-num))
           (start-time (Math.max channel.lastPlaySec audioContext.currentTime))
           (end-time (+ start-time len)))
       (set! channel.lastPlaySec end-time))))
 
 (define (play-pcm channel-num pcm-data :optional (detune 0) (playback-rate 1.0) (loop-range #f) (len #f) (gain 1.0))
-  (let ((loop? (if loop-range #t #f))
-        (loop-start (if loop-range (list-ref loop-range 0) 0))
-        (loop-end (if loop-range (list-ref loop-range 1) 0))
-        (len (or len
-                 (slot-ref pcm-data 'duration))))
-  (jslet (channel-num::u8
-          pcm-data::proxy
-          detune::f64
-          playback-rate::f64
-          loop?::boolean
-          loop-start::f64
-          loop-end::f64
-          len::f64
-          gain::f64)
+  (jslet ((channel-num::u8)
+          (pcm-data::proxy)
+          (detune::f64)
+          (playback-rate::f64)
+          (loop?::boolean (if loop-range #t #f))
+          (loop-start::f64 (if loop-range (list-ref loop-range 0) 0))
+          (loop-end::f64 (if loop-range (list-ref loop-range 1) 0))
+          (len::f64 (or len
+                        (slot-ref pcm-data 'duration)))
+          (gain::f64))
     (let ((channel (aref audioChannels channel-num))
           (pcm-node (audioContext.createBufferSource))
           (gain-node (audioContext.createGain))
@@ -188,4 +180,4 @@
       (gain-node.connect audioContext.destination)
       (pcm-node.start start-time)
       (pcm-node.stop end-time)
-      (set! channel.lastPlaySec end-time)))))
+      (set! channel.lastPlaySec end-time))))
