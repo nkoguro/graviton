@@ -43,6 +43,7 @@
   (use gauche.parameter)
   (use gauche.partcont)
   (use gauche.process)
+  (use gauche.record)
   (use gauche.regexp)
   (use gauche.selector)
   (use gauche.sequence)
@@ -166,7 +167,7 @@
           (cond
             ((or (slot-ref future 'result-values)
                  (slot-ref future 'result-exception))
-             ;; If values or exception is set, do nothing.
+             ;; If values or exception is already set, do nothing.
              #f)
             (else
              (slot-set! future 'result-values vals)
@@ -234,12 +235,13 @@
     ((_ expr ...)
      (async-apply-main (lambda () expr ...) '()))))
 
-(define (register-future! future)
+(define (allocate-future-id future)
   (with-future-table
     (lambda (tbl future-next-id)
       (define (loop)
         (let1 id (future-next-id)
           (cond
+            ;; If the counter goes around the cycle, the ID can be conflict. So we need to skip IDs in the table.
             ((hash-table-contains? tbl id)
              (loop))
             (else
@@ -250,7 +252,9 @@
 (define (notify-result id vals err)
   (with-future-table
     (lambda (tbl future-next-id)
-      (let1 future (hash-table-get tbl id #f)
+      (let1 future (begin0
+                     (hash-table-get tbl id #f)
+                     (hash-table-delete! tbl id))
         (cond
           (future
            (set-future-result-values&exception! future
@@ -261,8 +265,7 @@
                                                     #f
                                                     (condition
                                                       (&message (message err))
-                                                      (&error))))
-           (hash-table-delete! tbl id))
+                                                      (&error)))))
           ((not (eq? err 'false))
            (raise err))
           (else
@@ -534,7 +537,6 @@
 (define-class <send-context> ()
   ((websocket-output-port :init-keyword :websocket-output-port)
    (buffer-output-port :init-keyword :buffer-output-port)
-   (proxy-object-id-generator :init-form (make-id-generator #xffffffff))
    (command-buffering? :init-value #f)))
 
 (define *application-context-slot-initials* '())
@@ -617,10 +619,6 @@
     (lambda (ctx)
       (slot-set! ctx 'command-buffering? val))))
 
-(define (proxy-object-next-id)
-  (with-send-context (lambda (ctx)
-                       ((slot-ref ctx 'proxy-object-id-generator)))))
-
 (define (with-future-table proc)
   (atomic (slot-ref (application-context) 'future-table-atom) proc))
 
@@ -664,7 +662,6 @@
           (atomic-update! *num-dispatcher* (^x (+ x 1)))
           (let* ((sel (make <selector>))
                  (ctx (make <websocket-server-context>))
-                 (next-id (make-id-generator #xffffffff))
                  (app-context (make-application-context 1 2 out)))
             (define (close-websocket status data)
               (log-info "WebSocket closed: code=~a, data=(~a)" status data)
@@ -868,7 +865,7 @@
                  ('boolean
                    (write-u8 (if arg 1 0) out 'little-endian))
                  ('future
-                  (let1 id (register-future! arg)
+                  (let1 id (allocate-future-id arg)
                     (write-u32 id out 'little-endian)))
                  ('proxy
                   (write-u32 (proxy-object-id arg) out 'little-endian))
@@ -1071,25 +1068,63 @@
 
 ;;;
 
+(define-record-type <id-range>
+  make-id-range id-range?
+  (start id-range-start set-id-range-start!)
+  (end id-range-end))
+
+(define (make-free-id-list id-size)
+  (cons #t
+        (cons (make-id-range 1 id-size)
+              #f)))
+
+(define (allocate-id! free-id-list)
+  (let1 cell (cdr free-id-list)
+    (cond
+      (cell
+       (let* ((id-range (car cell))
+              (s (id-range-start id-range)))
+         (if (= (+ s 1) (id-range-end id-range))
+             (set-cdr! free-id-list (cdr cell))
+             (set-id-range-start! id-range (+ s 1)))
+         s))
+      (else
+       #f))))
+
+(define (release-id! free-id-list id)
+  (let1 cell (let loop ((cell free-id-list))
+               (if (or (not (cdr cell))
+                       (< id (id-range-start (cadr cell))))
+                   cell
+                   (loop (cdr cell))))
+    (set-cdr! cell (cons (make-id-range id (+ id 1)) (cdr cell)))))
+
 (define-class <proxy-object> ()
-  ((id :init-value #f)))
+  ((%free-id-list :allocation :class
+                  :init-form (atom (make-free-id-list #x100000000)))
+   (id :init-value #f)))
 
-(define-method initialize ((obj <proxy-object>) :rest args)
+(define-method initialize ((obj <proxy-object>) initargs)
   (next-method)
-  (slot-set! obj 'id (proxy-object-next-id)))
+  (or (and-let1 id (atomic (slot-ref obj '%free-id-list)
+                     (lambda (free-id-list)
+                       (allocate-id! free-id-list)))
+        (slot-set! obj 'id id)
+        #t)
+      (error "The proxy object ID space is exhausted.")))
 
-(define (proxy-object-id obj)
+(define-method proxy-object-id ((obj <proxy-object>))
   (or (slot-ref obj 'id)
       (errorf "~s was unlinked" obj)))
 
-(define (unlink-proxy-object! obj)
-  (cond
-    ((slot-ref obj 'id) => (lambda (id)
-                             (slot-set! obj 'id #f)
-                             (jslet ((id::u32))
-                               (Graviton.unlinkProxyObject id))))
-    (else
-     #t)))
+(define-method unlink-proxy-object! ((obj <proxy-object>))
+  (and-let1 id (slot-ref obj 'id)
+    (slot-set! obj 'id #f)
+    (atomic (slot-ref obj '%free-id-list)
+      (lambda (free-id-list)
+        (release-id! free-id-list id)))
+    (jslet ((id::u32))
+      (Graviton.unlinkProxyObject id))))
 
 ;;;
 
