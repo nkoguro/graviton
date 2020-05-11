@@ -539,23 +539,22 @@
    (buffer-output-port :init-keyword :buffer-output-port)
    (command-buffering? :init-value #f)))
 
-(define *application-context-slot-initials* '())
+(define *application-context-slot-initial-forms* '())
 
 (define-syntax define-application-context-slot
   (syntax-rules ()
     ((_ name val)
-     (push! *application-context-slot-initials* (cons 'name val)))))
+     (push! *application-context-slot-initial-forms* (cons 'name (lambda () val))))))
 
 (define-class <application-context> ()
   ((main-thread-pool :init-keyword :main-thread-pool)
    (worker-thread-pool :init-keyword :worker-thread-pool)
    (send-context-atom :init-keyword :send-context-atom)
-   (future-table-atom :init-form (atom (make-hash-table 'equal?) (make-id-generator #xffffffff)))
    (slot-table-atom :init-form (atom (let1 tbl (make-hash-table 'eq?)
                                        (for-each (match-lambda
-                                                   ((name . val)
-                                                    (hash-table-put! tbl name val)))
-                                                 *application-context-slot-initials*)
+                                                   ((name . thunk)
+                                                    (hash-table-put! tbl name (thunk))))
+                                                 *application-context-slot-initial-forms*)
                                        tbl)))))
 
 (define application-context (make-parameter #f))
@@ -619,8 +618,13 @@
     (lambda (ctx)
       (slot-set! ctx 'command-buffering? val))))
 
+(define-application-context-slot future-table (list (make-hash-table 'equal?) (make-id-generator #xffffffff)))
+
 (define (with-future-table proc)
-  (atomic (slot-ref (application-context) 'future-table-atom) proc))
+  (application-context-slot-atomic-ref 'future-table
+    (match-lambda
+      ((tbl gen)
+       (proc tbl gen)))))
 
 (define json-command-table (make-hash-table 'equal?))
 
