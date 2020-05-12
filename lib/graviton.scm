@@ -549,26 +549,20 @@
 (define-class <application-context> ()
   ((main-thread-pool :init-keyword :main-thread-pool)
    (worker-thread-pool :init-keyword :worker-thread-pool)
-   (send-context-atom :init-keyword :send-context-atom)
    (slot-table-atom :init-form (atom (let1 tbl (make-hash-table 'eq?)
                                        (for-each (match-lambda
                                                    ((name . thunk)
-                                                    (hash-table-put! tbl name (thunk))))
+                                                    (hash-table-put! tbl name (atom (thunk)))))
                                                  *application-context-slot-initial-forms*)
                                        tbl)))))
 
 (define application-context (make-parameter #f))
 (define current-thread-pool (make-parameter #f))
 
-(define (make-application-context num-main-pool-size num-worker-pool-size websocket-output-port)
-  (let* ((send-context (make <send-context>
-                         :websocket-output-port websocket-output-port
-                         :buffer-output-port (open-output-uvector)))
-         (app-context (make <application-context>
-                        :main-thread-pool (make-thread-pool num-main-pool-size)
-                        :worker-thread-pool (make-thread-pool num-worker-pool-size)
-                        :send-context-atom (atom send-context))))
-    app-context))
+(define (make-application-context num-main-pool-size num-worker-pool-size)
+  (make <application-context>
+    :main-thread-pool (make-thread-pool num-main-pool-size)
+    :worker-thread-pool (make-thread-pool num-worker-pool-size)))
 
 (define (main-thread-pool)
   (slot-ref (application-context) 'main-thread-pool))
@@ -577,24 +571,26 @@
   (slot-ref (application-context) 'worker-thread-pool))
 
 (define (application-context-slot-atomic-ref name proc)
-  (atomic (slot-ref (application-context) 'slot-table-atom)
-    (lambda (tbl)
-      (proc (hash-table-get tbl name #f)))))
+  (let1 val-atom (atomic (slot-ref (application-context) 'slot-table-atom)
+                   (lambda (tbl)
+                     (or (hash-table-get tbl name #f)
+                         (errorf "application-context doesn't have such slot: ~a" name))))
+    (atomic val-atom proc)))
 
 (define (application-context-slot-ref name)
-  (atomic (slot-ref (application-context) 'slot-table-atom)
-    (lambda (tbl)
-      (hash-table-get tbl name #f))))
+  (application-context-slot-atomic-ref name values))
 
 (define (application-context-slot-atomic-update! name proc)
-  (atomic (slot-ref (application-context) 'slot-table-atom)
-    (lambda (tbl)
-      (let1 val (proc (hash-table-get tbl name #f))
-        (hash-table-put! tbl name val)
-        val))))
+  (let1 val-atom (atomic (slot-ref (application-context) 'slot-table-atom)
+                   (lambda (tbl)
+                     (or (hash-table-get tbl name #f)
+                         (errorf "application-context doesn't have such slot: ~a" name))))
+    (atomic-update! val-atom proc)))
 
 (define (application-context-slot-set! name val)
   (application-context-slot-atomic-update! name (lambda _ val)))
+
+(define-application-context-slot send-context #f)
 
 (define current-send-context (make-parameter #f))
 
@@ -603,7 +599,7 @@
     ((current-send-context)
      (proc (current-send-context)))
     (else
-     (atomic (slot-ref (application-context) 'send-context-atom)
+     (application-context-slot-atomic-ref 'send-context
        (lambda (ctx)
          (parameterize ((current-send-context ctx))
            (proc ctx)))))))
@@ -666,7 +662,7 @@
           (atomic-update! *num-dispatcher* (^x (+ x 1)))
           (let* ((sel (make <selector>))
                  (ctx (make <websocket-server-context>))
-                 (app-context (make-application-context 1 2 out)))
+                 (app-context (make-application-context 1 2)))
             (define (close-websocket status data)
               (log-info "WebSocket closed: code=~a, data=(~a)" status data)
               (selector-delete! sel in #f #f)
@@ -692,6 +688,11 @@
                                                      ((true) #t)
                                                      (else sym))))
                            (application-context app-context))
+              (application-context-slot-set! 'send-context
+                                             (make <send-context>
+                                               :websocket-output-port out
+                                               :buffer-output-port (open-output-uvector)))
+
               (selector-add! sel in (lambda (in flag)
                                       (while (and (byte-ready? in) (not (port-closed? in)))
                                         (dispatch-payload ctx
@@ -1134,6 +1135,8 @@
 
 (define-class <browser-window> (<proxy-object>)
   ())
+
+(define-application-context-slot browser-window #f)
 
 (define (browser-window)
   (application-context-slot-atomic-update! 'browser-window
