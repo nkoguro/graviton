@@ -543,8 +543,8 @@
 
 (define-syntax define-application-context-slot
   (syntax-rules ()
-    ((_ name val)
-     (push! *application-context-slot-initial-forms* (cons 'name (lambda () val))))))
+    ((_ name vals ...)
+     (push! *application-context-slot-initial-forms* (cons 'name (lambda () (list vals ...)))))))
 
 (define-class <application-context> ()
   ((main-thread-pool :init-keyword :main-thread-pool)
@@ -552,23 +552,25 @@
    (slot-table-atom :init-form (atom (let1 tbl (make-hash-table 'eq?)
                                        (for-each (match-lambda
                                                    ((name . thunk)
-                                                    (hash-table-put! tbl name (atom (thunk)))))
+                                                    (hash-table-put! tbl name (apply atom (thunk)))))
                                                  *application-context-slot-initial-forms*)
                                        tbl)))))
 
 (define application-context (make-parameter #f))
 (define current-thread-pool (make-parameter #f))
 
-(define (make-application-context num-main-pool-size num-worker-pool-size)
-  (make <application-context>
-    :main-thread-pool (make-thread-pool num-main-pool-size)
-    :worker-thread-pool (make-thread-pool num-worker-pool-size)))
+(define (make-application-context)
+  (make <application-context>))
+
+(define-constant *worker-pool-size* 2)
+
+(define-application-context-slot thread-pool (make-thread-pool 1) (make-thread-pool *worker-pool-size*))
 
 (define (main-thread-pool)
-  (slot-ref (application-context) 'main-thread-pool))
+  (values-ref (application-context-slot-ref 'thread-pool) 0))
 
 (define (worker-thread-pool)
-  (slot-ref (application-context) 'worker-thread-pool))
+  (values-ref (application-context-slot-ref 'thread-pool) 1))
 
 (define (application-context-slot-atomic-ref name proc)
   (let1 val-atom (atomic (slot-ref (application-context) 'slot-table-atom)
@@ -587,8 +589,8 @@
                          (errorf "application-context doesn't have such slot: ~a" name))))
     (atomic-update! val-atom proc)))
 
-(define (application-context-slot-set! name val)
-  (application-context-slot-atomic-update! name (lambda _ val)))
+(define (application-context-slot-set! name :rest vals)
+  (application-context-slot-atomic-update! name (lambda _ (apply values vals))))
 
 (define-application-context-slot send-context #f)
 
@@ -614,13 +616,10 @@
     (lambda (ctx)
       (slot-set! ctx 'command-buffering? val))))
 
-(define-application-context-slot future-table (list (make-hash-table 'equal?) (make-id-generator #xffffffff)))
+(define-application-context-slot future-table (make-hash-table 'equal?) (make-id-generator #xffffffff))
 
 (define (with-future-table proc)
-  (application-context-slot-atomic-ref 'future-table
-    (match-lambda
-      ((tbl gen)
-       (proc tbl gen)))))
+  (application-context-slot-atomic-ref 'future-table proc))
 
 (define json-command-table (make-hash-table 'equal?))
 
@@ -662,7 +661,7 @@
           (atomic-update! *num-dispatcher* (^x (+ x 1)))
           (let* ((sel (make <selector>))
                  (ctx (make <websocket-server-context>))
-                 (app-context (make-application-context 1 2)))
+                 (app-context (make-application-context)))
             (define (close-websocket status data)
               (log-info "WebSocket closed: code=~a, data=(~a)" status data)
               (selector-delete! sel in #f #f)
