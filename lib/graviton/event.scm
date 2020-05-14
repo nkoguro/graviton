@@ -37,6 +37,7 @@
   (use gauche.regexp)
   (use graviton)
   (use graviton.config)
+  (use graviton.context)
   (use graviton.jsise)
   (use util.match)
 

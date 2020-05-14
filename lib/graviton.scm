@@ -51,6 +51,7 @@
   (use gauche.time)
   (use gauche.uvector)
   (use graviton.config)
+  (use graviton.context)
   (use graviton.jsise)
   (use makiki)
   (use rfc.base64)
@@ -91,13 +92,6 @@
           submit-thunk
 
           define-action
-
-          application-context
-          application-context-slot-atomic-ref
-          application-context-slot-atomic-update!
-          application-context-slot-ref
-          application-context-slot-set!
-          define-application-context-slot
 
           browser-window
 
@@ -539,28 +533,7 @@
    (buffer-output-port :init-keyword :buffer-output-port)
    (command-buffering? :init-value #f)))
 
-(define *application-context-slot-initial-forms* '())
-
-(define-syntax define-application-context-slot
-  (syntax-rules ()
-    ((_ name vals ...)
-     (push! *application-context-slot-initial-forms* (cons 'name (lambda () (list vals ...)))))))
-
-(define-class <application-context> ()
-  ((main-thread-pool :init-keyword :main-thread-pool)
-   (worker-thread-pool :init-keyword :worker-thread-pool)
-   (slot-table-atom :init-form (atom (let1 tbl (make-hash-table 'eq?)
-                                       (for-each (match-lambda
-                                                   ((name . thunk)
-                                                    (hash-table-put! tbl name (apply atom (thunk)))))
-                                                 *application-context-slot-initial-forms*)
-                                       tbl)))))
-
-(define application-context (make-parameter #f))
 (define current-thread-pool (make-parameter #f))
-
-(define (make-application-context)
-  (make <application-context>))
 
 (define-constant *worker-pool-size* 2)
 
@@ -571,26 +544,6 @@
 
 (define (worker-thread-pool)
   (values-ref (application-context-slot-ref 'thread-pool) 1))
-
-(define (application-context-slot-atomic-ref name proc)
-  (let1 val-atom (atomic (slot-ref (application-context) 'slot-table-atom)
-                   (lambda (tbl)
-                     (or (hash-table-get tbl name #f)
-                         (errorf "application-context doesn't have such slot: ~a" name))))
-    (atomic val-atom proc)))
-
-(define (application-context-slot-ref name)
-  (application-context-slot-atomic-ref name values))
-
-(define (application-context-slot-atomic-update! name proc)
-  (let1 val-atom (atomic (slot-ref (application-context) 'slot-table-atom)
-                   (lambda (tbl)
-                     (or (hash-table-get tbl name #f)
-                         (errorf "application-context doesn't have such slot: ~a" name))))
-    (atomic-update! val-atom proc)))
-
-(define (application-context-slot-set! name :rest vals)
-  (application-context-slot-atomic-update! name (lambda _ (apply values vals))))
 
 (define-application-context-slot send-context #f)
 
