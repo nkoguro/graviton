@@ -77,6 +77,7 @@
           grv-main
           grv-begin
 
+          transform-future
           async-apply-main
           async-main
           await
@@ -101,7 +102,6 @@
           define-jsenum
           jslet
           jslet/result
-          jslet/result:then
 
           estimate-content-type
           resource-url
@@ -145,16 +145,23 @@
 ;; future is await-able only in the main thread.
 (define-class <graviton-future> ()
   ((lock :init-form (make-mutex))
-   (result-maker :init-value values
-                 :init-keyword :result-maker)
    (result-values :init-value #f)
    (result-exception :init-value #f)
    (pool&continuations :init-value '())))
 
-(define (set-future-result-values&exception! future args exception)
+(define-class <graviton-future-transformer> ()
+  ((lock :init-form (make-mutex))
+   (original-future :init-keyword :original-future)
+   (transformer :init-keyword :transformer)
+   (cached-result-values :init-value #f)
+   (cached-result-exception :init-value #f)))
+
+(define (transform-future future proc)
+  (make <graviton-future-transformer> :original-future future :transformer proc))
+
+(define (set-future-result-values&exception! future vals exception)
   (let ((lock (slot-ref future 'lock))
-        (pool&conts '())
-        (vals (values->list (apply (slot-ref future 'result-maker) args))))
+        (pool&conts '()))
     (unwind-protect
         (begin
           (mutex-lock! lock)
@@ -176,36 +183,62 @@
                                    (cont vals exception))))))
               pool&conts)))
 
-(define (await future :optional (timeout #f) :rest timeout-vals)
+(define-method get-future-result-values&exception ((future <graviton-future>) timeout timeout-vals)
   (let1 lock (slot-ref future 'lock)
-    (flush-commands)
     (dynamic-wind
         (lambda ()
           (mutex-lock! lock))
         (lambda ()
-          (receive (vals exception)
-              (cond
-                ((slot-ref future 'result-values)
-                 => (cut values <> #f))
-                ((slot-ref future 'result-exception)
-                 => (cut values #f <>))
-                (else
-                 (let1 pool (current-thread-pool)
-                   (shift cont
-                     (push! (slot-ref future 'pool&continuations) (list pool cont))
-                     (when timeout
-                       (add-timeout! timeout future timeout-vals))))))
-            (cond
-              (vals
-               (if (null? vals)
-                   (undefined)
-                   (apply values vals)))
-              (exception
-               (raise exception))
-              (else
-               (error "[BUG] Invalid future state")))))
+          (cond
+            ((slot-ref future 'result-values)
+             => (cut values <> #f))
+            ((slot-ref future 'result-exception)
+             => (cut values #f <>))
+            (else
+             (let1 pool (current-thread-pool)
+               (shift cont
+                 (push! (slot-ref future 'pool&continuations) (list pool cont))
+                 (when timeout
+                   (add-timeout! timeout future timeout-vals)))))))
         (lambda ()
           (mutex-unlock! lock)))))
+
+(define-method get-future-result-values&exception ((future-transformer <graviton-future-transformer>) timeout timeout-vals)
+  (let1 lock (slot-ref future-transformer 'lock)
+    (dynamic-wind
+        (lambda ()
+          (mutex-lock! lock))
+        (lambda ()
+          (cond
+            ((slot-ref future-transformer 'cached-result-values)
+             => (cut values <> #f))
+            ((slot-ref future-transformer 'cached-result-exception)
+             => (cut values #f <>))
+            (else
+             (receive (vals exception) (get-future-result-values&exception (slot-ref future-transformer 'original-future)
+                                                                           timeout
+                                                                           timeout-vals)
+               (slot-set! future-transformer 'cached-result-values
+                          (and vals
+                               (values->list (apply (slot-ref future-transformer 'transformer) vals))))
+               (slot-set! future-transformer 'cached-result-exception exception))
+             (values (slot-ref future-transformer 'cached-result-values)
+                     (slot-ref future-transformer 'cached-result-exception)))))
+        (lambda ()
+          (mutex-unlock! lock)))))
+
+(define (await future :optional (timeout #f) :rest timeout-vals)
+  (flush-commands)
+  (receive (vals exception) (get-future-result-values&exception future timeout timeout-vals)
+    (cond
+      (vals
+       (if (null? vals)
+           (undefined)
+           (apply values vals)))
+      (exception
+       (raise exception))
+      (else
+       (error "[BUG] Invalid future state")))))
 
 (define (asleep sec)
   (let1 future (make <graviton-future>)
@@ -945,10 +978,8 @@
   ((err)
    `(Graviton.notifyException %future-id ((ref ,err toString)))))
 
-(define (jscall js-proc provider :rest args)
+(define (jscall js-proc :rest args)
   (let1 future (make <graviton-future>)
-    (when provider
-      (slot-set! future 'result-maker provider))
     (call-command (slot-ref js-proc 'call-id)
                   (cons 'future (slot-ref js-proc 'types))
                   (cons future args))
@@ -969,15 +1000,6 @@
 (define-macro (jslet/result var-spec :rest body)
   (let1 jscall jscall
     `(,jscall ,(compile-jslet var-spec body)
-              #f
-              ,@(map (lambda (spec)
-                       (list-ref (parse-arg-spec spec) 2))
-                     var-spec))))
-
-(define-macro (jslet/result:then provider var-spec :rest body)
-  (let1 jscall jscall
-    `(,jscall ,(compile-jslet var-spec body)
-              ,provider
               ,@(map (lambda (spec)
                        (list-ref (parse-arg-spec spec) 2))
                      var-spec))))
