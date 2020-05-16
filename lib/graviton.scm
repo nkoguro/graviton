@@ -177,38 +177,35 @@
               pool&conts)))
 
 (define (await future :optional (timeout #f) :rest timeout-vals)
-  (let ((lock (slot-ref future 'lock))
-        (result-values #f)
-        (result-exception #f))
+  (let1 lock (slot-ref future 'lock)
     (flush-commands)
-    (mutex-lock! lock)
-    (cond
-      ((slot-ref future 'result-values)
-       => (lambda (vals)
-            (set! result-values vals)
-            (mutex-unlock! lock)))
-      ((slot-ref future 'result-exception)
-       => (lambda (exception)
-            (set! result-exception exception)
-            (mutex-unlock! lock)))
-      (else
-       (let1 pool (current-thread-pool)
-         (receive (vals exception) (shift cont
-                                     (push! (slot-ref future 'pool&continuations) (list pool cont))
-                                     (when timeout
-                                       (add-timeout! timeout future timeout-vals))
-                                     (mutex-unlock! lock))
-           (set! result-values vals)
-           (set! result-exception exception)))))
-    (cond
-      (result-values
-       (if (null? result-values)
-           (undefined)
-           (apply values result-values)))
-      (result-exception
-       (raise result-exception))
-      (else
-       (error "[BUG] Invalid future state")))))
+    (dynamic-wind
+        (lambda ()
+          (mutex-lock! lock))
+        (lambda ()
+          (receive (vals exception)
+              (cond
+                ((slot-ref future 'result-values)
+                 => (cut values <> #f))
+                ((slot-ref future 'result-exception)
+                 => (cut values #f <>))
+                (else
+                 (let1 pool (current-thread-pool)
+                   (shift cont
+                     (push! (slot-ref future 'pool&continuations) (list pool cont))
+                     (when timeout
+                       (add-timeout! timeout future timeout-vals))))))
+            (cond
+              (vals
+               (if (null? vals)
+                   (undefined)
+                   (apply values vals)))
+              (exception
+               (raise exception))
+              (else
+               (error "[BUG] Invalid future state")))))
+        (lambda ()
+          (mutex-unlock! lock)))))
 
 (define (asleep sec)
   (let1 future (make <graviton-future>)
