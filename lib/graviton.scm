@@ -78,10 +78,17 @@
           grv-begin
 
           transform-future
-          async-apply-main
-          async-main
+          async-apply
+          async
           await
           asleep
+          task-yield
+          make-channel
+          channel-send
+          channel-recv
+          channel-recv/await
+          channel-close
+          set-graviton-worker-pool-size!
 
           command-buffering?
           set-command-buffering?
@@ -122,6 +129,8 @@
 
 ;;;
 
+(define thread-start-time (make-parameter #f))
+
 (define (make-pool-thunk app-context pool thunk :optional (error-handler #f))
   (lambda ()
     (reset
@@ -134,15 +143,22 @@
                      (else
                       (report-error e)
                       (exit 70)))))
+          (thread-start-time (time->seconds (current-time)))
           (thunk))))))
 
 (define (submit-thunk pool thunk :optional (error-handler #f))
   (let1 app-context (application-context)
     (add-job! pool (make-pool-thunk app-context pool thunk error-handler))))
 
+(define (submit-cont pool cont)
+  (add-job! pool
+    (lambda ()
+      (reset
+        (thread-start-time (time->seconds (current-time)))
+        (cont)))))
+
 ;;;
 
-;; future is await-able only in the main thread.
 (define-class <graviton-future> ()
   ((lock :init-form (make-mutex))
    (result-values :init-value #f)
@@ -162,70 +178,61 @@
 (define (set-future-result-values&exception! future vals exception)
   (let ((lock (slot-ref future 'lock))
         (pool&conts '()))
-    (unwind-protect
-        (begin
-          (mutex-lock! lock)
-          (cond
-            ((or (slot-ref future 'result-values)
-                 (slot-ref future 'result-exception))
-             ;; If values or exception is already set, do nothing.
-             #f)
-            (else
-             (slot-set! future 'result-values vals)
-             (slot-set! future 'result-exception exception)
-             (set! pool&conts (slot-ref future 'pool&continuations))
-             (slot-set! future 'pool&continuations '()))))
-      (mutex-unlock! lock))
+    (with-locking-mutex lock
+      (lambda ()
+        (cond
+          ((or (slot-ref future 'result-values)
+               (slot-ref future 'result-exception))
+           ;; If values or exception is already set, do nothing.
+           #f)
+          (else
+           (slot-set! future 'result-values vals)
+           (slot-set! future 'result-exception exception)
+           (set! pool&conts (slot-ref future 'pool&continuations))
+           (slot-set! future 'pool&continuations '())))))
     (for-each (match-lambda ((pool cont)
-                             (add-job! pool
-                               (lambda ()
-                                 (reset
-                                   (cont vals exception))))))
+                             (submit-cont pool (cut cont vals exception))))
               pool&conts)))
 
 (define-method get-future-result-values&exception ((future <graviton-future>) timeout timeout-vals)
   (let1 lock (slot-ref future 'lock)
-    (dynamic-wind
-        (lambda ()
-          (mutex-lock! lock))
-        (lambda ()
-          (cond
-            ((slot-ref future 'result-values)
-             => (cut values <> #f))
-            ((slot-ref future 'result-exception)
-             => (cut values #f <>))
-            (else
-             (let1 pool (current-thread-pool)
-               (shift cont
-                 (push! (slot-ref future 'pool&continuations) (list pool cont))
-                 (when timeout
-                   (add-timeout! timeout future timeout-vals)))))))
-        (lambda ()
-          (mutex-unlock! lock)))))
+    (mutex-lock! lock)
+    (cond
+      ((slot-ref future 'result-values)
+       => (lambda (vals)
+            (mutex-unlock! lock)
+            (values vals #f)))
+      ((slot-ref future 'result-exception)
+       => (lambda (exception)
+            (mutex-unlock! lock)
+            (values #f exception)))
+      (else
+       (let1 pool (current-thread-pool)
+         (shift cont
+           (push! (slot-ref future 'pool&continuations) (list pool cont))
+           (mutex-unlock! lock)
+           (when timeout
+             (add-timeout! timeout (lambda ()
+                                     (set-future-result-values&exception! future timeout-vals #f))))))))))
 
 (define-method get-future-result-values&exception ((future-transformer <graviton-future-transformer>) timeout timeout-vals)
-  (let1 lock (slot-ref future-transformer 'lock)
-    (dynamic-wind
-        (lambda ()
-          (mutex-lock! lock))
-        (lambda ()
-          (cond
-            ((slot-ref future-transformer 'cached-result-values)
-             => (cut values <> #f))
-            ((slot-ref future-transformer 'cached-result-exception)
-             => (cut values #f <>))
-            (else
-             (receive (vals exception) (get-future-result-values&exception (slot-ref future-transformer 'original-future)
-                                                                           timeout
-                                                                           timeout-vals)
-               (slot-set! future-transformer 'cached-result-values
-                          (and vals
-                               (values->list (apply (slot-ref future-transformer 'transformer) vals))))
-               (slot-set! future-transformer 'cached-result-exception exception))
-             (values (slot-ref future-transformer 'cached-result-values)
-                     (slot-ref future-transformer 'cached-result-exception)))))
-        (lambda ()
-          (mutex-unlock! lock)))))
+  (with-locking-mutex (slot-ref future-transformer 'lock)
+    (lambda ()
+      (cond
+        ((slot-ref future-transformer 'cached-result-values)
+         => (cut values <> #f))
+        ((slot-ref future-transformer 'cached-result-exception)
+         => (cut values #f <>))
+        (else
+         (receive (vals exception) (get-future-result-values&exception (slot-ref future-transformer 'original-future)
+                                                                       timeout
+                                                                       timeout-vals)
+           (slot-set! future-transformer 'cached-result-values
+                      (and vals
+                           (values->list (apply (slot-ref future-transformer 'transformer) vals))))
+           (slot-set! future-transformer 'cached-result-exception exception))
+         (values (slot-ref future-transformer 'cached-result-values)
+                 (slot-ref future-transformer 'cached-result-exception)))))))
 
 (define (await future :optional (timeout #f) :rest timeout-vals)
   (flush-commands)
@@ -244,20 +251,24 @@
   (let1 future (make <graviton-future>)
     (await future sec)))
 
-(define (async-apply-main proc args)
+(define (task-yield :optional (time-slice 0))
+  (when (<= time-slice (- (time->seconds (current-time)) (thread-start-time)))
+    (asleep 0)))
+
+(define (async-apply proc args)
   (let ((future (make <graviton-future>))
         (app-context (application-context)))
-    (submit-thunk (main-thread-pool)
+    (submit-thunk (worker-thread-pool)
                   (lambda ()
-                    (set! result-values (values->list (apply proc args))))
+                    (set-future-result-values&exception! future (values->list (apply proc args)) #f))
                   (lambda (e)
-                    (set! result-exception e)))
+                    (set-future-result-values&exception! future #f e)))
     future))
 
-(define-syntax async-main
+(define-syntax async
   (syntax-rules ()
     ((_ expr ...)
-     (async-apply-main (lambda () expr ...) '()))))
+     (async-apply (lambda () expr ...) '()))))
 
 (define (allocate-future-id future)
   (with-future-table
@@ -299,6 +310,85 @@
 
 ;;;
 
+(define-class <graviton-channel> ()
+  ((lock :init-form (make-mutex))
+   (queue :init-form (make-queue))
+   (pool&continuation-queue :init-form (make-queue))
+   (closed? :init-value #f)))
+
+(define (make-channel)
+  (make <graviton-channel>))
+
+(define (channel-closed? channel)
+  (with-locking-mutex (slot-ref channel 'lock)
+    (lambda ()
+      (slot-ref channel 'closed?))))
+
+(define (channel-send channel obj)
+  (with-locking-mutex (slot-ref channel 'lock)
+    (lambda ()
+      (when (slot-ref channel 'closed?)
+        (errorf "channel ~s is already closed." channel))
+      (let ((queue (slot-ref channel 'queue))
+            (pool&continuation-queue (slot-ref channel 'pool&continuation-queue)))
+        (cond
+          ((queue-empty? pool&continuation-queue)
+           (enqueue! queue obj))
+          (else
+           (match-let1 (pool cont) (dequeue! pool&continuation-queue)
+             (submit-cont pool (cut cont obj)))))))))
+
+(define (channel-send-timeout-val channel cont timeout-val)
+  (define (cont? pool&cont)
+    (match-let1 (pool k) pool&cont (eq? k cont)))
+  (with-locking-mutex (slot-ref channel 'lock)
+    (lambda ()
+      (and-let* ((pool&continuation-queue (slot-ref channel 'pool&continuation-queue))
+                 (pool&cont (find-in-queue cont? pool&continuation-queue)))
+        (remove-from-queue! cont? pool&continuation-queue)
+        (match-let1 (pool _) pool&cont
+          (submit-cont pool (cut cont timeout-val)))))))
+
+(define (channel-recv channel :optional (fallback #f))
+  (with-locking-mutex (slot-ref channel 'lock)
+    (lambda ()
+      (dequeue! (slot-ref channel 'queue) fallback))))
+
+(define (channel-recv/await channel :optional (timeout #f) (timeout-val #f))
+  (flush-commands)
+  (let ((lock (slot-ref channel 'lock))
+        (queue (slot-ref channel 'queue))
+        (pool&continuation-queue (slot-ref channel 'pool&continuation-queue)))
+    (mutex-lock! lock)
+    (cond
+      ((slot-ref channel 'closed?)
+       (mutex-unlock! lock)
+       (eof-object))
+      ((queue-empty? queue)
+       (let1 pool (current-thread-pool)
+         (shift cont
+           (enqueue! pool&continuation-queue (list pool cont))
+           (mutex-unlock! lock)
+           (when timeout
+             (add-timeout! timeout (lambda ()
+                                     (channel-send-timeout-val channel cont timeout-val)))))))
+      (else
+       (begin0
+         (dequeue! queue)
+         (mutex-unlock! lock))))))
+
+(define (channel-close channel)
+  (with-locking-mutex (slot-ref channel 'lock)
+    (lambda ()
+      (dequeue-all! (slot-ref channel 'queue))
+      (slot-set! channel 'closed? #t)
+      (for-each (match-lambda
+                  ((pool cont)
+                   (submit-cont pool (cut cont (eof-object)))))
+                (dequeue-all! (slot-ref channel 'pool&continuation-queue))))))
+
+;;;
+
 (define *scheduler-command-queue* (make-mtqueue))
 
 (define (run-scheduler)
@@ -311,8 +401,8 @@
                            (cond
                              ((and (not (null? schedule-list))
                                    (time<=? (caar schedule-list) now))
-                              (match-let1 (_ future vals) (car schedule-list)
-                                (set-future-result-values&exception! future vals #f))
+                              (match-let1 (_ thunk) (car schedule-list)
+                                (thunk))
                               (loop (cdr schedule-list)))
                              (else
                               (let1 timeout (if (null? schedule-list)
@@ -323,8 +413,8 @@
                                 (match (dequeue/wait! *scheduler-command-queue* timeout #f)
                                   (('shutdown)
                                    #f)
-                                  (('schedule wake-time future vals)
-                                   (loop (sort (cons (list wake-time future vals) schedule-list)
+                                  (('schedule wake-time thunk)
+                                   (loop (sort (cons (list wake-time thunk) schedule-list)
                                                time<?
                                                car)))
                                   (('cancel future)
@@ -338,8 +428,8 @@
 (define (shutdown-scheduler!)
   (enqueue! *scheduler-command-queue* '(shutdown)))
 
-(define (add-schedule! wake-time future vals)
-  (enqueue! *scheduler-command-queue* (list 'schedule wake-time future vals)))
+(define (add-schedule! wake-time thunk)
+  (enqueue! *scheduler-command-queue* (list 'schedule wake-time thunk)))
 
 (define (make-time-from-second type sec)
   (let* ((sec-part (floor sec))
@@ -347,11 +437,11 @@
                                         1000000000))))
     (make-time type nanosec-part sec-part)))
 
-(define (add-timeout! timeout-in-sec future vals)
-  (add-schedule! (add-duration (current-time)
-                               (make-time-from-second time-duration timeout-in-sec))
-                 future
-                 vals))
+(define (add-timeout! timeout-in-sec thunk)
+  (add-schedule!
+      (add-duration (current-time)
+                    (make-time-from-second time-duration timeout-in-sec))
+    thunk))
 
 (define (cancel-schedule! future)
   (enqueue! *scheduler-command-queue* (list 'cancel future)))
@@ -565,7 +655,10 @@
 
 (define current-thread-pool (make-parameter #f))
 
-(define-constant *worker-pool-size* 2)
+(define *worker-pool-size* 2)
+
+(define (set-graviton-worker-pool-size! n)
+  (set! *worker-pool-size* n))
 
 (define-application-context-slot thread-pool (make-thread-pool 1) (make-thread-pool *worker-pool-size*))
 
