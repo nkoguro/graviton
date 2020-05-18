@@ -23,12 +23,12 @@ function connectServer() {
     webSocket.onmessage = (event) => {
         try {
             if (typeof event.data === 'string') {
-                notifyException(false, "Can't handle string data: " + event.data);
+                notifyException("Can't handle string data: " + event.data);
             } else {
                 dispatchBinaryMessage(event.data);
             }
         } catch (e) {
-            notifyException(false, e.toString());
+            notifyException(e.toString());
         }
     };
 }
@@ -204,7 +204,7 @@ function uploadBinaryData(futureId, data) {
 
 export function notifyValues(futureId, vals) {
     if (futureId) {
-        callAction("notifyResult", futureId, vals, false);
+        callAction("notifyResult", futureId, vals);
     }
 }
 
@@ -212,8 +212,8 @@ export function notifyBinaryData(futureId, data) {
     uploadBinaryData(futureId, data);
 }
 
-export function notifyException(futureId, exception) {
-    callAction("notifyResult", futureId, false, exception.toString());
+export function notifyException(exception) {
+    callAction("notifyException", exception.toString());
 }
 
 /**
@@ -239,10 +239,10 @@ function dispatchBinaryMessage(abuf) {
             try {
                 func.apply(null, [futureId, ds]);
             } catch (e) {
-                notifyException(futureId, e.toString());
+                notifyException(e.toString());
             }
         } else {
-            notifyException(false, 'Invalid binary command index: ' + commandIndex);
+            notifyException('Invalid binary command index: ' + commandIndex);
         }
     }
 }

@@ -58,18 +58,17 @@
         (for-each (match-lambda
                     ((i j)
                      (async
-                       (guard (e (else (report-error e)))
-                         (mandelbrot-fill channel
-                                          mesh-w
-                                          mesh-h
-                                          (* mesh-w i)
-                                          (* mesh-h j)
-                                          -2
-                                          -1.5
-                                          delta-x
-                                          delta-y
-                                          *max-n*
-                                          #f)))))
+                       (mandelbrot-fill channel
+                                        mesh-w
+                                        mesh-h
+                                        (* mesh-w i)
+                                        (* mesh-h j)
+                                        -2
+                                        -1.5
+                                        delta-x
+                                        delta-y
+                                        *max-n*
+                                        #f))))
                   (cartesian-product (list (iota mesh-x) (iota mesh-y)))))
 
       (set-command-buffering? #f)

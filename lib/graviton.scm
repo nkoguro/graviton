@@ -131,24 +131,20 @@
 
 (define thread-start-time (make-parameter #f))
 
-(define (make-pool-thunk app-context pool thunk :optional (error-handler #f))
+(define (make-pool-thunk app-context pool thunk)
   (lambda ()
     (reset
       (parameterize ((application-context app-context)
                      (current-thread-pool pool))
         (guard (e (else
-                   (cond
-                     (error-handler
-                      (error-handler e))
-                     (else
-                      (report-error e)
-                      (exit 70)))))
+                   (report-error e)
+                   (exit 70)))
           (thread-start-time (time->seconds (current-time)))
           (thunk))))))
 
-(define (submit-thunk pool thunk :optional (error-handler #f))
+(define (submit-thunk pool thunk)
   (let1 app-context (application-context)
-    (add-job! pool (make-pool-thunk app-context pool thunk error-handler))))
+    (add-job! pool (make-pool-thunk app-context pool thunk))))
 
 (define (submit-cont pool cont)
   (add-job! pool
@@ -161,51 +157,43 @@
 
 (define-class <graviton-future> ()
   ((lock :init-form (make-mutex))
-   (result-values :init-value #f)
-   (result-exception :init-value #f)
+   (values :init-value #f)
    (pool&continuations :init-value '())))
 
 (define-class <graviton-future-transformer> ()
   ((lock :init-form (make-mutex))
    (original-future :init-keyword :original-future)
    (transformer :init-keyword :transformer)
-   (cached-result-values :init-value #f)
-   (cached-result-exception :init-value #f)))
+   (cached-values :init-value #f)))
 
 (define (transform-future future proc)
   (make <graviton-future-transformer> :original-future future :transformer proc))
 
-(define (set-future-result-values&exception! future vals exception)
+(define (set-future-values! future vals)
   (let ((lock (slot-ref future 'lock))
         (pool&conts '()))
     (with-locking-mutex lock
       (lambda ()
         (cond
-          ((or (slot-ref future 'result-values)
-               (slot-ref future 'result-exception))
-           ;; If values or exception is already set, do nothing.
+          ((slot-ref future 'values)
+           ;; If values is already set, do nothing.
            #f)
           (else
-           (slot-set! future 'result-values vals)
-           (slot-set! future 'result-exception exception)
+           (slot-set! future 'values vals)
            (set! pool&conts (slot-ref future 'pool&continuations))
            (slot-set! future 'pool&continuations '())))))
     (for-each (match-lambda ((pool cont)
-                             (submit-cont pool (cut cont vals exception))))
+                             (submit-cont pool (cut cont vals))))
               pool&conts)))
 
-(define-method get-future-result-values&exception ((future <graviton-future>) timeout timeout-vals)
+(define-method get-future-values ((future <graviton-future>) timeout timeout-vals)
   (let1 lock (slot-ref future 'lock)
     (mutex-lock! lock)
     (cond
-      ((slot-ref future 'result-values)
+      ((slot-ref future 'values)
        => (lambda (vals)
             (mutex-unlock! lock)
-            (values vals #f)))
-      ((slot-ref future 'result-exception)
-       => (lambda (exception)
-            (mutex-unlock! lock)
-            (values #f exception)))
+            vals))
       (else
        (let1 pool (current-thread-pool)
          (shift cont
@@ -213,39 +201,24 @@
            (mutex-unlock! lock)
            (when timeout
              (add-timeout! timeout (lambda ()
-                                     (set-future-result-values&exception! future timeout-vals #f))))))))))
+                                     (set-future-values! future timeout-vals))))))))))
 
-(define-method get-future-result-values&exception ((future-transformer <graviton-future-transformer>) timeout timeout-vals)
+(define-method get-future-values ((future-transformer <graviton-future-transformer>) timeout timeout-vals)
   (with-locking-mutex (slot-ref future-transformer 'lock)
     (lambda ()
-      (cond
-        ((slot-ref future-transformer 'cached-result-values)
-         => (cut values <> #f))
-        ((slot-ref future-transformer 'cached-result-exception)
-         => (cut values #f <>))
-        (else
-         (receive (vals exception) (get-future-result-values&exception (slot-ref future-transformer 'original-future)
-                                                                       timeout
-                                                                       timeout-vals)
-           (slot-set! future-transformer 'cached-result-values
-                      (and vals
-                           (values->list (apply (slot-ref future-transformer 'transformer) vals))))
-           (slot-set! future-transformer 'cached-result-exception exception))
-         (values (slot-ref future-transformer 'cached-result-values)
-                 (slot-ref future-transformer 'cached-result-exception)))))))
+      (or (slot-ref future-transformer 'cached-values)
+          (let1 vals (get-future-values (slot-ref future-transformer 'original-future) timeout timeout-vals)
+            (slot-set! future-transformer 'cached-values
+                       (and vals
+                            (values->list (apply (slot-ref future-transformer 'transformer) vals))))
+            (slot-ref future-transformer 'cached-values))))))
 
 (define (await future :optional (timeout #f) :rest timeout-vals)
   (flush-commands)
-  (receive (vals exception) (get-future-result-values&exception future timeout timeout-vals)
-    (cond
-      (vals
-       (if (null? vals)
-           (undefined)
-           (apply values vals)))
-      (exception
-       (raise exception))
-      (else
-       (error "[BUG] Invalid future state")))))
+  (let1 vals (get-future-values future timeout timeout-vals)
+    (if (null? vals)
+        (undefined)
+        (apply values vals))))
 
 (define (asleep sec)
   (let1 future (make <graviton-future>)
@@ -260,9 +233,7 @@
         (app-context (application-context)))
     (submit-thunk (worker-thread-pool)
                   (lambda ()
-                    (set-future-result-values&exception! future (values->list (apply proc args)) #f))
-                  (lambda (e)
-                    (set-future-result-values&exception! future #f e)))
+                    (set-future-values! future (values->list (apply proc args)))))
     future))
 
 (define-syntax async
@@ -284,7 +255,7 @@
              id))))
       (loop))))
 
-(define (notify-result id vals err)
+(define (notify-result id vals)
   (with-future-table
     (lambda (tbl future-next-id)
       (let1 future (begin0
@@ -292,17 +263,7 @@
                      (hash-table-delete! tbl id))
         (cond
           (future
-           (set-future-result-values&exception! future
-                                                (if (eq? vals 'false)
-                                                    #f
-                                                    (vector->list vals))
-                                                (if (eq? err 'false)
-                                                    #f
-                                                    (condition
-                                                      (&message (message err))
-                                                      (&error)))))
-          ((not (eq? err 'false))
-           (raise err))
+           (set-future-values! future (vector->list vals)))
           (else
            (errorf "[BUG] Invalid future ID: ~a" id)))))))
 
@@ -704,8 +665,11 @@
     ((_ action-name args body ...)
      (hash-table-put! json-command-table action-name (lambda args body ...)))))
 
-(define-action "notifyResult" (id vals err)
-  (notify-result id vals err))
+(define-action "notifyResult" (id vals)
+  (notify-result id vals))
+
+(define-action "notifyException" (err)
+  (raise (condition (&message (message err)) (&error))))
 
 (define-action "startApplication" ()
   (when *initial-thunk*
@@ -724,7 +688,7 @@
                      (hash-table-delete! tbl id))
         (cond
           (future
-           (set-future-result-values&exception! future (list data) #f))
+           (set-future-values! future (list data)))
           (else
            (errorf "[BUG] Invalid future ID: ~a" id)))))))
 
@@ -1069,7 +1033,7 @@
 
 (define-jsise-macro result-error
   ((err)
-   `(Graviton.notifyException %future-id ((ref ,err toString)))))
+   `(Graviton.notifyException ((ref ,err toString)))))
 
 (define (jscall js-proc :rest args)
   (let1 future (make <graviton-future>)
