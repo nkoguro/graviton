@@ -9,7 +9,7 @@
 (use util.combinations)
 (use util.match)
 
-(define (mandelbrot-fill channel width height offset-width offset-height start-x start-y delta-x delta-y max-loop)
+(define (mandelbrot-fill channel width height offset-width offset-height start-x start-y delta-x delta-y max-loop time-slice)
   (define (x+y->z x y)
     (make-rectangular (+ start-x (* x delta-x)) (+ start-y (* y delta-y))))
 
@@ -24,10 +24,9 @@
         ((<= (+ width offset-width) x) #f)
       (let1 n (compute 0 (x+y->z x y) 0)
         (when (< n max-loop)
-          (channel-send channel (list x y n))))))
-
-  ;; (channel-send channel #f)
-  )
+          (channel-send channel (list x y n))))
+      (when time-slice
+        (task-yield time-slice)))))
 
 (define (n->color n max-n)
   (let ((h (round->exact (* (/. (- max-n n) max-n) 360)))
@@ -69,7 +68,8 @@
                                           -1.5
                                           delta-x
                                           delta-y
-                                          *max-n*)))))
+                                          *max-n*
+                                          #f)))))
                   (cartesian-product (list (iota mesh-x) (iota mesh-y)))))
 
       (set-command-buffering? #f)
