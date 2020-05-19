@@ -136,11 +136,16 @@
     (reset
       (parameterize ((application-context app-context)
                      (current-thread-pool pool))
-        (guard (e (else
-                   (report-error e)
-                   (exit 70)))
-          (thread-start-time (time->seconds (current-time)))
-          (thunk))))))
+          (dynamic-wind
+              (lambda ()
+                (thread-start-time (time->seconds (current-time))))
+              (lambda ()
+                (guard (e (else
+                           (report-error e)
+                           (exit 70)))
+                  (thunk)))
+              (lambda ()
+                (flush-commands)))))))
 
 (define (submit-thunk pool thunk)
   (let1 app-context (application-context)
@@ -150,7 +155,6 @@
   (add-job! pool
     (lambda ()
       (reset
-        (thread-start-time (time->seconds (current-time)))
         (cont)))))
 
 ;;;
@@ -214,7 +218,6 @@
             (slot-ref future-transformer 'cached-values))))))
 
 (define (await future :optional (timeout #f) :rest timeout-vals)
-  (flush-commands)
   (let1 vals (get-future-values future timeout timeout-vals)
     (if (null? vals)
         (undefined)
@@ -316,7 +319,6 @@
       (dequeue! (slot-ref channel 'queue) fallback))))
 
 (define (channel-recv/await channel :optional (timeout #f) (timeout-val #f))
-  (flush-commands)
   (let ((lock (slot-ref channel 'lock))
         (queue (slot-ref channel 'queue))
         (pool&continuation-queue (slot-ref channel 'pool&continuation-queue)))
