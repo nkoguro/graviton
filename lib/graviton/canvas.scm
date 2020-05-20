@@ -292,7 +292,7 @@
                                  (result canvas.width canvas.height))))
             (set! img.onerror (lambda ()
                                 (*working-images*.delete img)
-                                (result-error "Load image failed.")))))
+                                (raise "Load image failed.")))))
       (lambda (w h)
         (slot-set! canvas 'width w)
         (slot-set! canvas 'height h)
@@ -814,4 +814,4 @@
 
 (define (download-image-data image)
   (jslet/result ((image::proxy))
-    (result-u8array image.data)))
+    (result image.data)))

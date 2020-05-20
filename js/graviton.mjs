@@ -66,7 +66,7 @@ export function registerEnum(enumName, vals) {
     enumTable[enumName] = vals;
 }
 
-class DataStream {
+class DataReadStream {
     constructor(buf) {
         this.dataView = new DataView(buf);
         this.position = 0;
@@ -189,27 +189,58 @@ class DataStream {
     }
 }
 
+function encodeValues(futureId, vals) {
+    if (vals.length >= 256) {
+        throw 'Too many values to server';
+    }
+
+    let encodeDataLen = 4;
+    let jsonVals = [];
+    let binaryDataMap = new Map();
+    vals.forEach((v, i) => {
+        if (v instanceof Uint8Array || v instanceof Uint8ClampedArray) {
+            jsonVals.push(null);
+            encodeDataLen += (1 + 4 + v.length);
+            binaryDataMap.set(i, v);
+        } else {
+            jsonVals.push(v);
+        }
+    });
+    let textEncoder = new TextEncoder();
+    let jsonData = textEncoder.encode(JSON.stringify(jsonVals));
+    encodeDataLen += (4 + jsonData.length);
+
+    let encodeData = new Uint8Array(encodeDataLen);
+    let encodeDataView = new DataView(encodeData.buffer);
+    let i = 0;
+    encodeDataView.setUint32(i, futureId, true);
+    i += 4;
+    encodeDataView.setUint32(i, jsonData.length, true);
+    i += 4;
+    encodeData.set(jsonData, i);
+    i += jsonData.length;
+    binaryDataMap.forEach((data, dataIndex) => {
+        encodeDataView.setUint8(i, dataIndex);
+        i += 1;
+        encodeDataView.setUint32(i, data.length, true);
+        i += 4;
+        encodeData.set(data, i);
+        i += data.length;
+    });
+
+    return encodeData;
+}
+
+
 export function callAction(name, ...args) {
     webSocket.send(JSON.stringify([name].concat(args)));
 }
 
-function uploadBinaryData(futureId, data) {
-    let sendData = new Uint8Array(data.length + 4);
-    let idData = new Uint32Array(1);
-    idData[0] = futureId;
-    sendData.set(idData, 0);
-    sendData.set(data, 4);
-    webSocket.send(sendData.buffer);
-}
-
 export function notifyValues(futureId, vals) {
     if (futureId) {
-        callAction("notifyResult", futureId, vals);
+        let sendData = encodeValues(futureId, vals);
+        webSocket.send(sendData.buffer);
     }
-}
-
-export function notifyBinaryData(futureId, data) {
-    uploadBinaryData(futureId, data);
 }
 
 export function notifyException(exception) {
@@ -227,7 +258,7 @@ export function registerBinaryCommand(commandId, func) {
 }
 
 function dispatchBinaryMessage(abuf) {
-    let ds = new DataStream(abuf);
+    let ds = new DataReadStream(abuf);
     while (ds.hasData()) {
         let commandIndex = ds.getUint16();
         let func = binaryCommands[commandIndex];

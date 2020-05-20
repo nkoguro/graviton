@@ -258,20 +258,6 @@
              id))))
       (loop))))
 
-(define (notify-result id vals)
-  (with-future-table
-    (lambda (tbl future-next-id)
-      (let1 future (begin0
-                     (hash-table-get tbl id #f)
-                     (hash-table-delete! tbl id))
-        (cond
-          (future
-           (set-future-values! future (vector->list vals)))
-          (else
-           (errorf "[BUG] Invalid future ID: ~a" id)))))))
-
-
-
 ;;;
 
 (define-class <graviton-channel> ()
@@ -574,11 +560,11 @@
                (let ((cont-opcode (slot-ref ctx 'continuation-opcode))
                      (cont-frames (cons payload-data (slot-ref ctx 'continuation-frames))))
                  (reset-context! ctx)
-                 (case (slot-ref ctx 'continuation-opcode)
+                 (case cont-opcode
                    ((1)
-                    (text-handler (u8vector->string (apply u8vector-append (reverse cont-frames))))))
-                 ((2)
-                  (binary-handler (apply u8vector-append (reverse cont-frames))))))
+                    (text-handler (u8vector->string (apply u8vector-append (reverse cont-frames)))))
+                   ((2)
+                    (binary-handler (apply u8vector-append (reverse cont-frames)))))))
               (else
                (push! (slot-ref ctx 'continuation-frames) payload-data))))
            ((1)
@@ -667,9 +653,6 @@
     ((_ action-name args body ...)
      (hash-table-put! json-command-table action-name (lambda args body ...)))))
 
-(define-action "notifyResult" (id vals)
-  (notify-result id vals))
-
 (define-action "notifyException" (err)
   (raise (condition (&message (message err)) (&error))))
 
@@ -680,19 +663,31 @@
         (run-hook *init-hook*)
         (*initial-thunk*)))))
 
-(define *binary-data-table-atom* (atom (make-hash-table 'equal?)))
+(define (decode-received-binary-data data)
+  (call-with-input-string (u8vector->string data)
+    (lambda (in)
+      (let* ((future-id (read-u32 in 'little-endian))
+             (json-len (read-u32 in 'little-endian))
+             (json-str (u8vector->string (read-uvector <u8vector> json-len in)))
+             (vals (parse-json-string json-str)))
+        (while (read-u8 in) (.$ not eof-object?)
+               => i
+               (let* ((binary-data-len (read-u32 in 'little-endian))
+                      (binary-data (read-uvector <u8vector> binary-data-len in)))
+                 (vector-set! vals i binary-data)))
+        (values future-id (vector->list vals))))))
 
-(define (notify-binary-result id data)
+(define (notify-values future-id vals)
   (with-future-table
     (lambda (tbl future-next-id)
       (let1 future (begin0
-                     (hash-table-get tbl id #f)
-                     (hash-table-delete! tbl id))
+                     (hash-table-get tbl future-id #f)
+                     (hash-table-delete! tbl future-id))
         (cond
           (future
-           (set-future-values! future (list data)))
+           (set-future-values! future vals))
           (else
-           (errorf "[BUG] Invalid future ID: ~a" id)))))))
+           (errorf "[BUG] Invalid future ID: ~a" future-id)))))))
 
 (define (start-websocket-dispatcher! sock in out)
   (thread-start!
@@ -719,9 +714,8 @@
                   (else
                    (log-error "Invalid data received: ~s" params)))))
             (define (receive-binary data)
-              (let* ((id (get-u32 data 0))
-                     (result (uvector-alias <u8vector> data 4)))
-                (notify-binary-result id result)))
+              (receive (future-id vals) (decode-received-binary-data data)
+                (notify-values future-id vals)))
 
             (parameterize ((json-special-handler (lambda (sym)
                                                    (case sym
@@ -1029,11 +1023,7 @@
   ((vals ...)
    `(Graviton.notifyValues %future-id ,(list->vector vals))))
 
-(define-jsise-macro result-u8array
-  ((data)
-   `(Graviton.notifyBinaryData %future-id ,data)))
-
-(define-jsise-macro result-error
+(define-jsise-macro raise
   ((err)
    `(Graviton.notifyException ((ref ,err toString)))))
 
