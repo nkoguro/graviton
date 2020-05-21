@@ -471,6 +471,7 @@
                         (html:html
                          (html:head
                           (html:meta :charset "UTF-8")
+                          (html:link :rel "icon" :href "data:png;base64,")
                           (html:title title))
                          (apply html:body :style (format "background-color: ~a" *background-color*)
                                 (append
