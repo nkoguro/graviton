@@ -2,6 +2,7 @@
 ;; Compute Mandelbrot set.
 ;;
 
+(use control.thread-pool)
 (use data.queue)
 (use graviton)
 (use graviton.canvas)
@@ -37,9 +38,10 @@
 (define *height* 500)
 (define *max-n* 50)
 
+(define worker-pool (make-thread-pool 4))
+
 (define (main args)
   (set-graviton-background-color! "black")
-  (set-graviton-worker-pool-size! 4)
   (grv-begin
     (add-event-listener! (browser-window) "keyup"
                          '("key")
@@ -57,18 +59,18 @@
              (mesh-h (round->exact (/. *height* mesh-y))))
         (for-each (match-lambda
                     ((i j)
-                     (async
-                       (mandelbrot-fill channel
-                                        mesh-w
-                                        mesh-h
-                                        (* mesh-w i)
-                                        (* mesh-h j)
-                                        -2
-                                        -1.5
-                                        delta-x
-                                        delta-y
-                                        *max-n*
-                                        #f))))
+                     (async worker-pool
+                            (mandelbrot-fill channel
+                                             mesh-w
+                                             mesh-h
+                                             (* mesh-w i)
+                                             (* mesh-h j)
+                                             -2
+                                             -1.5
+                                             delta-x
+                                             delta-y
+                                             *max-n*
+                                             #f))))
                   (cartesian-product (list (iota mesh-x) (iota mesh-y)))))
 
       (set-command-buffering? #f)

@@ -88,7 +88,6 @@
           channel-recv
           channel-recv/await
           channel-close
-          set-graviton-worker-pool-size!
 
           command-buffering?
           set-command-buffering?
@@ -231,18 +230,18 @@
   (when (<= time-slice (- (time->seconds (current-time)) (thread-start-time)))
     (asleep 0)))
 
-(define (async-apply proc args)
+(define (async-apply pool proc args)
   (let ((future (make <graviton-future>))
         (app-context (application-context)))
-    (submit-thunk (worker-thread-pool)
+    (submit-thunk pool
                   (lambda ()
                     (set-future-values! future (values->list (apply proc args)))))
     future))
 
 (define-syntax async
   (syntax-rules ()
-    ((_ expr ...)
-     (async-apply (lambda () expr ...) '()))))
+    ((_ pool expr ...)
+     (async-apply pool (lambda () expr ...) '()))))
 
 (define (allocate-future-id future)
   (with-future-table
@@ -605,18 +604,10 @@
 
 (define current-thread-pool (make-parameter #f))
 
-(define *worker-pool-size* 2)
-
-(define (set-graviton-worker-pool-size! n)
-  (set! *worker-pool-size* n))
-
-(define-application-context-slot thread-pool (make-thread-pool 1) (make-thread-pool *worker-pool-size*))
+(define-application-context-slot main-thread-pool (make-thread-pool 1))
 
 (define (main-thread-pool)
-  (values-ref (application-context-slot-ref 'thread-pool) 0))
-
-(define (worker-thread-pool)
-  (values-ref (application-context-slot-ref 'thread-pool) 1))
+  (application-context-slot-ref 'main-thread-pool))
 
 (define-application-context-slot send-context #f)
 
@@ -744,7 +735,7 @@
 
               (for-each (lambda (pool)
                           (terminate-all! pool :cancel-queued-jobs #t))
-                        (list (main-thread-pool) (worker-thread-pool)))
+                        (list (main-thread-pool)))
               (log-debug "WebSocket dispatcher finished")
               (close-input-port in)
               (close-output-port out)
