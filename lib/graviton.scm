@@ -105,6 +105,7 @@
 
           <proxy-object>
           proxy-id
+          release-proxy-id!
           invalidate!
           invalidate?
           define-jsenum
@@ -1151,14 +1152,17 @@
   (or (slot-ref obj 'id)
       (errorf "~s was invalidated" obj)))
 
-(define-method invalidate! ((obj <proxy-object>))
+(define-method release-proxy-id! ((obj <proxy-object>))
   (and-let1 id (slot-ref obj 'id)
     (slot-set! obj 'id #f)
     (atomic (slot-ref obj '%free-id-list)
       (lambda (free-id-list)
-        (release-id! free-id-list id)))
-    (jslet ((obj*::object* obj))
-      (obj*.invalidate))))
+        (release-id! free-id-list id)))))
+
+(define-method invalidate! ((obj <proxy-object>))
+  (jslet ((obj*::object* obj))
+      (obj*.invalidate))
+  (release-proxy-id! obj))
 
 (define-method invalidate? ((obj <proxy-object>))
   (not (not (slot-ref obj 'id))))
