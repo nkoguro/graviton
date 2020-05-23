@@ -41,25 +41,32 @@ export function closeConnection() {
     }
 }
 
-let proxyObjectTable = {};
-let reverseProxyObjectTable = {};
 let enumTable = {};
 
-export function linkProxyObject(index, obj) {
-    proxyObjectTable[index] = obj;
-    reverseProxyObjectTable[obj] = index;
-}
+let objectRefTable = {};
 
-export function unlinkProxyObject(index) {
-    let obj = proxyObjectTable[index];
-    if (obj != null) {
-        reverseProxyObjectTable[obj] = null;
+export class ObjectRef {
+    constructor(proxyId) {
+        this.proxyId = proxyId;
+        this.value = null;
     }
-    proxyObjectTable[index] = null;
-}
 
-export function getProxyObject(index) {
-    return proxyObjectTable[index];
+    static lookup(proxyId) {
+        let obj = objectRefTable[proxyId];
+        if (obj) {
+            return obj;
+        }
+
+        obj = new ObjectRef(proxyId);
+        objectRefTable[proxyId] = obj;
+        return obj;
+    }
+
+    invalidate() {
+        this.value = null;
+        this.proxyId = null;
+        objectRefTable[this.proxyId] = null;
+    }
 }
 
 export function registerEnum(enumName, vals) {
@@ -178,9 +185,14 @@ class DataReadStream {
         return data;
     }
 
-    getProxyObject() {
+    getObjectRef() {
         let index = this.getUint32();
-        return getProxyObject(index);
+        return ObjectRef.lookup(index);
+    }
+
+    getObjectRefValue() {
+        let objRef = this.getObjectRef();
+        return objRef.value;
     }
 
     getEnum(name) {

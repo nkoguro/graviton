@@ -104,8 +104,9 @@
           browser-window
 
           <proxy-object>
-          proxy-object-id
-          unlink-proxy-object!
+          proxy-id
+          invalidate!
+          invalidate?
           define-jsenum
           jslet
           jslet/result
@@ -913,8 +914,8 @@
                  ('future
                   (let1 id (allocate-future-id arg)
                     (write-u32 id out 'little-endian)))
-                 ('proxy
-                  (write-u32 (proxy-object-id arg) out 'little-endian))
+                 ((or 'object* 'object)
+                  (write-u32 (proxy-id arg) out 'little-endian))
                  ('string
                    (let1 data (ces-convert-to <u8vector> arg 'utf-8)
                      (write-u32 (u8vector-length data) out 'little-endian)
@@ -1011,8 +1012,10 @@
                                                       `((ref ,ds getString)))
                                                     ('json
                                                      `((ref ,ds getJson)))
-                                                    ('proxy
-                                                     `((ref ,ds getProxyObject)))
+                                                    ('object*
+                                                     `((ref ,ds getObjectRef)))
+                                                    ('object
+                                                     `((ref ,ds getObjectRefValue)))
                                                     ((? symbol? enum-name)
                                                      (unless (hash-table-contains? *enum-table* enum-name)
                                                        (errorf "Invalid type: ~a" type))
@@ -1144,18 +1147,21 @@
         #t)
       (error "The proxy object ID space is exhausted.")))
 
-(define-method proxy-object-id ((obj <proxy-object>))
+(define-method proxy-id ((obj <proxy-object>))
   (or (slot-ref obj 'id)
-      (errorf "~s was unlinked" obj)))
+      (errorf "~s was invalidated" obj)))
 
-(define-method unlink-proxy-object! ((obj <proxy-object>))
+(define-method invalidate! ((obj <proxy-object>))
   (and-let1 id (slot-ref obj 'id)
     (slot-set! obj 'id #f)
     (atomic (slot-ref obj '%free-id-list)
       (lambda (free-id-list)
         (release-id! free-id-list id)))
-    (jslet ((id::u32))
-      (Graviton.unlinkProxyObject id))))
+    (jslet ((obj*::object* obj))
+      (obj*.invalidate))))
+
+(define-method invalidate? ((obj <proxy-object>))
+  (not (not (slot-ref obj 'id))))
 
 ;;;
 
@@ -1169,9 +1175,8 @@
     (lambda (win)
       (unless win
         (set! win (make <browser-window>))
-        (let1 proxy-id (proxy-object-id win)
-          (jslet (proxy-id::u32)
-            (Graviton.linkProxyObject proxy-id window))))
+        (jslet ((win*::object* win))
+            (set! win*.value window)))
       win)))
 
 (define (window-size)

@@ -88,7 +88,7 @@
 (define-application-context-slot listener-table (make-hash-table 'equal?))
 
 (define (add-event-listener! event-target event-type event-class-or-props proc)
-  (let1 proxy-id (proxy-object-id event-target)
+  (let1 proxy-id (proxy-id event-target)
     (application-context-slot-atomic-ref 'listener-table
       (lambda (tbl)
         (hash-table-push! tbl
@@ -98,8 +98,7 @@
                                     event-class-or-props
                                     #f)
                                 proc))))
-    (jslet ((proxy-id::u32)
-            (event-target::proxy)
+    (jslet ((event-target*::object* event-target)
             (event-type::json)
             (prop-vec::json (map-to <vector> parse-prop (cond
                                                           ((and (is-a? event-class-or-props <class>)
@@ -109,10 +108,10 @@
                                                            event-class-or-props)
                                                           (else
                                                            (errorf "a class which inherits <jsevent> or a collection of property spec is required, but got ~s" event-class-or-props))))))
-      (Event.registerEventHandler proxy-id event-target event-type prop-vec))))
+      (Event.registerEventHandler event-target* event-type prop-vec))))
 
 (define (remove-event-listener! event-target event-type proc)
-  (let1 proxy-id (proxy-object-id event-target)
+  (let1 proxy-id (proxy-id event-target)
     (application-context-slot-atomic-ref 'listener-table
       (lambda (tbl)
         (let1 key (cons proxy-id event-type)
@@ -121,10 +120,9 @@
                                                   ((_ _ handler)
                                                    (eq? proc handler)))
                                                 vals))))))
-    (jslet ((proxy-id::u32)
-            (event-target::proxy)
+    (jslet ((event-target*::object* event-target)
             (event-type::json))
-      (Event.unregisterEventHandler proxy-id event-target event-type))))
+      (Event.unregisterEventHandler event-target* event-type))))
 
 
 (define-action "notifyEvent" (id event-type event-values)

@@ -22,7 +22,9 @@ function eventHandlerKey(proxyId, eventName) {
     return `${proxyId}_${eventName}`;
 }
 
-export function registerEventHandler(proxyId, eventTarget, eventName, props) {
+export function registerEventHandler(eventTargetRef, eventName, props) {
+    let proxyId = eventTargetRef.proxyId;
+    let eventTarget = eventTargetRef.value;
     unregisterEventHandler(proxyId, eventTarget, eventName);
     let handler = (e) => {
         notifyEvent(proxyId, eventName, extractEventValues(e, props));
@@ -31,7 +33,9 @@ export function registerEventHandler(proxyId, eventTarget, eventName, props) {
     eventTarget.addEventListener(eventName, handler);
 }
 
-export function unregisterEventHandler(proxyId, eventTarget, eventName) {
+export function unregisterEventHandler(eventTargetRef, eventName) {
+    let proxyId = eventTargetRef.proxyId;
+    let eventTarget = eventTargetRef.value;
     let key = eventHandlerKey(proxyId, eventName);
     let handler = eventHandlerTable[key];
     if (handler) {

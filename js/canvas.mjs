@@ -1,5 +1,27 @@
 import * as Graviton from '/js/graviton/graviton.mjs';
 
+export function createCanvas(width, height, z, visible) {
+    let canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    centralizeCanvas(canvas);
+    canvas.style.zIndex = z;
+    document.getElementById('_on').appendChild(canvas);
+
+    if (window.isElectron) {
+        window.showBrowserWindow();
+    }
+
+    if (visible) {
+        canvas.style.visibility = 'visible';
+    } else {
+        canvas.style.visibility = 'hidden';
+    }
+
+    return canvas;
+}
+
 export function centralizeCanvas(canvas) {
     let winWidth = window.innerWidth;
     let winHeight = window.innerHeight;
@@ -39,9 +61,9 @@ export function obj2style(ctx, style) {
         case 'pattern':
             var image = null;
             if (style['canvas']) {
-                image = Graviton.getProxyObject(style['canvas']);
+                image = Graviton.ObjectRef.lookup(style['canvas']).value;
             } else if (style['image']) {
-                image = createImageBitmap(Graviton.getProxyObject(style['image']));
+                image = createImageBitmap(Graviton.ObjectRef.lookup(style['image']).value);
             } else {
                 throw new Error('Neither canvas nor image specified for pattern');
             }

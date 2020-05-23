@@ -61,12 +61,12 @@
 (define (load-audio filename :key (content-type #f))
   (let1 node (make <audio-media-element-node>)
     (transform-future
-        (jslet/result ((node-id::u32 (proxy-object-id node))
+        (jslet/result ((node*::object* node)
                        (url::string (resource-url filename :content-type content-type)))
           (let ((audio (make Audio url)))
             (set! audio.onloadedmetadata (lambda ()
                                            (let ((source-node (audioContext.createMediaElementSource audio)))
-                                             (Graviton.linkProxyObject node-id source-node)
+                                             (set! node*.value source-node)
                                              (source-node.connect audioContext.destination)
                                              (result audio.duration))))
             (set! audio.onstalled (lambda ()
@@ -76,11 +76,11 @@
         node))))
 
 (define (play-audio audio)
-  (jslet ((audio::proxy))
+  (jslet ((audio::object))
     (audio.mediaElement.play)))
 
 (define (pause-audio audio)
-  (jslet ((audio::proxy))
+  (jslet ((audio::object))
     (audio.mediaElement.pause)))
 
 (define-class <audio-buffer> (<proxy-object>)
@@ -92,7 +92,7 @@
 (define (load-pcm filename :key (content-type #f))
   (let1 pcm (make <audio-buffer>)
     (transform-future
-        (jslet/result ((object-id::u32 (proxy-object-id pcm))
+        (jslet/result ((pcm*::object* pcm)
                        (url::string (resource-url filename :content-type content-type)))
           (let ((req (make XMLHttpRequest)))
             (req.open "GET" url #t)
@@ -103,7 +103,7 @@
                                   (let ((buf req.response))
                                     ((ref (audioContext.decodeAudioData buf) then)
                                      (lambda (decoded-data)
-                                       (Graviton.linkProxyObject object-id decoded-data)
+                                       (set! pcm*.value decoded-data)
                                        (result decoded-data.sampleRate
                                                decoded-data.length
                                                decoded-data.duration
@@ -154,7 +154,7 @@
 
 (define (play-pcm channel-num pcm-data :optional (detune 0) (playback-rate 1.0) (loop-range #f) (len #f) (gain 1.0))
   (jslet ((channel-num::u8)
-          (pcm-data::proxy)
+          (pcm-data::object)
           (detune::f64)
           (playback-rate::f64)
           (loop?::boolean (if loop-range #t #f))
