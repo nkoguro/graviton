@@ -134,5 +134,6 @@
                      (let1 args (if event-class
                                     (list (apply make event-class args))
                                     args)
-                       (submit-thunk pool (^() (apply proc args))))))
+                       (guard (e (<thread-pool-shut-down> #f))
+                         (submit-thunk pool (^() (apply proc args)))))))
                   (hash-table-get tbl (cons id event-type) '()))))))
