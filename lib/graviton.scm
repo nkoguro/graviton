@@ -94,6 +94,7 @@
           flush-commands
           app-close
           window-size
+          app-close-hook
 
           current-thread-pool
           submit-thunk
@@ -130,6 +131,14 @@
 
 (define thread-start-time (make-parameter #f))
 
+(define task-start-hook (make-hook))
+(define task-end-hook (make-hook))
+
+(add-hook! task-start-hook (lambda ()
+                             (thread-start-time (time->seconds (current-time)))))
+(add-hook! task-end-hook (lambda ()
+                           (flush-commands)))
+
 (define (make-pool-thunk app-context pool thunk)
   (lambda ()
     (reset
@@ -137,14 +146,14 @@
                      (current-thread-pool pool))
           (dynamic-wind
               (lambda ()
-                (thread-start-time (time->seconds (current-time))))
+                (run-hook task-start-hook))
               (lambda ()
                 (guard (e (else
                            (report-error e)
                            (exit 70)))
                   (thunk)))
               (lambda ()
-                (flush-commands)))))))
+                (run-hook task-end-hook)))))))
 
 (define (submit-thunk pool thunk)
   (let1 app-context (application-context)
@@ -681,6 +690,11 @@
           (else
            (errorf "[BUG] Invalid future ID: ~a" future-id)))))))
 
+(define app-close-hook (make-hook))
+
+(add-hook! app-close-hook (lambda ()
+                            (terminate-all! (main-thread-pool) :cancel-queued-jobs #t)))
+
 (define (start-websocket-dispatcher! sock in out)
   (thread-start!
     (make-thread
@@ -733,9 +747,8 @@
               (while (not (port-closed? in))
                 (selector-select sel))
 
-              (for-each (lambda (pool)
-                          (terminate-all! pool :cancel-queued-jobs #t))
-                        (list (main-thread-pool)))
+              (run-hook app-close-hook)
+
               (log-debug "WebSocket dispatcher finished")
               (close-input-port in)
               (close-output-port out)
