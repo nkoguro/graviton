@@ -213,7 +213,8 @@
            (mutex-unlock! lock)
            (when timeout
              (add-timeout! timeout (lambda ()
-                                     (set-future-values! future timeout-vals))))))))))
+                                     (guard (e (<thread-pool-shut-down> #f))
+                                       (set-future-values! future timeout-vals)))))))))))
 
 (define-method get-future-values ((future-transformer <graviton-future-transformer>) timeout timeout-vals)
   (with-locking-mutex (slot-ref future-transformer 'lock)
