@@ -6,6 +6,8 @@
 (define *program-dir* (sys-dirname (current-load-path)))
 
 (define (main args)
+  (grv-player)
+
   (grv-begin
     (add-event-listener! (browser-window) "keyup"
                          '("key")

@@ -4,6 +4,8 @@
 (use math.const)
 
 (define (main args)
+  (grv-player)
+
   (grv-begin
     (add-event-listener! (browser-window) "keyup"
                          '("key")

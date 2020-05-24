@@ -21,10 +21,10 @@
                   (floor->exact (/. (* (slot-ref obj 'height) (slot-ref obj 'offset-y))
                                     (slot-ref obj 'client-height)))))))
 
+
 (define (main args)
-  ;; (set-graviton-open-dev-tools! #t)
-  ;; (set-graviton-port! 8080)
-  ;; (set-graviton-use-player! #f)
+  (grv-player)
+
   (grv-begin
     (receive (w h) (await (window-size))
       (log-format "window width=~a, height=~a" w h))

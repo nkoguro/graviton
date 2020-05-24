@@ -6,6 +6,8 @@
 (current-directory (sys-dirname (current-load-path)))
 
 (define (main args)
+  (grv-player)
+
   (grv-begin
     (let1 pcm (await (load-pcm "pipo.mp3"))
       (log-format "PCM duration: ~a sec" (slot-ref pcm 'duration))

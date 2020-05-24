@@ -41,7 +41,8 @@
 (define worker-pool (make-thread-pool 4))
 
 (define (main args)
-  (set-graviton-background-color! "black")
+  (grv-player :background-color "black")
+
   (grv-begin
     (add-event-listener! (browser-window) "keyup"
                          '("key")

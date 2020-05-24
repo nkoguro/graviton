@@ -99,10 +99,8 @@
 ;; (trace update-balls!)
 
 (define (main args)
-  ;; (set-graviton-open-dev-tools! #t)
-  ;; (set-graviton-use-player! #f)
-  ;; (set-graviton-port! 8080)
-  (set-graviton-background-color! "black")
+  (grv-player :background-color "black")
+
   (let-args (cdr args) ((num-sprites "s|sprites=i" 100))
     (grv-begin
       (add-event-listener! (browser-window) "keyup"

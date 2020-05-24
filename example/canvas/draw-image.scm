@@ -8,7 +8,8 @@
 (define *program-dir* (sys-dirname (current-load-path)))
 
 (define (main args)
-  (set-graviton-background-color! "#000")
+  (grv-player :background-color "#000")
+
   (grv-begin
     (add-event-listener! (browser-window) "keyup"
                          '("key")

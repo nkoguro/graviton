@@ -67,15 +67,12 @@
   (use text.tree)
   (use util.match)
 
-  (export <text-metrics>
-          set-graviton-title!
-          set-graviton-port!
-          set-graviton-error-log-drain!
-          set-graviton-use-player!
-          set-graviton-background-color!
-          set-graviton-open-dev-tools!
-          grv-main
+  (export grv-main
           grv-begin
+
+          grv-player
+          grv-browser
+          grv-log-config
 
           transform-future
           async-apply
@@ -412,13 +409,16 @@
 (log-open #t)
 
 (define (log-debug fmt :rest args)
-  (apply log-format fmt args))
+  (when (<= (log-level) 0)
+    (apply log-format fmt args)))
 
 (define (log-info fmt :rest args)
-  (apply log-format fmt args))
+  (when (<= (log-level) 1)
+    (apply log-format fmt args)))
 
 (define (log-error fmt :rest args)
-  (apply log-format fmt args))
+  (when (<= (log-level) 2)
+    (apply log-format fmt args)))
 
 ;;;
 
@@ -461,37 +461,22 @@
 
 ;;;
 
-(define *title* #f)
-
-(define (set-graviton-title! title)
-  (set! *title* title))
-
-(define *background-color* "#FFF")
-
-(define (set-graviton-background-color! color)
-  (set! *background-color* color))
-
 (define-http-handler "/"
   (lambda (req app)
-    (let1 title (or *title*
-                    (if (and (list? (command-line))
-                             (<= (length (command-line)) 1))
-                        (path-sans-extension (sys-basename (list-ref (command-line) 0)))
-                        "Graviton"))
-      (respond/ok req (tree->string
-                        (html:html
-                         (html:head
-                          (html:meta :charset "UTF-8")
-                          (html:link :rel "icon" :href "data:png;base64,")
-                          (html:title title))
-                         (apply html:body :style (format "background-color: ~a" *background-color*)
-                                (append
-                                  (map (lambda (js-path)
-                                         (html:script :src js-path))
-                                       (load-js-list))
-                                  (map (lambda (js-mod)
-                                         (html:script :type "module" :src js-mod))
-                                       (js-main-module-absolute-paths))))))))))
+    (respond/ok req (tree->string
+                      (html:html
+                       (html:head
+                        (html:meta :charset "UTF-8")
+                        (html:link :rel "icon" :href "data:png;base64,")
+                        (html:title (client-title)))
+                       (apply html:body :style (format "background-color: ~a" (client-background-color))
+                              (append
+                                (map (lambda (js-path)
+                                       (html:script :src js-path))
+                                     (load-js-list))
+                                (map (lambda (js-mod)
+                                       (html:script :type "module" :src js-mod))
+                                     (js-main-module-absolute-paths)))))))))
 
 (define-class <websocket-server-context> ()
   ((continuation-opcode :init-value 0)
@@ -709,7 +694,7 @@
                  (ctx (make <websocket-server-context>))
                  (app-context (make-application-context)))
             (define (close-websocket status data)
-              (log-info "WebSocket closed: code=~a, data=(~a)" status data)
+              (log-debug "WebSocket closed: code=~a, data=(~a)" status data)
               (selector-delete! sel in #f #f)
               (close-input-port in))
             (define (receive-json json-str)
@@ -759,7 +744,7 @@
               (connection-shutdown sock 'both)
               (atomic-update! *num-dispatcher* (lambda (x)
                                                  (let1 num (- x 1)
-                                                   (when (= num 0)
+                                                   (when (and (= num 0) (client-close-on-exit?))
                                                      (terminate-server-loop *control-channel* 0))
                                                    num))))))))))
 
@@ -1216,62 +1201,171 @@
 
 ;;;
 
-(define *graviton-port* 0)
-(define *graviton-access-log-drain* #t)
+(define *graviton-access-log-drain* #f)
 (define *graviton-error-log-drain* #t)
+
 (define *control-channel* (make-server-control-channel))
-(define *graviton-use-player?* #t)
-(define *graviton-player-window-size* '(800 600))
-(define *graviton-open-dev-tools?* #f)
 
-(define (set-graviton-port! port)
-  (set! *graviton-port* port))
-
-(define (set-graviton-error-log-drain! log-drain)
-  (set! *graviton-error-log* log-drain))
-
-(define (set-graviton-use-player! flag)
-  (set! *graviton-use-player?* flag))
-
-(define (set-graviton-player-window-size! width height)
-  (set! *graviton-player-window-size* (list width height)))
-
-(define (set-graviton-open-dev-tools! flag)
-  (set! *graviton-open-dev-tools?* flag))
+(define (server-url sock)
+  (format "http://localhost:~a/" (sockaddr-port (socket-address sock))))
 
 (define (invoke-player sock)
-  (let* ((addr (socket-address sock))
-         (config `((width . ,(list-ref *graviton-player-window-size* 0))
-                   (height . ,(list-ref *graviton-player-window-size* 1))
-                   (url . ,(format "http://localhost:~a/" (sockaddr-port addr)))
-                   (background-color . ,*background-color*)
-                   (open-dev-tools . ,*graviton-open-dev-tools?*)))
+  (let* ((config-file (generate-player-config-file (server-url sock)))
+         (player-path (graviton-config 'graviton-player-path)))
+    (cond
+      ((file-exists? player-path)
+       (run-process `(,player-path "--config" ,config-file)
+                    :output (player-stdout-filename)
+                    :error (player-stderr-filename)))
+      (else
+       (run-process `("npx" "electron" "." "--config" ,config-file)
+                    :directory "./player/src"
+                    :output (player-stdout-filename)
+                    :error (player-stderr-filename))))))
+
+(define (generate-player-config-file url)
+  (let* ((win-size (player-window-size))
+         (config `((width . ,(list-ref win-size 0))
+                   (height . ,(list-ref win-size 1))
+                   (url . ,url)
+                   (background-color . ,(client-background-color))
+                   (open-dev-tools . ,(player-open-dev-tools?))))
          (config-file (receive (out filename) (sys-mkstemp (build-path (temporary-directory) "grvcfg"))
                         (construct-json config out)
                         (close-port out)
                         (if (absolute-path? filename)
                             filename
-                            (simplify-path (build-path (current-directory) filename)))))
-         (player-path (graviton-config 'graviton-player-path)))
-    (when (graviton-config 'wsl?)
-      (set! config-file (process-output->string `("wslpath" "-w" ,config-file))))
-    (cond
-      ((file-exists? player-path)
-       (run-process `(,player-path "--config" ,config-file)))
-      (else
-       (run-process `("npx" "electron" "." "--config" ,config-file) :directory "./player/src")))))
+                            (simplify-path (build-path (current-directory) filename))))))
+    (if (graviton-config 'wsl?)
+        (process-output->string `("wslpath" "-w" ,config-file))
+        config-file)))
+
+(define-class <client-config> ()
+  ((port :init-value 0
+         :init-keyword :port)
+   (title :init-value (if (and (list? (command-line))
+                               (<= (length (command-line)) 1))
+                          (path-sans-extension (sys-basename (list-ref (command-line) 0)))
+                          "Graviton"))
+   (background-color :init-value "#FFF")))
+
+(define-syntax set-config-param!
+  (syntax-rules ()
+    ((_ cfg)
+     cfg)
+    ((_ cfg param rest ...)
+     (begin
+       (unless (undefined? param)
+         (slot-set! cfg 'param param))
+       (set-config-param! cfg rest ...)))))
+
+(define-syntax config-with-params
+  (syntax-rules ()
+    ((_ config-class param ...)
+     (let1 cfg (make config-class)
+       (set-config-param! cfg param ...)))))
+
+(define-class <player-config> (<client-config>)
+  ((type :init-value 'player)
+   (window-size :init-value '(800 600))
+   (open-dev-tools? :init-value #f)
+   (close-on-exit? :init-value #t)
+   (stdout-filename :init-form (build-path (temporary-directory) (format "graviton-player.~a.out" (sys-getpid))))
+   (stderr-filename :init-form (build-path (temporary-directory) (format "graviton-player.~a.err" (sys-getpid))))))
+
+(define-class <browser-config> (<client-config>)
+  ((type :init-value 'browser)
+   (port :init-value 8080
+         :init-keyword :port)
+   (close-on-exit? :init-value #f)))
+
+(define *client-config* (make <browser-config> :port 8080))
+
+(define (client-type)
+  (slot-ref *client-config* 'type))
+
+(define (client-port)
+  (slot-ref *client-config* 'port))
+
+(define (client-title)
+  (slot-ref *client-config* 'title))
+
+(define (client-background-color)
+  (slot-ref *client-config* 'background-color))
+
+(define (client-close-on-exit?)
+  (slot-ref *client-config* 'close-on-exit?))
+
+(define (player-window-size)
+  (slot-ref *client-config* 'window-size))
+
+(define (player-open-dev-tools?)
+  (slot-ref *client-config* 'open-dev-tools?))
+
+(define (player-stdout-filename)
+  (slot-ref *client-config* 'stdout-filename))
+
+(define (player-stderr-filename)
+  (slot-ref *client-config* 'stderr-filename))
+
+(define (grv-player :key
+                    window-size
+                    open-dev-tools?
+                    title
+                    background-color
+                    stdout-filename
+                    stderr-filename)
+  (set! *client-config* (config-with-params <player-config>
+                          window-size
+                          open-dev-tools?
+                          title
+                          background-color
+                          stdout-filename
+                          stderr-filename)))
+
+(define (grv-browser :key
+                     port
+                     title
+                     background-color)
+  (set! *client-config* (config-with-params <browser-config> port title background-color)))
+
+(define-class <log-config> ()
+  ((access-log-drain :init-value #f)
+   (error-log-drain :init-value #t)
+   (log-level :init-value 1)))
+
+(define *log-config* (make <log-config>))
+
+(define (grv-log-config :key
+                        access-log-drain
+                        error-log-drain
+                        log-level)
+  (set! *log-config* (config-with-params <log-config> access-log-drain error-log-drain log-level)))
+
+(define (access-log-drain)
+  (slot-ref *log-config* 'access-log-drain))
+
+(define (error-log-drain)
+  (slot-ref *log-config* 'error-log-drain))
+
+(define (log-level)
+  (slot-ref *log-config* 'log-level))
 
 (define (grv-main thunk)
   (set! *initial-thunk* thunk)
-  (let ((port *graviton-port*))
+  (let ((port (client-port)))
     (start-http-server :port port
-                       :access-log *graviton-access-log-drain*
-                       :error-log *graviton-error-log-drain*
+                       :access-log (access-log-drain)
+                       :error-log (error-log-drain)
                        :control-channel *control-channel*
                        :startup-callback (lambda (socks)
                                            (run-scheduler)
-                                           (when *graviton-use-player?*
-                                             (invoke-player (car socks))))
+                                           (case (client-type)
+                                             ((player)
+                                              (invoke-player (car socks)))
+                                             ((browser)
+                                              (log-info "Graviton server is running at")
+                                              (log-info "~a" (server-url (first socks))))))
                        :shutdown-callback (lambda ()
                                             (shutdown-scheduler!)))))
 
