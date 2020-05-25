@@ -53,6 +53,7 @@
   (use graviton.config)
   (use graviton.context)
   (use graviton.jsise)
+  (use graviton.scheduler)
   (use makiki)
   (use rfc.base64)
   (use rfc.json)
@@ -343,66 +344,6 @@
                   ((pool cont)
                    (submit-cont pool (cut cont (eof-object)))))
                 (dequeue-all! (slot-ref channel 'pool&continuation-queue))))))
-
-;;;
-
-(define *scheduler-command-queue* (make-mtqueue))
-
-(define (run-scheduler)
-  (thread-start! (make-thread
-                   (lambda ()
-                     (guard (e (else (report-error e)
-                                     (exit 70)))
-                       (let loop ((schedule-list '()))
-                         (let1 now (current-time)
-                           (cond
-                             ((and (not (null? schedule-list))
-                                   (time<=? (caar schedule-list) now))
-                              (match-let1 (_ thunk) (car schedule-list)
-                                (thunk))
-                              (loop (cdr schedule-list)))
-                             (else
-                              (let1 timeout (if (null? schedule-list)
-                                                #f
-                                                (max (- (time->seconds (caar schedule-list))
-                                                        (time->seconds now))
-                                                     0))
-                                (match (dequeue/wait! *scheduler-command-queue* timeout #f)
-                                  (('shutdown)
-                                   #f)
-                                  (('schedule wake-time thunk)
-                                   (loop (sort (cons (list wake-time thunk) schedule-list)
-                                               time<?
-                                               car)))
-                                  (('cancel future)
-                                   (loop (remove (lambda (schedule)
-                                                   (eq? (cdr schedule) future))
-                                                 schedule-list)))
-                                  (_
-                                   (loop schedule-list))))))))))
-                   "scheduler")))
-
-(define (shutdown-scheduler!)
-  (enqueue! *scheduler-command-queue* '(shutdown)))
-
-(define (add-schedule! wake-time thunk)
-  (enqueue! *scheduler-command-queue* (list 'schedule wake-time thunk)))
-
-(define (make-time-from-second type sec)
-  (let* ((sec-part (floor sec))
-         (nanosec-part (round->exact (* (- sec sec-part)
-                                        1000000000))))
-    (make-time type nanosec-part sec-part)))
-
-(define (add-timeout! timeout-in-sec thunk)
-  (add-schedule!
-      (add-duration (current-time)
-                    (make-time-from-second time-duration timeout-in-sec))
-    thunk))
-
-(define (cancel-schedule! future)
-  (enqueue! *scheduler-command-queue* (list 'cancel future)))
-
 
 ;;;
 
