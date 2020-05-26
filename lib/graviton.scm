@@ -890,26 +890,23 @@
     (((var) init-val)
      (list var 'json init-val))))
 
-(define binary-command-next-id (make-id-generator #x7fffffff))
+(define binary-command-next-id (make-id-generator #xffffffff))
 
 (define *enum-table* (make-hash-table))
 
 (define-class <js-procedure> ()
   ((types :init-keyword :types)
-   (call-id :init-keyword :call-id)
-   (run-id :init-keyword :run-id)))
+   (command-id :init-keyword :command-id)))
 
 (define (compile-jslet arg-specs body)
   (let* ((jsmodule-name (js-vm-current-main-module))
          (var-type-list (map parse-arg-spec arg-specs))
-         (base-id (binary-command-next-id))
-         (run-id (ash base-id 1))
-         (call-id (+ (ash base-id 1) 1))
+         (command-id (binary-command-next-id))
          (name (gensym))
          (ds (gensym)))
     (register-js-stmt! jsmodule-name
                        `(begin
-                          (define (,name %future-id ,ds)
+                          (define (,name ,ds)
                             (let ,(map (match-lambda
                                          ((var type _)
                                           `(,var ,(match type
@@ -935,6 +932,8 @@
                                                      `((ref ,ds getFloat64Array)))
                                                     ('boolean
                                                       `((ref ,ds getBoolean)))
+                                                    ('future
+                                                     `((ref ,ds getUint32)))
                                                     ('string
                                                       `((ref ,ds getString)))
                                                     ('json
@@ -951,9 +950,8 @@
                                        var-type-list)
                               ,@body)
                             undefined)
-                          (Graviton.registerBinaryCommand ,call-id ,name)
-                          (Graviton.registerBinaryCommand ,run-id ,name)))
-    (make <js-procedure> :call-id call-id :run-id run-id :types (map (cut list-ref <> 1) var-type-list))))
+                          (Graviton.registerBinaryCommand ,command-id ,name)))
+    (make <js-procedure> :command-id command-id :types (map (cut list-ref <> 1) var-type-list))))
 
 (define-jsise-macro result
   ((vals ...)
@@ -965,13 +963,13 @@
 
 (define (jscall js-proc :rest args)
   (let1 future (make <graviton-future>)
-    (call-command (slot-ref js-proc 'call-id)
-                  (cons 'future (slot-ref js-proc 'types))
+    (call-command (slot-ref js-proc 'command-id)
+                  (slot-ref js-proc 'types)
                   (cons future args))
     future))
 
 (define (jsrun js-proc :rest args)
-  (call-command (slot-ref js-proc 'run-id)
+  (call-command (slot-ref js-proc 'command-id)
                 (slot-ref js-proc 'types)
                 args))
 
@@ -984,7 +982,7 @@
 
 (define-macro (jslet/result var-spec :rest body)
   (let1 jscall jscall
-    `(,jscall ,(compile-jslet var-spec body)
+    `(,jscall ,(compile-jslet (cons '%future-id::future var-spec) body)
               ,@(map (lambda (spec)
                        (list-ref (parse-arg-spec spec) 2))
                      var-spec))))

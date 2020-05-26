@@ -274,13 +274,9 @@ function dispatchBinaryMessage(abuf) {
     while (ds.hasData()) {
         let commandIndex = ds.getUint16();
         let func = binaryCommands[commandIndex];
-        let futureId = false;
-        if (commandIndex & 1) {
-            futureId = ds.getUint32();
-        }
         if (func) {
             try {
-                func.apply(null, [futureId, ds]);
+                func(ds);
             } catch (e) {
                 notifyException(e.toString());
             }
