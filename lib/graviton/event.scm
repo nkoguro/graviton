@@ -88,13 +88,19 @@
 
 (define-application-context-slot listener-table (make-hash-table 'equal?))
 
-(define (add-event-listener! event-target event-type event-class-or-props proc)
+(define (add-event-listener! event-target event-type event-class-or-props proc :optional pool)
   (let1 proxy-id (proxy-id event-target)
     (application-context-slot-atomic-ref 'listener-table
       (lambda (tbl)
         (hash-table-push! tbl
                           (cons proxy-id event-type)
-                          (list (current-thread-pool)
+                          (list (cond
+                                  ((undefined? pool)
+                                   (current-thread-pool))
+                                  ((is-a? pool <thread-pool>)
+                                    pool)
+                                  (else
+                                   (errorf "<thread-pool> required, but got ~s" pool)))
                                 (if (is-a? event-class-or-props <class>)
                                     event-class-or-props
                                     #f)
