@@ -322,6 +322,7 @@
 (define-class <send-context> ()
   ((websocket-output-port :init-keyword :websocket-output-port)
    (buffer-output-port :init-keyword :buffer-output-port)
+   (output-buffer-storage :init-form (make-u8vector (* 1024 1024)))
    (command-buffering? :init-value #f)))
 
 (add-hook! task-end-hook (lambda ()
@@ -452,10 +453,10 @@
                                                      ((true) #t)
                                                      (else sym))))
                            (application-context app-context))
-              (application-context-slot-set! 'send-context
-                                             (make <send-context>
-                                               :websocket-output-port out
-                                               :buffer-output-port (open-output-uvector)))
+              (let1 send-context (make <send-context> :websocket-output-port out)
+                (slot-set! send-context 'buffer-output-port
+                           (open-output-uvector (slot-ref send-context 'output-buffer-storage) :extendable #t))
+                (application-context-slot-set! 'send-context send-context))
 
               (selector-add! sel in (lambda (in flag)
                                       (while (and (byte-ready? in) (not (port-closed? in)))
@@ -657,10 +658,10 @@
 (define (flush-commands)
   (with-send-context
     (lambda (ctx)
-      (let1 output-data (get-output-uvector (slot-ref ctx 'buffer-output-port))
+      (let1 output-data (get-output-uvector (slot-ref ctx 'buffer-output-port) :shared #t)
         (unless (= (uvector-length output-data) 0)
           (send-binary-frame (slot-ref ctx 'websocket-output-port) output-data)))
-      (slot-set! ctx 'buffer-output-port (open-output-uvector)))))
+      (slot-set! ctx 'buffer-output-port (open-output-uvector (slot-ref ctx 'output-buffer-storage))))))
 
 ;;;
 
