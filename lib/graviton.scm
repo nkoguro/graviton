@@ -600,58 +600,58 @@
         (write-u16 command-id
                    out
                    'little-endian)
-        (map (lambda (type arg)
-               (match type
-                 ('uint
-                  (write-variant arg out))
-                 ('int
-                  (write-variant (if (<= 0 arg)
-                                     (ash arg 1)
-                                     (- (ash (- n) 1) 1))
-                                 out))
-                 ('f32
-                  (write-f32 arg out 'little-endian))
-                 ('f64
-                  (write-f64 arg out 'little-endian))
-                 ('s16
-                  (write-s16 arg out 'little-endian))
-                 ('s32
-                  (write-s32 arg out 'little-endian))
-                 ('s8
-                  (write-s8 arg out 'little-endian))
-                 ('u16
-                  (write-u16 arg out 'little-endian))
-                 ('u32
-                  (write-u32 arg out 'little-endian))
-                 ('u8
-                  (write-u8 arg out 'little-endian))
-                 ('u8vector
-                  (write-u32 (u8vector-length arg) out 'little-endian)
-                  (write-uvector arg out))
-                 ('f64vector
-                  (write-u32 (f64vector-length arg) out 'little-endian)
-                  (write-uvector arg out 0 -1 'little-endian))
-                 ('boolean
-                   (write-u8 (if arg 1 0) out 'little-endian))
-                 ('future
-                  (let1 id (allocate-future-id arg)
-                    (write-u32 id out 'little-endian)))
-                 ((or 'object* 'object)
-                  (write-u32 (proxy-id arg) out 'little-endian))
-                 ('string
-                   (let1 data (ces-convert-to <u8vector> arg 'utf-8)
-                     (write-u32 (u8vector-length data) out 'little-endian)
-                     (write-uvector data out )))
-                 ('json
-                  ;; Make a vector to make JSON to satisfy RFC4627.
-                  (let1 data (ces-convert-to <u8vector> (construct-json-string (vector arg)) 'utf-8)
-                    (write-u32 (u8vector-length data) out 'little-endian)
-                    (write-uvector data out)))
-                 ((? symbol? enum-name)
-                  (unless (hash-table-contains? *enum-table* enum-name)
-                    (errorf "Invalid type: ~a" type))
-                  (write-u8 (enum-value enum-name arg) out 'little-endian))))
-             types args))
+        (for-each (lambda (type arg)
+                    (match type
+                      ('uint
+                       (write-variant arg out))
+                      ('int
+                       (write-variant (if (<= 0 arg)
+                                          (ash arg 1)
+                                          (- (ash (- n) 1) 1))
+                                      out))
+                      ('f32
+                       (write-f32 arg out 'little-endian))
+                      ('f64
+                       (write-f64 arg out 'little-endian))
+                      ('s16
+                       (write-s16 arg out 'little-endian))
+                      ('s32
+                       (write-s32 arg out 'little-endian))
+                      ('s8
+                       (write-s8 arg out 'little-endian))
+                      ('u16
+                       (write-u16 arg out 'little-endian))
+                      ('u32
+                       (write-u32 arg out 'little-endian))
+                      ('u8
+                       (write-u8 arg out 'little-endian))
+                      ('u8vector
+                       (write-u32 (u8vector-length arg) out 'little-endian)
+                       (write-uvector arg out))
+                      ('f64vector
+                       (write-u32 (f64vector-length arg) out 'little-endian)
+                       (write-uvector arg out 0 -1 'little-endian))
+                      ('boolean
+                        (write-u8 (if arg 1 0) out 'little-endian))
+                      ('future
+                       (let1 id (allocate-future-id arg)
+                         (write-u32 id out 'little-endian)))
+                      ((or 'object* 'object)
+                       (write-u32 (proxy-id arg) out 'little-endian))
+                      ('string
+                        (let1 data (ces-convert-to <u8vector> arg 'utf-8)
+                          (write-u32 (u8vector-length data) out 'little-endian)
+                          (write-uvector data out )))
+                      ('json
+                       ;; Make a vector to make JSON to satisfy RFC4627.
+                       (let1 data (ces-convert-to <u8vector> (construct-json-string (vector arg)) 'utf-8)
+                         (write-u32 (u8vector-length data) out 'little-endian)
+                         (write-uvector data out)))
+                      ((? symbol? enum-name)
+                       (unless (hash-table-contains? *enum-table* enum-name)
+                         (errorf "Invalid type: ~a" type))
+                       (write-u8 (enum-value enum-name arg) out 'little-endian))))
+                  types args))
       (unless (command-buffering?)
         (flush-commands)))))
 
