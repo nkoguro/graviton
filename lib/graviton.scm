@@ -590,64 +590,73 @@
           (write-u8 (logior (logand n #x7f) #x80) out)
           (loop (ash n -7))))))))
 
+(define *jsargtype-serializer-table* (make-hash-table 'eq?))
+(define *jsargtype-datastream-method-table* (make-hash-table 'eq?))
+
+(define-syntax define-jsargtype
+  (syntax-rules ()
+    ((_ (type-name rest ...) datastream-method serializer)
+     (begin
+       (define-jsargtype type-name datastream-method serializer)
+       (define-jsargtype (rest ...) datastream-method serializer-body)))
+    ((_ type-name datastream-method serializer)
+     (begin
+       (hash-table-put! *jsargtype-serializer-table* 'type-name serializer)
+       (hash-table-put! *jsargtype-datastream-method-table* 'type-name 'datastream-method)))))
+
+(define-jsargtype f32 getFloat32 (lambda (v out)
+                                   (write-f32 v out 'little-endian)))
+(define-jsargtype f64 getFloat64 (lambda (v out)
+                                   (write-f64 v out 'little-endian)))
+(define-jsargtype s8 getInt8 (lambda (v out)
+                               (write-s8 v out 'little-endian)))
+(define-jsargtype s16 getInt16 (lambda (v out)
+                                 (write-s16 v out 'little-endian)))
+(define-jsargtype s32 getInt32 (lambda (v out)
+                                 (write-s32 v out 'little-endian)))
+(define-jsargtype u8 getUint8 (lambda (v out)
+                                (write-u8 v out 'little-endian)))
+(define-jsargtype u16 getUint16 (lambda (v out)
+                                  (write-u16 v out 'little-endian)))
+(define-jsargtype u32 getUint32 (lambda (v out)
+                                  (write-u32 v out 'little-endian)))
+(define-jsargtype u8vector getUint8Array (lambda (v out)
+                                           (write-u32 (u8vector-length v) out 'little-endian)
+                                           (write-uvector v out)))
+(define-jsargtype f64vector getFloat64Array (lambda (v out)
+                                              (write-u32 (f64vector-length v) out 'little-endian)
+                                              (write-uvector v out 0 -1 'little-endian)))
+(define-jsargtype boolean getBoolean (lambda (v out)
+                                       (write-u8 (if v 1 0) out 'little-endian)))
+(define-jsargtype future getUint32 (lambda (v out)
+                                     (write-u32 (allocate-future-id v) out 'little-endian)))
+(define-jsargtype object getObjectRefValue (lambda (v out)
+                                             (write-u32 (proxy-id v) out 'little-endian)))
+(define-jsargtype object* getObjectRef (lambda (v out)
+                                         (write-u32 (proxy-id v) out 'little-endian)))
+(define-jsargtype string getString (lambda (v out)
+                                     (let1 data (ces-convert-to <u8vector> v 'utf-8)
+                                       (write-u32 (u8vector-length data) out 'little-endian)
+                                       (write-uvector data out))))
+(define-jsargtype json getJson (lambda (v out)
+                                 ;; Make a vector to make JSON to satisfy RFC4627.
+                                 (let1 data (ces-convert-to <u8vector> (construct-json-string (vector v)) 'utf-8)
+                                   (write-u32 (u8vector-length data) out 'little-endian)
+                                   (write-uvector data out))))
+
+
 (define (call-command command-id types args)
   (with-send-context
     (lambda (ctx)
       (let1 out (slot-ref ctx 'buffer-output-port)
-        (write-u16 command-id
-                   out
-                   'little-endian)
+        (write-u16 command-id out 'little-endian)
         (for-each (lambda (type arg)
-                    (match type
-                      ('uint
-                       (write-variant arg out))
-                      ('int
-                       (write-variant (if (<= 0 arg)
-                                          (ash arg 1)
-                                          (- (ash (- n) 1) 1))
-                                      out))
-                      ('f32
-                       (write-f32 arg out 'little-endian))
-                      ('f64
-                       (write-f64 arg out 'little-endian))
-                      ('s16
-                       (write-s16 arg out 'little-endian))
-                      ('s32
-                       (write-s32 arg out 'little-endian))
-                      ('s8
-                       (write-s8 arg out 'little-endian))
-                      ('u16
-                       (write-u16 arg out 'little-endian))
-                      ('u32
-                       (write-u32 arg out 'little-endian))
-                      ('u8
-                       (write-u8 arg out 'little-endian))
-                      ('u8vector
-                       (write-u32 (u8vector-length arg) out 'little-endian)
-                       (write-uvector arg out))
-                      ('f64vector
-                       (write-u32 (f64vector-length arg) out 'little-endian)
-                       (write-uvector arg out 0 -1 'little-endian))
-                      ('boolean
-                        (write-u8 (if arg 1 0) out 'little-endian))
-                      ('future
-                       (let1 id (allocate-future-id arg)
-                         (write-u32 id out 'little-endian)))
-                      ((or 'object* 'object)
-                       (write-u32 (proxy-id arg) out 'little-endian))
-                      ('string
-                        (let1 data (ces-convert-to <u8vector> arg 'utf-8)
-                          (write-u32 (u8vector-length data) out 'little-endian)
-                          (write-uvector data out )))
-                      ('json
-                       ;; Make a vector to make JSON to satisfy RFC4627.
-                       (let1 data (ces-convert-to <u8vector> (construct-json-string (vector arg)) 'utf-8)
-                         (write-u32 (u8vector-length data) out 'little-endian)
-                         (write-uvector data out)))
-                      ((? symbol? enum-name)
-                       (unless (hash-table-contains? *enum-table* enum-name)
-                         (errorf "Invalid type: ~a" type))
-                       (write-u8 (enum-value enum-name arg) out 'little-endian))))
+                    (or (and-let1 serialize (hash-table-get *jsargtype-serializer-table* type #f)
+                          (serialize arg out)
+                          #t)
+                        (and (hash-table-contains? *enum-table* type)
+                             (write-u8 (enum-value type arg) out 'little-endian))
+                        (errorf "Invalid jsarg type: ~a" type)))
                   types args))
       (unless (command-buffering?)
         (flush-commands)))))
@@ -701,44 +710,11 @@
                           (define (,name ,ds)
                             (let ,(map (match-lambda
                                          ((var type _)
-                                          `(,var ,(match type
-                                                    ('f32
-                                                     `((ref ,ds getFloat32)))
-                                                    ('f64
-                                                     `((ref ,ds getFloat64)))
-                                                    ('s16
-                                                     `((ref ,ds getInt16)))
-                                                    ('s32
-                                                     `((ref ,ds getInt32)))
-                                                    ('s8
-                                                     `((ref ,ds getInt8)))
-                                                    ('u16
-                                                     `((ref ,ds getUint16)))
-                                                    ('u32
-                                                     `((ref ,ds getUint32)))
-                                                    ('u8
-                                                     `((ref ,ds getUint8)))
-                                                    ('u8vector
-                                                     `((ref ,ds getUint8Array)))
-                                                    ('f64vector
-                                                     `((ref ,ds getFloat64Array)))
-                                                    ('boolean
-                                                      `((ref ,ds getBoolean)))
-                                                    ('future
-                                                     `((ref ,ds getUint32)))
-                                                    ('string
-                                                      `((ref ,ds getString)))
-                                                    ('json
-                                                     `((ref ,ds getJson)))
-                                                    ('object*
-                                                     `((ref ,ds getObjectRef)))
-                                                    ('object
-                                                     `((ref ,ds getObjectRefValue)))
-                                                    ((? symbol? enum-name)
-                                                     (unless (hash-table-contains? *enum-table* enum-name)
-                                                       (errorf "Invalid type: ~a" type))
-                                                     `((ref ,ds getEnum) ,(symbol->string enum-name)))
-                                                    ))))
+                                          `(,var ,(or (and-let1 method (hash-table-get *jsargtype-datastream-method-table* type #f)
+                                                        `((ref ,ds ,method)))
+                                                      (and (hash-table-contains? *enum-table* type)
+                                                           `((ref ,ds getEnum) ,(symbol->string type)))
+                                                      (errorf "Invalid jsarg type: ~a" type)))))
                                        var-type-list)
                               ,@body)
                             undefined)
