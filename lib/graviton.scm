@@ -716,14 +716,9 @@
                                                            `((ref ,ds getEnum) ,(symbol->string type)))
                                                       (errorf "Invalid jsarg type: ~a" type)))))
                                        var-type-list)
-                              ,@body)
-                            undefined)
+                              ,@body))
                           (Graviton.registerBinaryCommand ,command-id ,name)))
     (make <js-procedure> :command-id command-id :types (map (cut list-ref <> 1) var-type-list))))
-
-(define-jsise-macro result
-  ((vals ...)
-   `(Graviton.notifyValues %future-id ,(list->vector vals))))
 
 (define-jsise-macro raise
   ((err)

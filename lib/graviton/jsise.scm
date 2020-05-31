@@ -99,7 +99,7 @@
       (or (assq-ref (slot-ref env 'var-alist) var #f)
           (assq-ref (slot-ref env 'defvar-alist) var #f)
           (resolve-js-local-var (slot-ref env 'parent) var))
-        #f))
+      #f))
 
 (define (resolve-js-var env var)
   (let1 parts (string-split (symbol->string var) ".")
@@ -291,6 +291,22 @@
               clauses)
          "}")))
 
+(define-jsise-stmt result env
+  ((vals ...)
+   (cond
+     ((resolve-js-local-var env '%future-id)
+      (compile-jsise-stmt env `(begin
+                                 (Graviton.notifyValues %future-id ,(list->vector vals))
+                                 (return))))
+     (else
+      (error "result is called outside jslet/result.")))))
+
+(define-jsise-stmt return env
+  (()
+   (list "return;"))
+  ((val)
+   (list "return " (compile-jsise-expr env val) ";")))
+
 (define-syntax define-jsise-unary
   (syntax-rules ()
     ((_ op js-op)
@@ -381,7 +397,7 @@
      (let ((vars (map (cut list-ref <> 0) form))
            (inits (map (cut list-ref <> 1) form)))
        (compile-jsise-expr env `((lambda ,vars ,@body) ,@inits))))
-    (('lambda args expr ...)
+    (('lambda args stmt ...)
      (let1 env (make-env env args)
        (list "(" "(" (intersperse ","
                                   (let loop ((args args)
@@ -394,9 +410,7 @@
                                       ((arg . rest)
                                        (loop rest (cons (resolve-js-var env arg) js-args))))))
              ")" "=>" "{"
-             (receive (heads tail) (split-at expr (- (length expr) 1))
-               (list (map (cut compile-jsise-stmt env <>) heads)
-                     "return " (compile-jsise-expr env (list-ref tail 0)) ";"))
+             (map (cut compile-jsise-stmt env <>) stmt)
              "}" ")")))
     (('if expr then)
      (compile-jsise-expr env `(if ,expr ,then undefined)))
@@ -424,8 +438,6 @@
      (list "(" (hash-table-get *unary-op-table* op) (compile-jsise-expr env arg) ")"))
     (((? (cut hash-table-contains? *infix-op-table* <>) op) args ...)
      (list "(" (intersperse (hash-table-get *infix-op-table* op) (map (cut compile-jsise-expr env <>) args)) ")"))
-    (((? is-stmt? _) rest ...)
-     (list "(" "()=>{" (compile-jsise-stmt env expr) "return undefined;" "}" ")" "()"))
     ((f args ...)
      (list (compile-jsise-expr env f) "(" (intersperse "," (map (cut compile-jsise-expr env <>) args)) ")"))
     (_
@@ -487,7 +499,7 @@
 (define (compile-import-spec import-spec)
   (match import-spec
     (((? string? module-path) import-options ...)
-     `(js-code "import " ,(compile-import-option import-options) " from '" ,(absolute-js-path module-path) "';"))
+     `(js-code "import " ,(compile-import-option import-options) " from '" ,(absolute-js-path module-path) "'"))
     (_
      (errorf "Invalid import-spec: ~s" import-spec))))
 
