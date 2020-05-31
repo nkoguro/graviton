@@ -18,18 +18,23 @@
 
 ;; Here you can add feature tests and other cf-define's.
 
-(define wsl?
-  (if (get-environment-variable "WSLENV")
-      #t
-      #f))
+(define wsl (let ((wslenv (get-environment-variable "WSLENV"))
+                  (wsl-interop (get-environment-variable "WSL_INTEROP")))
+              (cond
+                ((and wslenv wsl-interop)
+                 "2")
+                (wslenv
+                 "1")
+                (else
+                 #f))))
 
-(cf-subst 'WSL (if wsl? "true" "false"))
+(cf-subst 'WSL (or wsl ""))
 
 (cf-subst 'GRAVITON_PLAYER_ARCH
           (let1 platform (gauche-config "--arch")
             (match-let1 (arch os) (string-split platform "-" 1)
               (cond
-                (wsl?
+                (wsl
                  "win32-x64")
                 ((and (#/x86_64/i arch)
                       (#/linux/i os))
@@ -48,7 +53,7 @@
 
 (cf-subst 'GRAVITON_PLAYER_EXECUTABLE
           (cond
-            (wsl?
+            (wsl
              "graviton-player.exe")
             (else
              (string-join "graviton-player" (gauche-config 'executable-suffix) "."))))

@@ -4,7 +4,12 @@
     (datarootdir . "@datarootdir@")
     (datadir . "@datadir@")
 
-    (wsl? . ,(equal? "@WSL@" "true"))
+    (wsl . ,(let1 wsl "@WSL@"
+              (cond
+                ((equal? wsl "")
+                 #f)
+                (else
+                 wsl))))
 
     (graviton-data-dir . "${datadir}/graviton")
     (graviton-player-arch . "@GRAVITON_PLAYER_ARCH@")
