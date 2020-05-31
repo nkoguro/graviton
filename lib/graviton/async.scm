@@ -134,7 +134,7 @@
 (define-class <graviton-future> ()
   ((lock :init-form (make-mutex))
    (values :init-value #f)
-   (pool&continuations :init-value '())))
+   (tqueue&continuations :init-value '())))
 
 (define-class <graviton-future-transformer> ()
   ((lock :init-form (make-mutex))
@@ -155,9 +155,9 @@
         (else
          (for-each (match-lambda ((task-queue cont)
                                   (submit-cont task-queue (cut cont vals))))
-                   (slot-ref future 'pool&continuations))
+                   (slot-ref future 'tqueue&continuations))
          (slot-set! future 'values vals)
-         (slot-set! future 'pool&continuations '()))))))
+         (slot-set! future 'tqueue&continuations '()))))))
 
 (define-method get-future-values ((future <graviton-future>) timeout timeout-vals)
   (let1 lock (slot-ref future 'lock)
@@ -170,7 +170,7 @@
       (else
        (let1 task-queue (current-task-queue)
          (shift cont
-           (push! (slot-ref future 'pool&continuations) (list task-queue cont))
+           (push! (slot-ref future 'tqueue&continuations) (list task-queue cont))
            (mutex-unlock! lock)
            (when timeout
              (add-timeout! timeout (lambda ()
@@ -228,7 +228,7 @@
 (define-class <graviton-channel> ()
   ((lock :init-form (make-mutex))
    (queue :init-form (make-queue))
-   (pool&continuation-queue :init-form (make-queue))
+   (tqueue&continuation-queue :init-form (make-queue))
    (closed? :init-value #f)))
 
 (define (make-channel)
@@ -245,23 +245,23 @@
       (when (slot-ref channel 'closed?)
         (errorf "channel ~s is already closed." channel))
       (let ((queue (slot-ref channel 'queue))
-            (pool&continuation-queue (slot-ref channel 'pool&continuation-queue)))
+            (tqueue&continuation-queue (slot-ref channel 'tqueue&continuation-queue)))
         (cond
-          ((queue-empty? pool&continuation-queue)
+          ((queue-empty? tqueue&continuation-queue)
            (enqueue! queue obj))
           (else
-           (match-let1 (task-queue cont) (dequeue! pool&continuation-queue)
+           (match-let1 (task-queue cont) (dequeue! tqueue&continuation-queue)
              (submit-cont task-queue (cut cont obj)))))))))
 
 (define (channel-send-timeout-val channel cont timeout-val)
-  (define (cont? pool&cont)
-    (match-let1 (_ k) pool&cont (eq? k cont)))
+  (define (cont? tqueue&cont)
+    (match-let1 (_ k) tqueue&cont (eq? k cont)))
   (with-locking-mutex (slot-ref channel 'lock)
     (lambda ()
-      (and-let* ((pool&continuation-queue (slot-ref channel 'pool&continuation-queue))
-                 (pool&cont (find-in-queue cont? pool&continuation-queue)))
-        (remove-from-queue! cont? pool&continuation-queue)
-        (match-let1 (task-queue _) pool&cont
+      (and-let* ((tqueue&continuation-queue (slot-ref channel 'tqueue&continuation-queue))
+                 (tqueue&cont (find-in-queue cont? tqueue&continuation-queue)))
+        (remove-from-queue! cont? tqueue&continuation-queue)
+        (match-let1 (task-queue _) tqueue&cont
           (submit-cont task-queue (cut cont timeout-val)))))))
 
 (define (channel-recv channel :optional (fallback #f))
@@ -272,7 +272,7 @@
 (define (channel-recv/await channel :optional (timeout #f) (timeout-val #f))
   (let ((lock (slot-ref channel 'lock))
         (queue (slot-ref channel 'queue))
-        (pool&continuation-queue (slot-ref channel 'pool&continuation-queue)))
+        (tqueue&continuation-queue (slot-ref channel 'tqueue&continuation-queue)))
     (mutex-lock! lock)
     (cond
       ((slot-ref channel 'closed?)
@@ -281,7 +281,7 @@
       ((queue-empty? queue)
        (let1 task-queue (current-task-queue)
          (shift cont
-           (enqueue! pool&continuation-queue (list task-queue cont))
+           (enqueue! tqueue&continuation-queue (list task-queue cont))
            (mutex-unlock! lock)
            (when timeout
              (add-timeout! timeout (lambda ()
@@ -299,5 +299,5 @@
       (for-each (match-lambda
                   ((task-queue cont)
                    (submit-cont task-queue (cut cont (eof-object)))))
-                (dequeue-all! (slot-ref channel 'pool&continuation-queue))))))
+                (dequeue-all! (slot-ref channel 'tqueue&continuation-queue))))))
 
