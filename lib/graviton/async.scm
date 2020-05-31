@@ -192,10 +192,6 @@
         (undefined)
         (apply values vals))))
 
-;; (define (asleep sec)
-;;   (let1 future (make <graviton-future>)
-;;     (await future sec)))
-
 (define (asleep sec)
   (cond
     ((<= sec 0)
