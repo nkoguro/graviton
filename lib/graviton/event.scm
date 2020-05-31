@@ -31,7 +31,6 @@
 ;;;
 
 (define-module graviton.event
-  (use control.thread-pool)
   (use file.util)
   (use gauche.collection)
   (use gauche.regexp)
@@ -88,19 +87,19 @@
 
 (define-application-context-slot listener-table (make-hash-table 'equal?))
 
-(define (add-event-listener! event-target event-type event-class-or-props proc :optional pool)
+(define (add-event-listener! event-target event-type event-class-or-props proc :optional task-queue)
   (let1 proxy-id (proxy-id event-target)
     (application-context-slot-atomic-ref 'listener-table
       (lambda (tbl)
         (hash-table-push! tbl
                           (cons proxy-id event-type)
                           (list (cond
-                                  ((undefined? pool)
-                                   (current-thread-pool))
-                                  ((is-a? pool <thread-pool>)
-                                    pool)
+                                  ((undefined? task-queue)
+                                   (current-task-queue))
+                                  ((is-a? task-queue <task-queue>)
+                                    task-queue)
                                   (else
-                                   (errorf "<thread-pool> required, but got ~s" pool)))
+                                   (errorf "<task-queue> required, but got ~s" task-queue)))
                                 (if (is-a? event-class-or-props <class>)
                                     event-class-or-props
                                     #f)
@@ -137,10 +136,9 @@
     (lambda (tbl)
       (let1 args (vector->list event-values)
         (for-each (match-lambda
-                    ((pool event-class proc)
+                    ((task-queue event-class proc)
                      (let1 args (if event-class
                                     (list (apply make event-class args))
                                     args)
-                       (guard (e (<thread-pool-shut-down> #f))
-                         (submit-thunk pool (^() (apply proc args)))))))
+                       (submit-task task-queue (^() (apply proc args))))))
                   (hash-table-get tbl (cons id event-type) '()))))))

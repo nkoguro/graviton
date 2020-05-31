@@ -2,7 +2,6 @@
 ;; Compute Mandelbrot set.
 ;;
 
-(use control.thread-pool)
 (use data.queue)
 (use graviton)
 (use graviton.canvas)
@@ -38,7 +37,7 @@
 (define *height* 500)
 (define *max-n* 50)
 
-(define worker-pool (make-thread-pool 4))
+(define worker-task-queue (make-task-queue 4))
 
 (define (main args)
   (grv-player :background-color "black")
@@ -60,7 +59,7 @@
              (mesh-h (round->exact (/. *height* mesh-y))))
         (for-each (match-lambda
                     ((i j)
-                     (async worker-pool
+                     (async worker-task-queue
                             (mandelbrot-fill channel
                                              mesh-w
                                              mesh-h

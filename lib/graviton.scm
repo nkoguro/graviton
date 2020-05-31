@@ -32,7 +32,6 @@
 
 (define-module graviton
   (use binary.io)
-  (use control.thread-pool)
   (use data.queue)
   (use file.util)
   (use gauche.charconv)
@@ -76,6 +75,7 @@
           grv-browser
           grv-log-config
 
+          make-task-queue
           transform-future
           async-apply
           async
@@ -95,7 +95,7 @@
           window-size
           app-close-hook
 
-          current-thread-pool
+          current-task-queue
 
           define-action
 
@@ -383,7 +383,7 @@
 
 (define-action "startApplication" ()
   (when *initial-thunk*
-    (submit-thunk (main-thread-pool)
+    (submit-task (main-task-queue)
       (lambda ()
         (run-hook *init-hook*)
         (*initial-thunk*)))))
@@ -415,9 +415,6 @@
            (errorf "[BUG] Invalid future ID: ~a" future-id)))))))
 
 (define app-close-hook (make-hook))
-
-(add-hook! app-close-hook (lambda ()
-                            (terminate-all! (main-thread-pool) :cancel-queued-jobs #t)))
 
 (define (start-websocket-dispatcher! sock in out)
   (thread-start!
@@ -915,8 +912,7 @@
 (define (loop-frame proc :key (fps 30))
   (let ((exit? #f)
         (frame-sec (/. 1 fps))
-        (current-buffering-mode (command-buffering?))
-        (prev-sec 0))
+        (current-buffering-mode (command-buffering?)))
     (define (break)
       (set! exit? #t))
     (set-command-buffering? #t)
