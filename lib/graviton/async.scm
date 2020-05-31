@@ -193,14 +193,10 @@
         (apply values vals))))
 
 (define (asleep sec)
-  (cond
-    ((<= sec 0)
-     #f)
-    (else
-     (let1 task-queue (current-task-queue)
-       (shift cont
-         (add-timeout! sec (lambda ()
-                             (submit-cont task-queue cont))))))))
+  (let1 task-queue (current-task-queue)
+    (shift cont
+      (add-timeout! sec (lambda ()
+                          (submit-cont task-queue cont))))))
 
 (define (task-yield :optional (time-slice 0))
   (when (<= time-slice (- (time->seconds (current-time)) (thread-start-time)))
