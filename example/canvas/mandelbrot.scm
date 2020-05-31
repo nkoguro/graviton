@@ -73,7 +73,7 @@
                                              #f))))
                   (cartesian-product (list (iota mesh-x) (iota mesh-y)))))
 
-      (set-command-buffering? #f)
+      (set-command-buffering? #t)
       (while (channel-recv/await channel)
         => point+n
         (match-let1 (x y n) point+n
