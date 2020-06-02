@@ -711,9 +711,9 @@
                             (let ,(map (match-lambda
                                          ((var type _)
                                           `(,var ,(or (and-let1 method (hash-table-get *jsargtype-datastream-method-table* type #f)
-                                                        `((ref ,ds ,method)))
+                                                        `((~ ,ds ',method)))
                                                       (and (hash-table-contains? *enum-table* type)
-                                                           `((ref ,ds getEnum) ,(symbol->string type)))
+                                                           `((~ ,ds 'getEnum) ,(symbol->string type)))
                                                       (errorf "Invalid jsarg type: ~a" type)))))
                                        var-type-list)
                               ,@body))

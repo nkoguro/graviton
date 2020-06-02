@@ -387,10 +387,14 @@
                                       x)))
                                body))))
        (traverse body)))
-    (('ref expr attrs ...)
-     (list (compile-jsise-expr env expr) "." (string-join (map symbol->string attrs) ".")))
-    (('aref expr key)
-     (list (compile-jsise-expr env expr) "[" (compile-jsise-expr env key) "]"))
+    (((or 'ref '~) expr attrs ...)
+     (list (compile-jsise-expr env expr) (map (lambda (attr)
+                                                (match attr
+                                                  (('quote sym)
+                                                   (list "." (symbol->string sym)))
+                                                  (_
+                                                   (list "[" (compile-jsise-expr env attr) "]"))))
+                                              attrs)))
     (('begin expr ...)
      (list "(" (intersperse "," (map (cut compile-jsise-expr env <>) expr)) ")"))
     (('let form body ...)
