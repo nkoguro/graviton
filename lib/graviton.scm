@@ -574,21 +574,6 @@
 
 ;;;
 
-(define (write-variant n out)
-  (cond
-    ((zero? n)
-     (write-u8 0 out))
-    (else
-     (let loop ((n n))
-       (cond
-         ((zero? n)
-          #t)
-         ((<= n #x7f)
-          (write-u8 n out))
-         (else
-          (write-u8 (logior (logand n #x7f) #x80) out)
-          (loop (ash n -7))))))))
-
 (define *jsargtype-serializer-table* (make-hash-table 'eq?))
 (define *jsargtype-datastream-method-table* (make-hash-table 'eq?))
 

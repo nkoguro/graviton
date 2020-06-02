@@ -84,28 +84,6 @@ class DataReadStream {
         return this.position < this.dataView.byteLength;
     }
 
-    getUint() {
-        let n = 0;
-        let v = 0;
-        let i = 0;
-        do {
-            v = this.dataView.getUint8(this.position);
-            this.position++;;
-            n += (v & 0x7f) << (i * 7);
-            i++;
-        } while (v > 0x7f);
-        return n;
-    }
-
-    getInt() {
-        let n = this.getUint();
-        if ((n & 1) === 0) {
-            return n >> 1;
-        } else {
-            return -(n >> 1) - 1;
-        }
-    }
-
     getFloat32() {
         let v = this.dataView.getFloat32(this.position, true);
         this.position += 4;
