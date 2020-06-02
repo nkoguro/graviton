@@ -53,6 +53,7 @@
   (use graviton.config)
   (use graviton.context)
   (use graviton.jsise)
+  (use graviton.misc)
   (use graviton.scheduler)
   (use makiki)
   (use rfc.base64)
@@ -115,18 +116,6 @@
           loop-frame))
 
 (select-module graviton)
-
-;;;
-
-(define (make-id-generator :optional (max-value #f) (start 0))
-  (let1 counter-atom (atom start)
-    (lambda ()
-      (atomic-update! counter-atom (lambda (x)
-                                     (if max-value
-                                         (modulo (+ x 1) max-value)
-                                         (+ x 1)))))))
-
-;;;
 
 ;;;
 
