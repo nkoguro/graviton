@@ -55,7 +55,7 @@
   (sawtooth "sawtooth")
   (triangle "triangle"))
 
-(define-class <audio-media-element-node> (<proxy-object>)
+(define-class <audio-media-element-node> (<jsobject>)
   ((duration :init-value #f)))
 
 (define (load-audio filename :key (content-type #f))
@@ -83,7 +83,7 @@
   (jslet ((audio::object))
     (audio.mediaElement.pause)))
 
-(define-class <audio-buffer> (<proxy-object>)
+(define-class <audio-buffer> (<jsobject>)
   ((sample-rate)
    (length)
    (duration)

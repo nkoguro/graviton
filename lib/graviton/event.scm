@@ -88,11 +88,11 @@
 (define-application-context-slot listener-table (make-hash-table 'equal?))
 
 (define (add-event-listener! event-target event-type event-class-or-props proc :optional task-queue)
-  (let1 proxy-id (proxy-id event-target)
+  (let1 id (jsobject-id event-target)
     (application-context-slot-atomic-ref 'listener-table
       (lambda (tbl)
         (hash-table-push! tbl
-                          (cons proxy-id event-type)
+                          (cons id event-type)
                           (list (cond
                                   ((undefined? task-queue)
                                    (current-task-queue))
@@ -117,10 +117,10 @@
       (Event.registerEventHandler event-target* event-type prop-vec))))
 
 (define (remove-event-listener! event-target event-type proc)
-  (let1 proxy-id (proxy-id event-target)
+  (let1 id (jsobject-id event-target)
     (application-context-slot-atomic-ref 'listener-table
       (lambda (tbl)
-        (let1 key (cons proxy-id event-type)
+        (let1 key (cons jsobject-id event-type)
           (hash-table-update! tbl key (lambda (vals)
                                         (remove (match-lambda
                                                   ((_ _ handler)

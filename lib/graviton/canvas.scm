@@ -124,7 +124,7 @@
 
 (define current-canvas (make-parameter #f))
 
-(define-class <canvas> (<proxy-object>)
+(define-class <canvas> (<jsobject>)
   ((width :init-keyword :width)
    (height :init-keyword :height)
    (z :init-keyword :z)
@@ -162,7 +162,7 @@
               (class-direct-slots <context2d>))
     ctx2))
 
-(define-class <graviton-image> (<proxy-object>)
+(define-class <graviton-image> (<jsobject>)
   ((width :init-keyword :width)
    (height :init-keyword :height)))
 
@@ -235,9 +235,9 @@
 (define-method style->json ((pattern <pattern>))
   `(("type" . "pattern")
     ("canvas" . ,(and-let1 canvas (slot-ref pattern 'canvas)
-                   (proxy-id canvas)))
+                   (jsobject-id canvas)))
     ("image" . ,(and-let1 image (slot-ref pattern 'image)
-                  (proxy-id image)))
+                  (jsobject-id image)))
     ("repetition" . ,(slot-ref pattern 'repetition))))
 
 

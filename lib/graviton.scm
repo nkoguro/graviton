@@ -101,9 +101,8 @@
 
           browser-window
 
-          <proxy-object>
-          proxy-id
-          release-proxy-id!
+          <jsobject>
+          jsobject-id
           invalidate!
           invalidate?
           define-jsenum
@@ -631,9 +630,9 @@
 (define-jsargtype future getUint32 (lambda (v out)
                                      (write-u32 (allocate-future-id v) out 'little-endian)))
 (define-jsargtype object getObjectRefValue (lambda (v out)
-                                             (write-u32 (proxy-id v) out 'little-endian)))
+                                             (write-u32 (jsobject-id v) out 'little-endian)))
 (define-jsargtype object* getObjectRef (lambda (v out)
-                                         (write-u32 (proxy-id v) out 'little-endian)))
+                                         (write-u32 (jsobject-id v) out 'little-endian)))
 (define-jsargtype string getString (lambda (v out)
                                      (let1 data (ces-convert-to <u8vector> v 'utf-8)
                                        (write-u32 (u8vector-length data) out 'little-endian)
@@ -821,42 +820,42 @@
                    (loop (cdr cell))))
     (set-cdr! cell (cons (make-id-range id (+ id 1)) (cdr cell)))))
 
-(define-class <proxy-object> ()
+(define-class <jsobject> ()
   ((%free-id-list :allocation :class
                   :init-form (atom (make-free-id-list #x100000000)))
    (id :init-value #f)))
 
-(define-method initialize ((obj <proxy-object>) initargs)
+(define-method initialize ((obj <jsobject>) initargs)
   (next-method)
   (or (and-let1 id (atomic (slot-ref obj '%free-id-list)
                      (lambda (free-id-list)
                        (allocate-id! free-id-list)))
         (slot-set! obj 'id id)
         #t)
-      (error "The proxy object ID space is exhausted.")))
+      (error "The jsobject ID space is exhausted.")))
 
-(define-method proxy-id ((obj <proxy-object>))
+(define-method jsobject-id ((obj <jsobject>))
   (or (slot-ref obj 'id)
       (errorf "~s was invalidated" obj)))
 
-(define-method release-proxy-id! ((obj <proxy-object>))
+(define-method release-jsobject-id! ((obj <jsobject>))
   (and-let1 id (slot-ref obj 'id)
     (slot-set! obj 'id #f)
     (atomic (slot-ref obj '%free-id-list)
       (lambda (free-id-list)
         (release-id! free-id-list id)))))
 
-(define-method invalidate! ((obj <proxy-object>))
+(define-method invalidate! ((obj <jsobject>))
   (jslet ((obj*::object* obj))
       (obj*.invalidate))
-  (release-proxy-id! obj))
+  (release-jsobject-id! obj))
 
-(define-method invalidate? ((obj <proxy-object>))
+(define-method invalidate? ((obj <jsobject>))
   (not (not (slot-ref obj 'id))))
 
 ;;;
 
-(define-class <browser-window> (<proxy-object>)
+(define-class <browser-window> (<jsobject>)
   ())
 
 (define-application-context-slot browser-window #f)
