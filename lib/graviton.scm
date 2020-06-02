@@ -679,7 +679,7 @@
 
 (define *enum-table* (make-hash-table))
 
-(define-class <js-procedure> ()
+(define-class <jsprocedure> ()
   ((types :init-keyword :types)
    (command-id :init-keyword :command-id)))
 
@@ -702,7 +702,7 @@
                                        var-type-list)
                               ,@body))
                           (Graviton.registerBinaryCommand ,command-id ,name)))
-    (make <js-procedure> :command-id command-id :types (map (cut list-ref <> 1) var-type-list))))
+    (make <jsprocedure> :command-id command-id :types (map (cut list-ref <> 1) var-type-list))))
 
 (define-jsise-macro raise
   ((err)
@@ -734,12 +734,12 @@
                        (list-ref (parse-arg-spec spec) 2))
                      var-spec))))
 
-(define-class <js-enum> ()
+(define-class <jsenum> ()
   ((symbol->value-table :init-form (make-hash-table))
    (jsvalue->symbol-table :init-form (make-hash-table 'equal?))))
 
 (define (make-enum jsmodule-name enum-name symbol->jsvalue-list)
-  (let ((enum (make <js-enum>))
+  (let ((enum (make <jsenum>))
         (jsvals '()))
     (for-each-with-index (lambda (i symbol->jsvalue)
                            (match symbol->jsvalue
