@@ -26,5 +26,4 @@
       (move-to 20 20)
       (line-to 200 20)
       (line-to 120 120))
-    (clear-rect 10 10 100 100))
-  0)
+    (clear-rect 10 10 100 100)))

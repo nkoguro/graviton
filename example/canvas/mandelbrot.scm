@@ -79,5 +79,4 @@
         (match-let1 (x y n) point+n
           (set-fill-style! (n->color n *max-n*))
           (fill-rect x y 1 1)
-          (task-yield (/. 1 10))))))
-  0)
+          (task-yield (/. 1 10)))))))

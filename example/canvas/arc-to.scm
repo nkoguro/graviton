@@ -41,5 +41,4 @@
       (set-fill-style! "red")
       (arc 200 130 5 0 (* 2 pi))
       (arc 50 20 5 0 (* 2 pi))
-      (fill)))
-  0)
+      (fill))))

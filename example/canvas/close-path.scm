@@ -18,5 +18,4 @@
     (line-to 120 10)
     (line-to 220 140)
     (close-path)
-    (stroke))
-  0)
+    (stroke)))

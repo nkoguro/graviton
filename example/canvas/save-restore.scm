@@ -21,5 +21,4 @@
 
     (restore-context)
 
-    (fill-rect 150 40 100 100))
-  0)
+    (fill-rect 150 40 100 100)))

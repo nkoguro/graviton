@@ -87,20 +87,13 @@
 
 (define-application-context-slot listener-table (make-hash-table 'equal?))
 
-(define (add-event-listener! event-target event-type event-class-or-props proc :optional task-queue)
+(define (add-event-listener! event-target event-type event-class-or-props proc)
   (let1 id (jsobject-id event-target)
     (application-context-slot-atomic-ref 'listener-table
       (lambda (tbl)
         (hash-table-push! tbl
                           (cons id event-type)
-                          (list (cond
-                                  ((undefined? task-queue)
-                                   (current-task-queue))
-                                  ((is-a? task-queue <task-queue>)
-                                    task-queue)
-                                  (else
-                                   (errorf "<task-queue> required, but got ~s" task-queue)))
-                                (if (is-a? event-class-or-props <class>)
+                          (list (if (is-a? event-class-or-props <class>)
                                     event-class-or-props
                                     #f)
                                 proc))))
@@ -123,7 +116,7 @@
         (let1 key (cons jsobject-id event-type)
           (hash-table-update! tbl key (lambda (vals)
                                         (remove (match-lambda
-                                                  ((_ _ handler)
+                                                  ((_ handler)
                                                    (eq? proc handler)))
                                                 vals))))))
     (jslet ((event-target*::object* event-target)
@@ -132,13 +125,13 @@
 
 
 (define-action "notifyEvent" (id event-type event-values)
-  (application-context-slot-atomic-ref 'listener-table
-    (lambda (tbl)
-      (let1 args (vector->list event-values)
-        (for-each (match-lambda
-                    ((task-queue event-class proc)
-                     (let1 args (if event-class
-                                    (list (apply make event-class args))
-                                    args)
-                       (submit-task task-queue (^() (apply proc args))))))
+  (let1 args (vector->list event-values)
+    (for-each (match-lambda
+                ((event-class proc)
+                 (let1 args (if event-class
+                                (list (apply make event-class args))
+                                args)
+                   (apply proc args))))
+              (application-context-slot-atomic-ref 'listener-table
+                (lambda (tbl)
                   (hash-table-get tbl (cons id event-type) '()))))))

@@ -14,5 +14,4 @@
           (app-close))))
 
     (make-canvas 300 150)
-    (log-format "text width: ~a" (slot-ref (await (measure-text "Hello world")) 'width)))
-  0)
+    (log-format "text width: ~a" (slot-ref (await (measure-text "Hello world")) 'width))))

@@ -1,5 +1,5 @@
 ;;;
-;;; misc.scm - Misc utilities
+;;; app.scm - Graviton application
 ;;;
 ;;;   Copyright (c) 2020 KOGURO, Naoki (naoki@koguro.net)
 ;;;   All rights reserved.
@@ -30,63 +30,27 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
-(define-module graviton.misc
-  (use gauche.threads)
+(define-module graviton.app
+  (use gauche.hook)
+  (use gauche.selector)
+  (use graviton.context)
+  (use util.match)
 
-  (export make-id-generator
+  (export app-start-hook
+          app-close-hook
 
-          grv-log-config
-          access-log-drain
-          error-log-drain
-          log-level
-          log-debug
-          log-info
-          log-error))
+          app-exit))
 
-(select-module graviton.misc)
+(select-module graviton.app)
 
-;;;
+(define app-start-hook (make-hook))
+(define app-close-hook (make-hook))
 
-(define (make-id-generator :optional (max-value #f) (start 0))
-  (let1 counter-atom (atom start)
-    (lambda ()
-      (atomic-update! counter-atom (lambda (x)
-                                     (if max-value
-                                         (modulo (+ x 1) max-value)
-                                         (+ x 1)))))))
+(define-application-context-slot control-out #f)
 
 ;;;
 
-(define-class <log-config> ()
-  ((access-log-drain :init-value #f)
-   (error-log-drain :init-value #t)
-   (log-level :init-value 1)))
-
-(define *log-config* (make <log-config>))
-
-(define (grv-log-config :key
-                        access-log-drain
-                        error-log-drain
-                        log-level)
-  (set! *log-config* (config-with-params <log-config> access-log-drain error-log-drain log-level)))
-
-(define (access-log-drain)
-  (slot-ref *log-config* 'access-log-drain))
-
-(define (error-log-drain)
-  (slot-ref *log-config* 'error-log-drain))
-
-(define (log-level)
-  (slot-ref *log-config* 'log-level))
-
-(define (log-debug fmt :rest args)
-  (when (<= (log-level) 0)
-    (apply log-format fmt args)))
-
-(define (log-info fmt :rest args)
-  (when (<= (log-level) 1)
-    (apply log-format fmt args)))
-
-(define (log-error fmt :rest args)
-  (when (<= (log-level) 2)
-    (apply log-format fmt args)))
+(define (app-exit code)
+  (let1 out (application-context-slot-ref 'control-out)
+    (write `(shutdown ,code) out)
+    (flush out)))

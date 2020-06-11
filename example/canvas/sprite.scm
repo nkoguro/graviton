@@ -121,5 +121,4 @@
         (parameterize ((current-canvas canvas))
           (loop-frame
             (lambda (break)
-              (update-frame canvas sprite balls)))))))
-  0)
+              (update-frame canvas sprite balls))))))))

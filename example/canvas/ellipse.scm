@@ -37,5 +37,4 @@
     (set-fill-style! "green")
     (begin-path)
     (ellipse 240 375 50 30 (* pi 0.25) 0 pi #t)
-    (fill))
-  0)
+    (fill)))

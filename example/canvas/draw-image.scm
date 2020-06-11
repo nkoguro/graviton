@@ -19,5 +19,4 @@
 
     (let ((canvas (make-canvas 300 300))
           (loaded-image (load-canvas (build-path *program-dir* "../font_16x16.png") :visible? #f)))
-      (draw-canvas (await loaded-image) 0 0)))
-  0)
+      (draw-canvas (await loaded-image) 0 0))))

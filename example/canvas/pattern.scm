@@ -18,5 +18,4 @@
     (let1 pat (load-canvas (build-path *program-dir* "Canvas_createpattern.png") :visible? #f)
       (make-canvas 300 300)
       (set-fill-style! (pattern (await pat)))
-      (fill-rect 0 0 300 300)))
-  0)
+      (fill-rect 0 0 300 300))))

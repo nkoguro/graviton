@@ -29,5 +29,4 @@
     (set-fill-style! "red")
     (begin-path)
     (arc 230 30 5 0 (* 2 pi))
-    (fill))
-  0)
+    (fill)))

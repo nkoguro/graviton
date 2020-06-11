@@ -33,6 +33,7 @@
 (define-module graviton.context
   (use gauche.parameter)
   (use gauche.threads)
+  (use gauche.uvector)
   (use util.match)
 
   (export application-context
@@ -41,7 +42,9 @@
           application-context-slot-atomic-update!
           application-context-slot-ref
           application-context-slot-set!
-          define-application-context-slot))
+          define-application-context-slot
+
+          app-exit))
 
 (select-module graviton.context)
 

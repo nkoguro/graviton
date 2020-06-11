@@ -49,7 +49,9 @@
   (use gauche.threads)
   (use gauche.time)
   (use gauche.uvector)
+  (use graviton.app)
   (use graviton.async)
+  (use graviton.comm)
   (use graviton.config)
   (use graviton.context)
   (use graviton.jsise)
@@ -94,6 +96,7 @@
           flush-commands
           app-close
           window-size
+          app-start-hook
           app-close-hook
 
           current-task-queue
@@ -120,18 +123,6 @@
 ;;;
 
 (log-open #t)
-
-(define (log-debug fmt :rest args)
-  (when (<= (log-level) 0)
-    (apply log-format fmt args)))
-
-(define (log-info fmt :rest args)
-  (when (<= (log-level) 1)
-    (apply log-format fmt args)))
-
-(define (log-error fmt :rest args)
-  (when (<= (log-level) 2)
-    (apply log-format fmt args)))
 
 ;;;
 
@@ -191,218 +182,20 @@
                                        (html:script :type "module" :src js-mod))
                                      (js-main-module-absolute-paths)))))))))
 
-(define-class <websocket-server-context> ()
-  ((continuation-opcode :init-value 0)
-   (continuation-frames :init-value '())))
-
-(define (reset-context! ctx)
-  (slot-set! ctx 'continuation-opcode 0)
-  (slot-set! ctx 'continuation-frames '()))
-
-(define (send-frame out opcode payload)
-  (let1 payload-len (u8vector-length payload)
-    (write-u8 (logior #x80 opcode) out)
-    (write-u8 (cond
-                ((< payload-len 126)
-                 payload-len)
-                ((< payload-len #xffff)
-                 126)
-                (else
-                 127))
-              out)
-    ;; Extended payload
-    (cond
-      ((< payload-len 126)
-       #f)
-      ((< payload-len #xffff)
-       (write-u16 payload-len out 'big-endian))
-      (else
-       (write-u64 payload-len out 'big-endian)))
-    (write-uvector payload out)
-    (flush out)))
-
-(define (send-text-frame out text)
-  (send-frame out 1 (string->u8vector text)))
-
-(define (send-binary-frame out data)
-  (send-frame out 2 data))
-
-(define (dispatch-payload ctx
-                          in
-                          out
-                          :key
-                          (text-handler #f)
-                          (binary-handler #f)
-                          (close-handler #f)
-                          (pong-handler #f))
-  (let1 data (read-u16 in 'big-endian)
-    (cond
-      ((eof-object? data)
-       (close-input-port in))
-      (else
-       (let* ((fin? (logbit? 15 data))
-              (opcode (logand (ash data -8) #b1111))
-              (mask? (logbit? 7 data))
-              (payload-length
-               (let1 v (logand data #b1111111)
-                 (cond
-                   ((< v 126)
-                    v)
-                   ((= v 126)
-                    (read-u16 in 'big-endian))
-                   ((= v 127)
-                    (read-u64 in 'big-endian)))))
-              (masking-key (if mask?
-                               (read-uvector <u8vector> 4 in)
-                               #u8(0 0 0 0)))
-              (payload-data (let1 uvec (make-u8vector payload-length)
-                              (dotimes (i payload-length)
-                                (u8vector-set! uvec
-                                               i
-                                               (logxor (read-u8 in)
-                                                       (u8vector-ref masking-key (modulo i 4)))))
-                              uvec)))
-         (log-debug "receive frame: fin?=~a, opcode=~a, payload-length=~a" fin? opcode payload-length)
-         (case opcode
-           ((0)
-            (cond
-              (fin?
-               (let ((cont-opcode (slot-ref ctx 'continuation-opcode))
-                     (cont-frames (cons payload-data (slot-ref ctx 'continuation-frames))))
-                 (reset-context! ctx)
-                 (case cont-opcode
-                   ((1)
-                    (text-handler (u8vector->string (apply u8vector-append (reverse cont-frames)))))
-                   ((2)
-                    (binary-handler (apply u8vector-append (reverse cont-frames)))))))
-              (else
-               (push! (slot-ref ctx 'continuation-frames) payload-data))))
-           ((1)
-            (cond
-              (fin?
-               (text-handler (u8vector->string payload-data)))
-              (else
-               (slot-set! ctx 'continuation-opcode opcode)
-               (slot-set! ctx 'continuation-frames (list payload-data)))))
-           ((2)
-            (cond
-              (fin?
-               (binary-handler payload-data))
-              (else
-               (slot-set! ctx 'continuation-opcode opcode)
-               (slot-set! ctx 'continuation-frames (list payload-data)))))
-           ((8)
-            (when close-handler
-              (let ((status (get-u16 payload-data 0 'big-endian))
-                    (rest (uvector-alias <u8vector> payload-data 2 (u8vector-length payload-data))))
-                (close-handler status rest))))
-           ((9)
-            (log-debug "Received ping frame: ~s" payload-data)
-            (send-frame out #xa payload-data))
-           ((8)
-            (when pong-handler
-              (pong-handler payload-data)))))))))
 
 (define *initial-thunk* #f)
-(define *num-dispatcher* (atom 0))
 (define *init-hook* (make-hook))
-
-(define-class <send-context> ()
-  ((websocket-output-port :init-keyword :websocket-output-port)
-   (buffer-output-port :init-keyword :buffer-output-port)
-   (output-buffer-storage :init-form (make-u8vector (* 1024 1024)))
-   (command-buffering? :init-value #f)))
 
 (add-hook! task-end-hook (lambda ()
                            (flush-commands)))
-
-(define-application-context-slot send-context #f)
-
-(define current-send-context (make-parameter #f))
-
-(define (with-send-context proc)
-  (cond
-    ((current-send-context)
-     (proc (current-send-context)))
-    (else
-     (application-context-slot-atomic-ref 'send-context
-       (lambda (ctx)
-         (parameterize ((current-send-context ctx))
-           (proc ctx)))))))
-
-(define (command-buffering?)
-  (with-send-context
-    (lambda (ctx)
-      (slot-ref ctx 'command-buffering?))))
-
-(define (set-command-buffering? val)
-  (with-send-context
-    (lambda (ctx)
-      (slot-set! ctx 'command-buffering? val))))
-
-(define-application-context-slot future-table (make-hash-table 'equal?) (make-id-generator #xffffffff))
-
-(define (with-future-table proc)
-  (application-context-slot-atomic-ref 'future-table proc))
-
-(define (allocate-future-id future)
-  (with-future-table
-    (lambda (tbl future-next-id)
-      (define (loop)
-        (let1 id (future-next-id)
-          (cond
-            ;; If the counter goes around the cycle, the ID can be conflict. So we need to skip IDs in the table.
-            ((hash-table-contains? tbl id)
-             (loop))
-            (else
-             (hash-table-put! tbl id future)
-             id))))
-      (loop))))
-
-(define json-command-table (make-hash-table 'equal?))
-
-(define-syntax define-action
-  (syntax-rules ()
-    ((_ action-name args body ...)
-     (hash-table-put! json-command-table action-name (lambda args body ...)))))
 
 (define-action "notifyException" (err)
   (raise (condition (&message (message err)) (&error))))
 
 (define-action "startApplication" ()
   (when *initial-thunk*
-    (submit-task (main-task-queue)
-      (lambda ()
-        (run-hook *init-hook*)
-        (*initial-thunk*)))))
-
-(define (decode-received-binary-data data)
-  (call-with-input-string (u8vector->string data)
-    (lambda (in)
-      (let* ((future-id (read-u32 in 'little-endian))
-             (json-len (read-u32 in 'little-endian))
-             (json-str (u8vector->string (read-uvector <u8vector> json-len in)))
-             (vals (parse-json-string json-str)))
-        (while (read-u8 in) (.$ not eof-object?)
-               => i
-               (let* ((binary-data-len (read-u32 in 'little-endian))
-                      (binary-data (read-uvector <u8vector> binary-data-len in)))
-                 (vector-set! vals i binary-data)))
-        (values future-id (vector->list vals))))))
-
-(define (notify-values future-id vals)
-  (with-future-table
-    (lambda (tbl future-next-id)
-      (let1 future (begin0
-                     (hash-table-get tbl future-id #f)
-                     (hash-table-delete! tbl future-id))
-        (cond
-          (future
-           (set-future-values! future vals))
-          (else
-           (errorf "[BUG] Invalid future ID: ~a" future-id)))))))
-
-(define app-close-hook (make-hook))
+    (run-hook *init-hook*)
+    (*initial-thunk*)))
 
 (define (start-websocket-dispatcher! sock in out)
   (thread-start!
@@ -410,64 +203,14 @@
       (lambda ()
         (guard (e (else (report-error e)
                         (exit 70)))
-          (atomic-update! *num-dispatcher* (^x (+ x 1)))
-          (let* ((sel (make <selector>))
-                 (ctx (make <websocket-server-context>))
-                 (app-context (make-application-context)))
-            (define (close-websocket status data)
-              (log-debug "WebSocket closed: code=~a, data=(~a)" status data)
-              (selector-delete! sel in #f #f)
-              (close-input-port in))
-            (define (receive-json json-str)
-              (let* ((params (vector->list (parse-json-string json-str)))
-                     (cmd (car params))
-                     (args (cdr params))
-                     (proc (hash-table-get json-command-table cmd #f)))
-                (cond
-                  (proc
-                   (apply proc args))
-                  (else
-                   (log-error "Invalid data received: ~s" params)))))
-            (define (receive-binary data)
-              (receive (future-id vals) (decode-received-binary-data data)
-                (notify-values future-id vals)))
-
-            (parameterize ((json-special-handler (lambda (sym)
-                                                   (case sym
-                                                     ((false) #f)
-                                                     ((true) #t)
-                                                     (else sym))))
-                           (application-context app-context))
-              (let1 send-context (make <send-context> :websocket-output-port out)
-                (slot-set! send-context 'buffer-output-port
-                           (open-output-uvector (slot-ref send-context 'output-buffer-storage) :extendable #t))
-                (application-context-slot-set! 'send-context send-context))
-
-              (selector-add! sel in (lambda (in flag)
-                                      (while (and (byte-ready? in) (not (port-closed? in)))
-                                        (dispatch-payload ctx
-                                                          in
-                                                          out
-                                                          :text-handler receive-json
-                                                          :binary-handler receive-binary
-                                                          :close-handler close-websocket)))
-                             '(r))
-
-              (while (not (port-closed? in))
-                (selector-select sel))
-
-              (run-hook app-close-hook)
-
-              (log-debug "WebSocket dispatcher finished")
-              (close-input-port in)
-              (close-output-port out)
-              (connection-close sock)
-              (connection-shutdown sock 'both)
-              (atomic-update! *num-dispatcher* (lambda (x)
-                                                 (let1 num (- x 1)
-                                                   (when (and (= num 0) (client-close-on-exit?))
-                                                     (terminate-server-loop *control-channel* 0))
-                                                   num))))))))))
+          (let1 exit-code (websocket-main-loop in out)
+            (log-debug "WebSocket dispatcher finished: ~a" exit-code)
+            (close-input-port in)
+            (close-output-port out)
+            (connection-close sock)
+            (connection-shutdown sock 'both)
+            (when (client-close-on-exit?)
+              (terminate-server-loop *control-channel* exit-code))))))))
 
 (define-http-handler "/s"
   (lambda (req app)
@@ -563,6 +306,56 @@
 
 ;;;
 
+;; TODO: Deprecate send-context
+(define-class <send-context> ()
+  ((buffer-output-port :init-keyword :buffer-output-port)
+   (output-buffer-storage :init-form (make-u8vector (* 1024 1024)))
+   (command-buffering? :init-value #f)))
+
+(define-application-context-slot send-context #f)
+
+(define current-send-context (make-parameter #f))
+
+(define (init-send-context)
+  (let1 send-context (make <send-context>)
+    (slot-set! send-context
+               'buffer-output-port
+               (open-output-uvector (slot-ref send-context 'output-buffer-storage) :extendable #t))
+    (application-context-slot-set! 'send-context send-context)))
+
+(add-hook! app-start-hook init-send-context)
+
+(define (with-send-context proc)
+  (cond
+    ((current-send-context)
+     (proc (current-send-context)))
+    (else
+     (application-context-slot-atomic-ref 'send-context
+       (lambda (ctx)
+         (parameterize ((current-send-context ctx))
+           (proc ctx)))))))
+
+(define (command-buffering?)
+  (with-send-context
+    (lambda (ctx)
+      (slot-ref ctx 'command-buffering?))))
+
+(define (set-command-buffering? val)
+  (with-send-context
+    (lambda (ctx)
+      (slot-set! ctx 'command-buffering? val))))
+
+(define (flush-commands)
+  (let1 output-data (with-send-context
+                      (lambda (ctx)
+                        (begin0
+                          (get-output-uvector (slot-ref ctx 'buffer-output-port) :shared #t)
+                          (slot-set! ctx 'buffer-output-port (open-output-uvector (slot-ref ctx 'output-buffer-storage))))))
+    (unless (= (uvector-length output-data) 0)
+      (send-binary-frame (application-context-slot-ref 'websocket-output-port) output-data))))
+
+;;;
+
 (define *jsargtype-serializer-table* (make-hash-table 'eq?))
 (define *jsargtype-datastream-method-table* (make-hash-table 'eq?))
 
@@ -617,30 +410,25 @@
                                    (write-u32 (u8vector-length data) out 'little-endian)
                                    (write-uvector data out))))
 
+(define (write-command-args types args out)
+  (for-each (lambda (type arg)
+              (or (and-let1 serialize (hash-table-get *jsargtype-serializer-table* type #f)
+                    (serialize arg out)
+                    #t)
+                  (and (hash-table-contains? *enum-table* type)
+                       (write-u8 (enum-value type arg) out 'little-endian))
+                  (errorf "Invalid jsarg type: ~a" type)))
+            types args))
+
 
 (define (call-command command-id types args)
   (with-send-context
     (lambda (ctx)
       (let1 out (slot-ref ctx 'buffer-output-port)
         (write-u16 command-id out 'little-endian)
-        (for-each (lambda (type arg)
-                    (or (and-let1 serialize (hash-table-get *jsargtype-serializer-table* type #f)
-                          (serialize arg out)
-                          #t)
-                        (and (hash-table-contains? *enum-table* type)
-                             (write-u8 (enum-value type arg) out 'little-endian))
-                        (errorf "Invalid jsarg type: ~a" type)))
-                  types args))
+        (write-command-args types args out))
       (unless (command-buffering?)
         (flush-commands)))))
-
-(define (flush-commands)
-  (with-send-context
-    (lambda (ctx)
-      (let1 output-data (get-output-uvector (slot-ref ctx 'buffer-output-port) :shared #t)
-        (unless (= (uvector-length output-data) 0)
-          (send-binary-frame (slot-ref ctx 'websocket-output-port) output-data)))
-      (slot-set! ctx 'buffer-output-port (open-output-uvector (slot-ref ctx 'output-buffer-storage))))))
 
 ;;;
 
@@ -1011,28 +799,6 @@
                      title
                      background-color)
   (set! *client-config* (config-with-params <browser-config> port title background-color)))
-
-(define-class <log-config> ()
-  ((access-log-drain :init-value #f)
-   (error-log-drain :init-value #t)
-   (log-level :init-value 1)))
-
-(define *log-config* (make <log-config>))
-
-(define (grv-log-config :key
-                        access-log-drain
-                        error-log-drain
-                        log-level)
-  (set! *log-config* (config-with-params <log-config> access-log-drain error-log-drain log-level)))
-
-(define (access-log-drain)
-  (slot-ref *log-config* 'access-log-drain))
-
-(define (error-log-drain)
-  (slot-ref *log-config* 'error-log-drain))
-
-(define (log-level)
-  (slot-ref *log-config* 'log-level))
 
 (define (grv-main thunk)
   (set! *initial-thunk* thunk)

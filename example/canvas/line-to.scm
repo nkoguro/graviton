@@ -19,5 +19,4 @@
     (line-to 205 25)
     (line-to 210 130)
     (set-line-width! 15)
-    (stroke))
-  0)
+    (stroke)))

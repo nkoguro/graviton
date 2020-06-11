@@ -20,5 +20,4 @@
       (set-fill-style! "blue")
       (fill-rect 0 0 (slot-ref canvas 'width) (slot-ref canvas 'height))
       (set-fill-style! "orange")
-      (fill-rect 0 0 100 100)))
-  0)
+      (fill-rect 0 0 100 100))))

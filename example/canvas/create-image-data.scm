@@ -25,5 +25,4 @@
           (u8vector-set! data (+ i 3) 255) ; A
           )
         (upload-image-data image data)
-        (put-image-data image 20 20))))
-  0)
+        (put-image-data image 20 20)))))

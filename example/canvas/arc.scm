@@ -52,5 +52,4 @@
             (arc x y radius start-angle end-angle anti-clockwise)
             (if (< 1 i)
                 (fill)
-                (stroke)))))))
-  0)
+                (stroke))))))))

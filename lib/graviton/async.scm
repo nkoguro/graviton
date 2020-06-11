@@ -36,6 +36,7 @@
   (use gauche.parameter)
   (use gauche.partcont)
   (use gauche.threads)
+  (use graviton.app)
   (use graviton.context)
   (use graviton.scheduler)
   (use srfi-42)
@@ -105,7 +106,7 @@
          (wrapped-thunk (lambda ()
                           (reset
                             (guard (e (else (report-error e)
-                                            (exit 70)))
+                                            (app-exit 70)))
                               (parameterize ((application-context app-context)
                                              (current-task-queue task-queue))
                                 (dynamic-wind

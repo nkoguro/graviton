@@ -22,5 +22,4 @@
     (line-to 270 90)
     (close-path)
     (set-fill-style! "green")
-    (fill 'evenodd))
-  0)
+    (fill 'evenodd)))
