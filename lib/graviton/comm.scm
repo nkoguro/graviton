@@ -135,17 +135,23 @@
        masking-key))))
 
 (define (read-websocket-payload-data payload-length masking-key in)
-  (let1 payload-data (read-uvector <u8vector> payload-length in)
-    (cond
-      ((< (u8vector-length payload-data) payload-length)
-       (raise (condition (<websocket-end-of-data>))))
-      (else
-       (dotimes (i payload-length)
-         (u8vector-set! payload-data
-                        i
-                        (logxor (u8vector-ref payload-data i)
-                                (u8vector-ref masking-key (modulo i 4)))))
-       payload-data))))
+  (let1 payload-data (make-u8vector payload-length)
+    (let1 i 0
+      (while (and (< i payload-length)
+                  (read-uvector! payload-data in i -1 'little-endian))
+        => count
+        (cond
+          ((eof-object? count)
+           (raise (condition (<websocket-end-of-data>))))
+          (else
+           (inc! i count))))
+
+      (dotimes (i payload-length)
+        (u8vector-set! payload-data
+                       i
+                       (logxor (u8vector-ref payload-data i)
+                               (u8vector-ref masking-key (modulo i 4)))))
+      payload-data)))
 
 (define (handle-payload ctx
                         in
