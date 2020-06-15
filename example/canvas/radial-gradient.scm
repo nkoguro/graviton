@@ -6,11 +6,11 @@
   (grv-player)
 
   (grv-begin
-    (add-event-listener! (browser-window) "keyup"
+    (add-event-listener! (client-window) "keyup"
                          '("key")
       (lambda (key)
         (when (equal? key "Escape")
-          (app-close))))
+          (client-close))))
 
     (make-canvas 200 200)
     (set-fill-style! (radial-gradient 110 90 30 100 100 70 '((0 "pink") (0.9 "white") (1 "green"))))

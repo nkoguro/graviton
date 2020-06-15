@@ -7,11 +7,11 @@
   (grv-player)
 
   (grv-begin
-    (add-event-listener! (browser-window) "keyup"
+    (add-event-listener! (client-window) "keyup"
                          '("key")
       (lambda (key)
         (when (equal? key "Escape")
-          (app-close))))
+          (client-close))))
 
     (let1 canvas (make-canvas 300 150)
       ;; Tangential lines

@@ -9,11 +9,11 @@
   (grv-player)
 
   (grv-begin
-    (add-event-listener! (browser-window) "keyup"
+    (add-event-listener! (client-window) "keyup"
                          '("key")
       (lambda (key)
         (when (equal? key "Escape")
-          (app-close))))
+          (client-close))))
 
     (let1 pat (load-canvas (build-path *program-dir* "Canvas_createpattern.png") :visible? #f)
       (make-canvas 300 300)

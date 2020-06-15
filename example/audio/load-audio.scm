@@ -13,4 +13,4 @@
       (log-format "duration: ~a" (slot-ref audio 'duration))
       (play-audio audio)
       (asleep 0.5))
-    (app-close)))
+    (app-exit 0)))

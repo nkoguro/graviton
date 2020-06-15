@@ -11,11 +11,11 @@
   (grv-player :background-color "#000")
 
   (grv-begin
-    (add-event-listener! (browser-window) "keyup"
+    (add-event-listener! (client-window) "keyup"
                          '("key")
       (lambda (key)
         (when (equal? key "Escape")
-          (app-close))))
+          (client-close))))
 
     (let ((canvas (make-canvas 300 300))
           (loaded-image (load-canvas (build-path *program-dir* "../font_16x16.png") :visible? #f)))

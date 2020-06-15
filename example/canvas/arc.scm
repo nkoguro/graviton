@@ -26,13 +26,13 @@
   (grv-player)
 
   (grv-begin
-    (receive (w h) (await (window-size))
+    (receive (w h) (await (client-window-size))
       (log-format "window width=~a, height=~a" w h))
-    (add-event-listener! (browser-window) "keyup"
+    (add-event-listener! (client-window) "keyup"
                          '("key")
       (lambda (key)
         (when (equal? key "Escape")
-          (app-close))))
+          (client-close))))
 
     (let1 canvas (make-canvas 150 200)
       (add-event-listener! canvas "click" <mouse-event>
