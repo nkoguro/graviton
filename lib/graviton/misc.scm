@@ -31,6 +31,7 @@
 ;;;
 
 (define-module graviton.misc
+  (use gauche.logger)
   (use gauche.threads)
 
   (export make-id-generator
