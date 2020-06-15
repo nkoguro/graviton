@@ -47,6 +47,13 @@
           <graviton-channel>
 
           make-task-queue
+          task-queue-min-num-threads
+          task-queue-min-num-threads-set!
+          task-queue-max-num-threads
+          task-queue-max-num-threads-set!
+          task-queue-worker-timeout
+          task-queue-worker-timeout-set!
+
           transform-future
           async-apply
           async
@@ -65,6 +72,8 @@
 
           current-task-queue
           main-task-queue
+          async-task-queue
+          default-async-task-queue
 
           task-start-hook
           task-end-hook))
@@ -74,24 +83,142 @@
 ;;;
 
 (define current-task-queue (make-parameter #f))
+(define async-task-queue (make-parameter #f))
+
+(define-application-context-slot task-queue-list '())
 
 (define-class <task-queue> ()
-  ((queue :init-form (make-mtqueue))
+  ((lock :init-form (make-mutex))
+   (state :init-value 'active)
+   (min-num-threads :init-keyword :min-num-threads)
+   (max-num-threads :init-keyword :max-num-threads)
+   (worker-timeout :init-keyword :worker-timeout)
+   (name :init-keyword :name)
+   (working-thread-table :init-form (make-hash-table 'eq?))
+   (queue :init-form (make-mtqueue))
    (threads :init-value '())))
 
-(define (task-worker task-queue)
-  (let1 queue (slot-ref task-queue 'queue)
-    (while (dequeue/wait! queue)
-      => thunk
-      (thunk))))
+(define-method write-object ((tq <task-queue>) port)
+  (if-let1 name (slot-ref tq 'name)
+           (format port "#<task-queue:~a>" name)
+           (display "#<task-queue>" port)))
 
-(define (make-task-queue n)
-  (let* ((task-queue (make <task-queue>))
-         (threads (list-ec (: i n)
-                           (make-thread (cut task-worker task-queue)))))
-    (slot-set! task-queue 'threads threads)
-    (for-each thread-start! threads)
-    task-queue))
+(define (task-queue-lock-recursively! tq)
+  (let1 mutex (slot-ref tq 'lock)
+    (if (eq? (mutex-state mutex) (current-thread))
+        (let1 n (mutex-specific mutex)
+          (mutex-specific-set! mutex (+ n 1)))
+        (begin
+          (mutex-lock! mutex)
+          (mutex-specific-set! mutex 0)))))
+
+(define (task-queue-unlock-recursively! tq)
+  (let* ((mutex (slot-ref tq 'lock))
+         (n (mutex-specific mutex)))
+    (if (= n 0)
+        (mutex-unlock! mutex)
+        (mutex-specific-set! mutex (- n 1)))))
+
+(define (with-task-queue-lock tq thunk)
+  (dynamic-wind
+      (lambda ()
+        (task-queue-lock-recursively! tq))
+      thunk
+      (lambda ()
+        (task-queue-unlock-recursively! tq))))
+
+(define (task-queue-safe-slot-ref tq slot)
+  (with-task-queue-lock tq
+    (lambda ()
+      (slot-ref tq slot))))
+
+(define (task-queue-min-num-threads tq)
+  (task-queue-safe-slot-ref tq 'min-num-threads))
+
+(define (task-queue-min-num-threads-set! tq min-num-threads)
+  (with-task-queue-lock tq
+    (lambda ()
+      (slot-set! tq 'min-num-threads min-num-threads))))
+
+(define (task-queue-max-num-threads tq)
+  (task-queue-safe-slot-ref tq 'max-num-threads))
+
+(define (task-queue-max-num-threads-set! tq max-num-threads)
+  (with-task-queue-lock tq
+    (lambda ()
+      (slot-set! tq 'max-num-threads max-num-threads))))
+
+(define (task-queue-worker-timeout tq)
+  (task-queue-safe-slot-ref tq 'worker-timeout))
+
+(define (task-queue-worker-timeout-set! tq worker-timeout)
+  (with-task-queue-lock tq
+    (lambda ()
+      (slot-set! tq 'worker-timeout worker-timeout))))
+
+(define (task-worker-mark-idle tq)
+  (with-task-queue-lock tq
+    (lambda ()
+      (hash-table-delete! (slot-ref tq 'working-thread-table) (current-thread)))))
+
+(define (task-worker-mark-busy tq)
+  (with-task-queue-lock tq
+    (lambda ()
+      (hash-table-put! (slot-ref tq 'working-thread-table) (current-thread) #t))))
+
+(define (task-worker-register! tq)
+  (with-task-queue-lock tq
+    (lambda ()
+      (push! (slot-ref tq 'threads) (current-thread)))))
+
+(define (task-worker-unregister! tq)
+  (with-task-queue-lock tq
+      (lambda ()
+        (slot-set! tq 'threads (remove (cut eq? (current-thread) <>) (slot-ref tq 'threads))))))
+
+(define (task-worker tq)
+  (task-worker-register! tq)
+
+  (let1 queue (task-queue-safe-slot-ref tq 'queue)
+    (while (with-task-queue-lock tq
+             (lambda ()
+               (and (<= (slot-ref tq 'min-num-threads) (length (slot-ref tq 'threads)))
+                    (eq? (slot-ref tq 'state) 'active))))
+      (while (begin
+               (task-worker-mark-idle tq)
+               (dequeue/wait! queue (task-queue-safe-slot-ref tq 'worker-timeout) #f))
+        => thunk
+        (task-worker-mark-busy tq)
+        (reset
+          (thunk))))
+
+    (task-worker-unregister! tq)
+    #t))
+
+(define (start-task-worker tq)
+  (with-task-queue-lock tq
+    (lambda ()
+      (let* ((worker-id (+ (length (slot-ref tq 'threads)) 1))
+             (name (and-let1 prefix (slot-ref tq 'name)
+                     (format #f "~a:~d-~d" prefix (application-context-id) worker-id))))
+        (thread-start! (make-thread (cut task-worker tq) name))))))
+
+
+(define (make-task-queue min-num-threads :optional max-num-threads (worker-timeout #f) (name #f))
+  (let* ((max-num-threads (if (undefined? max-num-threads)
+                              min-num-threads
+                              max-num-threads))
+         (tq (make <task-queue>
+               :min-num-threads min-num-threads
+               :max-num-threads max-num-threads
+               :worker-timeout worker-timeout
+               :name name)))
+    (dotimes (i min-num-threads)
+      (start-task-worker tq))
+    (application-context-slot-atomic-update! 'task-queue-list
+      (lambda (lst)
+        (cons tq lst)))
+    tq))
 
 (define task-start-hook (make-hook))
 (define task-end-hook (make-hook))
@@ -101,34 +228,103 @@
 (add-hook! task-start-hook (lambda ()
                              (thread-start-time (time->seconds (current-time)))))
 
+(define (task-queue-busy? tq)
+  (with-task-queue-lock tq
+    (lambda ()
+      (let* ((tbl (slot-ref tq 'working-thread-table))
+             (threads (slot-ref tq 'threads))
+             (num-busy-worker (fold (lambda (thread i)
+                                      (if (hash-table-get tbl thread #f)
+                                          (+ i 1)
+                                          i))
+                                    0
+                                    threads)))
+        (= (length threads) num-busy-worker)))))
+
+(define (task-queue-expandable? tq)
+  (with-task-queue-lock tq
+    (lambda ()
+      (< (length (slot-ref tq 'threads)) (slot-ref tq 'max-num-threads)))))
+
+(define (%submit tq thunk)
+  (with-task-queue-lock tq
+    (lambda ()
+      (when (eq? (slot-ref tq 'state) 'active)
+        (when (and (task-queue-busy? tq)
+                   (task-queue-expandable? tq))
+          (start-task-worker tq))
+        (enqueue! (slot-ref tq 'queue) thunk)))))
+
 (define (submit-task task-queue thunk)
   (let* ((app-context (application-context))
          (wrapped-thunk (lambda ()
-                          (reset
+                          ;; These parameters will not be changed in this thread.
+                          (application-context app-context)
+                          (current-task-queue task-queue)
+                          ;; async-task-queue can be changed in thunk. So it needs to be restored when the continuation is called.
+                          (parameterize ((async-task-queue (default-async-task-queue)))
                             (guard (e (else (report-error e)
                                             (app-exit 70)))
-                              (parameterize ((application-context app-context)
-                                             (current-task-queue task-queue))
-                                (dynamic-wind
-                                    (lambda ()
-                                      (run-hook task-start-hook))
-                                    thunk
-                                    (lambda ()
-                                      (run-hook task-end-hook)))))))))
-    (enqueue! (slot-ref task-queue 'queue) wrapped-thunk)))
+                              (dynamic-wind
+                                  (lambda ()
+                                    (run-hook task-start-hook))
+                                  thunk
+                                  (lambda ()
+                                    (run-hook task-end-hook)))))
+                          (undefined))))
+    (%submit task-queue wrapped-thunk)))
 
 (define (submit-cont task-queue cont)
-  (enqueue! (slot-ref task-queue 'queue)
-            (lambda ()
-              (reset
-                (cont)))))
+  (%submit task-queue cont))
+
+(define (task-queue-close! task-queue)
+  (with-task-queue-lock task-queue
+    (lambda ()
+      (slot-set! task-queue 'state 'inactive)
+      (let1 queue (slot-ref task-queue 'queue)
+        (dequeue-all! queue)
+        (dotimes (_ (length (slot-ref task-queue 'threads)))
+          (enqueue! queue #f))))))
+
+(define (task-queue-join! task-queue :optional (timeout #f))
+  (with-task-queue-lock task-queue
+    (lambda ()
+      (when (eq? (slot-ref task-queue 'state) 'active)
+        (errorf "task-queue ~s is still active" task-queue))))
+
+  (for-each (lambda (thread)
+              (unless (thread-join! thread timeout #f)
+                (thread-terminate! thread)))
+            (slot-ref task-queue 'threads))
+  (slot-set! task-queue 'threads '()))
+
+(define (all-task-queue-shutdown!)
+  (let1 tq-list (application-context-slot-ref 'task-queue-list)
+    (for-each (lambda (tq)
+                (task-queue-close! tq))
+              tq-list)
+    (for-each (lambda (tq)
+                (task-queue-join! tq))
+              tq-list)))
+
+(add-hook! app-close-hook all-task-queue-shutdown!)
 
 ;;;
 
-(define-application-context-slot main-task-queue (make-task-queue 1))
+(define-application-context-slot main-task-queue #f)
+(define-application-context-slot default-async-task-queue #f)
+
+(define (init-task-queue)
+  (application-context-slot-set! 'main-task-queue (make-task-queue 1 1 #f "main-task-queue"))
+  (application-context-slot-set! 'default-async-task-queue (make-task-queue 0 2 #f "default-async-task-queue")))
+
+(add-hook! app-start-hook init-task-queue)
 
 (define (main-task-queue)
   (application-context-slot-ref 'main-task-queue))
+
+(define (default-async-task-queue)
+  (application-context-slot-ref 'default-async-task-queue))
 
 ;;;
 
@@ -203,18 +399,18 @@
   (when (<= time-slice (- (time->seconds (current-time)) (thread-start-time)))
     (asleep 0)))
 
-(define (async-apply task-queue proc args)
+(define (async-apply proc args)
   (let ((future (make <graviton-future>))
         (app-context (application-context)))
-    (submit-task task-queue
+    (submit-task (async-task-queue)
                   (lambda ()
                     (set-future-values! future (values->list (apply proc args)))))
     future))
 
 (define-syntax async
   (syntax-rules ()
-    ((_ task-queue expr ...)
-     (async-apply task-queue (lambda () expr ...) '()))))
+    ((_ expr ...)
+     (async-apply (lambda () expr ...) '()))))
 
 ;;;
 

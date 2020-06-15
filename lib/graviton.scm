@@ -79,6 +79,13 @@
           grv-log-config
 
           make-task-queue
+          task-queue-min-num-threads
+          task-queue-min-num-threads-set!
+          task-queue-max-num-threads
+          task-queue-max-num-threads-set!
+          task-queue-worker-timeout
+          task-queue-worker-timeout-set!
+
           transform-future
           async-apply
           async
@@ -94,16 +101,20 @@
           command-buffering?
           set-command-buffering?
           flush-commands
-          app-close
-          window-size
+
+          client-window
+          client-window-size
+          client-close
+
           app-start-hook
           app-close-hook
+          app-exit
 
           current-task-queue
+          async-task-queue
+          default-async-task-queue
 
           define-action
-
-          browser-window
 
           <jsobject>
           jsobject-id
@@ -617,25 +628,25 @@
 
 ;;;
 
-(define-class <browser-window> (<jsobject>)
+(define-class <client-window> (<jsobject>)
   ())
 
-(define-application-context-slot browser-window #f)
+(define-application-context-slot client-window #f)
 
-(define (browser-window)
-  (application-context-slot-atomic-update! 'browser-window
+(define (client-window)
+  (application-context-slot-atomic-update! 'client-window
     (lambda (win)
       (unless win
-        (set! win (make <browser-window>))
+        (set! win (make <client-window>))
         (jslet ((win*::object* win))
             (set! win*.value window)))
       win)))
 
-(define (window-size)
+(define (client-window-size)
   (jslet/result ()
     (result window.innerWidth window.innerHeight)))
 
-(define (app-close)
+(define (client-close)
   (jslet ()
     (Graviton.closeConnection)))
 

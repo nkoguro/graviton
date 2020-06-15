@@ -34,10 +34,12 @@
   (use gauche.parameter)
   (use gauche.threads)
   (use gauche.uvector)
+  (use graviton.misc)
   (use util.match)
 
   (export application-context
           make-application-context
+          application-context-id
           application-context-slot-atomic-ref
           application-context-slot-atomic-update!
           application-context-slot-ref
@@ -50,13 +52,16 @@
 
 (define *application-context-slot-initial-forms* '())
 
+(define application-context-next-id (make-id-generator))
+
 (define-syntax define-application-context-slot
   (syntax-rules ()
     ((_ name vals ...)
      (push! *application-context-slot-initial-forms* (cons 'name (lambda () (list vals ...)))))))
 
 (define-class <application-context> ()
-  ((slot-table-atom :init-form (atom (let1 tbl (make-hash-table 'eq?)
+  ((id :init-form (application-context-next-id))
+   (slot-table-atom :init-form (atom (let1 tbl (make-hash-table 'eq?)
                                        (for-each (match-lambda
                                                    ((name . thunk)
                                                     (hash-table-put! tbl name (apply atom (thunk)))))
@@ -68,7 +73,12 @@
 (define (make-application-context)
   (make <application-context>))
 
+(define (application-context-id)
+  (slot-ref (application-context) 'id))
+
 (define (application-context-slot-atomic-ref name proc)
+  (unless (application-context)
+    (errorf "application-context-slot-atomic-ref called without application-context, name=~a, proc=~s, thread=~s" name proc (current-thread)))
   (let1 val-atom (atomic (slot-ref (application-context) 'slot-table-atom)
                    (lambda (tbl)
                      (or (hash-table-get tbl name #f)
@@ -79,6 +89,8 @@
   (application-context-slot-atomic-ref name values))
 
 (define (application-context-slot-atomic-update! name proc)
+  (unless (application-context)
+    (errorf "application-context-slot-atomic-update! called without application-context, name=~a, proc=~s, thread=~s" name proc (current-thread)))
   (let1 val-atom (atomic (slot-ref (application-context) 'slot-table-atom)
                    (lambda (tbl)
                      (or (hash-table-get tbl name #f)

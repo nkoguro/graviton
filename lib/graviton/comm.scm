@@ -42,6 +42,7 @@
   (use graviton.context)
   (use graviton.misc)
   (use rfc.json)
+  (use util.match)
 
   (export send-text-frame
           send-binary-frame
@@ -213,7 +214,7 @@
     (cond
       (proc
        (submit-task (main-task-queue) (lambda ()
-                                          (apply proc args))))
+                                        (apply proc args))))
       (else
        (log-error "Invalid data received: ~s" params)))))
 
@@ -287,44 +288,41 @@
   (let ((ctx (make <websocket-server-context>))
         (app-context (make-application-context))
         (exit-code 0))
-    (define (close-websocket status data)
-      (log-debug "WebSocket closed: code=~a, data=(~a)" status data)
-      (close-input-port in))
 
-    (parameterize ((json-special-handler handle-json-special)
-                   (application-context app-context))
-      (application-context-slot-set! 'websocket-output-port out)
+    (json-special-handler handle-json-special)
+    (application-context app-context)
 
-      (run-hook app-start-hook)
+    (application-context-slot-set! 'websocket-output-port out)
 
-      (receive (ctrl-in ctrl-out) (sys-pipe)
-        (application-context-slot-set! 'control-out ctrl-out)
+    (run-hook app-start-hook)
 
-        (let ((sel (make <selector>))
-              (run-loop? #t))
-          (define (exit-loop)
-            (set! run-loop? #f))
+    (receive (ctrl-in ctrl-out) (sys-pipe)
+      (application-context-slot-set! 'control-out ctrl-out)
 
-          (selector-add! sel
-                         ctrl-in
-                         (lambda (in flag)
-                           (match (read in)
-                             (('shutdown code)
-                              (set! exit-code code)
-                              (exit-loop))
-                             (cmd
-                              (errorf "Invalid control command: ~s" cmd))))
-                         '(r))
-          (selector-add! sel
-                         in
-                         (lambda (in flag)
-                           (handle-payload ctx in out exit-loop))
-                         '(r))
-          (while run-loop?
-            (selector-select sel))
+      (let ((sel (make <selector>))
+            (run-loop? #t))
+        (define (exit-loop)
+          (run-hook app-close-hook)
+          (set! run-loop? #f))
 
-          (selector-delete! sel #f #f #f)))
+        (selector-add! sel
+                       ctrl-in
+                       (lambda (in flag)
+                         (match (read in)
+                           (('shutdown code)
+                            (set! exit-code code)
+                            (exit-loop))
+                           (cmd
+                            (errorf "Invalid control command: ~s" cmd))))
+                       '(r))
+        (selector-add! sel
+                       in
+                       (lambda (in flag)
+                         (handle-payload ctx in out exit-loop))
+                       '(r))
+        (while run-loop?
+          (selector-select sel))
 
-      (run-hook app-close-hook))
+        (selector-delete! sel #f #f #f)))
 
     exit-code))

@@ -37,12 +37,12 @@
 (define *height* 500)
 (define *max-n* 50)
 
-(define worker-task-queue (make-task-queue 4))
-
 (define (main args)
   (grv-player :background-color "black")
 
   (grv-begin
+    (task-queue-max-num-threads-set! (async-task-queue) 4)
+
     (add-event-listener! (client-window) "keyup"
                          '("key")
       (lambda (key)
@@ -59,18 +59,18 @@
              (mesh-h (round->exact (/. *height* mesh-y))))
         (for-each (match-lambda
                     ((i j)
-                     (async worker-task-queue
-                            (mandelbrot-fill channel
-                                             mesh-w
-                                             mesh-h
-                                             (* mesh-w i)
-                                             (* mesh-h j)
-                                             -2
-                                             -1.5
-                                             delta-x
-                                             delta-y
-                                             *max-n*
-                                             #f))))
+                     (async
+                       (mandelbrot-fill channel
+                                        mesh-w
+                                        mesh-h
+                                        (* mesh-w i)
+                                        (* mesh-h j)
+                                        -2
+                                        -1.5
+                                        delta-x
+                                        delta-y
+                                        *max-n*
+                                        #f))))
                   (cartesian-product (list (iota mesh-x) (iota mesh-y)))))
 
       (set-command-buffering? #t)
