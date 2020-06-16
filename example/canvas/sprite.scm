@@ -90,7 +90,7 @@
                            *sprite-height*))
             balls))
 
-(define (update-frame canvas sprite balls)
+(define (update-frame sprite balls)
   (draw-balls sprite balls)
   (update-balls! balls))
 
@@ -110,7 +110,8 @@
             (client-close))))
 
       (let ((sprite (make-canvas (* *sprite-width* *num-patterns*) *sprite-height* :visible? #f))
-            (canvas (make-canvas *canvas-width* *canvas-height*))
+            (canvas0 (make-canvas *canvas-width* *canvas-height* :visible? #f))
+            (canvas1 (make-canvas *canvas-width* *canvas-height* :visible? #f))
             (balls (list-ec (: i num-sprites)
                             (make-ball (modulo i *num-patterns*)
                                        (random-integer *canvas-width*)
@@ -118,7 +119,11 @@
                                        (- (* (random-real) 400) 200)
                                        (- (* (random-real) 400) 200)))))
         (prepare-ball-images sprite *sprite-width* *sprite-height* *num-patterns*)
-        (parameterize ((current-canvas canvas))
+        (let1 visible-canvas 0
           (loop-frame
             (lambda (break)
-              (update-frame canvas sprite balls))))))))
+              (set-canvas-visible! canvas0 (= visible-canvas 0))
+              (set-canvas-visible! canvas1 (= visible-canvas 1))
+              (current-canvas (if (= visible-canvas 0) canvas1 canvas0))
+              (update-frame sprite balls)
+              (set! visible-canvas (if (= visible-canvas 0) 1 0)))))))))
