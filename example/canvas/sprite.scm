@@ -119,7 +119,6 @@
                                        (- (* (random-real) 400) 200)
                                        (- (* (random-real) 400) 200)))))
         (prepare-ball-images sprite *sprite-width* *sprite-height* *num-patterns*)
-        (set-command-buffering? #t)
         (let1 visible-canvas 0
           (loop-frame
             (lambda (break)
