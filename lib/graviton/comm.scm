@@ -39,7 +39,6 @@
   (use gauche.uvector)
   (use graviton.app)
   (use graviton.async)
-  (use graviton.context)
   (use graviton.misc)
   (use rfc.json)
   (use util.match)

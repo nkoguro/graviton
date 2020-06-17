@@ -37,7 +37,6 @@
   (use gauche.partcont)
   (use gauche.threads)
   (use graviton.app)
-  (use graviton.context)
   (use graviton.scheduler)
   (use srfi-42)
   (use util.match)

@@ -32,16 +32,79 @@
 
 (define-module graviton.app
   (use gauche.hook)
+  (use gauche.parameter)
   (use gauche.selector)
-  (use graviton.context)
+  (use gauche.threads)
+  (use graviton.misc)
   (use util.match)
 
-  (export app-start-hook
+  (export application-context
+          make-application-context
+          application-context-id
+          application-context-slot-atomic-ref
+          application-context-slot-atomic-update!
+          application-context-slot-ref
+          application-context-slot-set!
+          define-application-context-slot
+
+          app-start-hook
           app-close-hook
 
           app-exit))
 
 (select-module graviton.app)
+
+(define *application-context-slot-initial-forms* '())
+
+(define application-context-next-id (make-id-generator))
+
+(define-syntax define-application-context-slot
+  (syntax-rules ()
+    ((_ name vals ...)
+     (push! *application-context-slot-initial-forms* (cons 'name (lambda () (list vals ...)))))))
+
+(define-class <application-context> ()
+  ((id :init-form (application-context-next-id))
+   (slot-table-atom :init-form (atom (let1 tbl (make-hash-table 'eq?)
+                                       (for-each (match-lambda
+                                                   ((name . thunk)
+                                                    (hash-table-put! tbl name (apply atom (thunk)))))
+                                                 *application-context-slot-initial-forms*)
+                                       tbl)))))
+
+(define application-context (make-parameter #f))
+
+(define (make-application-context)
+  (make <application-context>))
+
+(define (application-context-id)
+  (slot-ref (application-context) 'id))
+
+(define (application-context-slot-atomic-ref name proc)
+  (unless (application-context)
+    (errorf "application-context-slot-atomic-ref called without application-context, name=~a, proc=~s, thread=~s" name proc (current-thread)))
+  (let1 val-atom (atomic (slot-ref (application-context) 'slot-table-atom)
+                   (lambda (tbl)
+                     (or (hash-table-get tbl name #f)
+                         (errorf "application-context doesn't have such slot: ~a" name))))
+    (atomic val-atom proc)))
+
+(define (application-context-slot-ref name)
+  (application-context-slot-atomic-ref name values))
+
+(define (application-context-slot-atomic-update! name proc)
+  (unless (application-context)
+    (errorf "application-context-slot-atomic-update! called without application-context, name=~a, proc=~s, thread=~s" name proc (current-thread)))
+  (let1 val-atom (atomic (slot-ref (application-context) 'slot-table-atom)
+                   (lambda (tbl)
+                     (or (hash-table-get tbl name #f)
+                         (errorf "application-context doesn't have such slot: ~a" name))))
+    (atomic-update! val-atom proc)))
+
+(define (application-context-slot-set! name :rest vals)
+  (application-context-slot-atomic-update! name (lambda _ (apply values vals))))
+
+;;;
 
 (define app-start-hook (make-hook))
 (define app-close-hook (make-hook))

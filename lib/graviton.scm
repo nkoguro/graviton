@@ -53,7 +53,6 @@
   (use graviton.async)
   (use graviton.comm)
   (use graviton.config)
-  (use graviton.context)
   (use graviton.jsise)
   (use graviton.misc)
   (use graviton.scheduler)

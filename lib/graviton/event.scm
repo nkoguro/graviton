@@ -35,9 +35,9 @@
   (use gauche.collection)
   (use gauche.regexp)
   (use graviton)
+  (use graviton.app)
   (use graviton.async)
   (use graviton.config)
-  (use graviton.context)
   (use graviton.jsise)
   (use util.match)
 
