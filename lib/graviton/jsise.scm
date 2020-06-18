@@ -31,9 +31,20 @@
 ;;;
 
 (define-module graviton.jsise
+  (use binary.io)
   (use file.util)
+  (use gauche.charconv)
   (use gauche.collection)
+  (use gauche.hook)
+  (use gauche.parameter)
+  (use gauche.record)
+  (use gauche.sequence)
   (use gauche.threads)
+  (use gauche.uvector)
+  (use graviton.app)
+  (use graviton.async)
+  (use graviton.comm)
+  (use graviton.misc)
   (use rfc.json)
   (use rfc.sha)
   (use text.tree)
@@ -54,7 +65,19 @@
           load-js
           load-js-list
           js-current-main-module
-          js-vm-current-main-module))
+          js-vm-current-main-module
+
+          <jsobject>
+          jsobject-id
+          invalidate!
+          invalidate?
+          define-jsenum
+          jslet
+          jslet/result
+
+          command-buffering?
+          set-command-buffering?
+          flush-commands))
 
 (select-module graviton.jsise)
 
@@ -475,6 +498,341 @@
 
 ;;;
 
+(define *js-code-table* (make-hash-table 'equal?))
+
+(define (register-js-stmt! name stmt)
+  (let1 env (find-js-env name)
+    (hash-table-push! *js-code-table* name (compile-jsise-stmt env stmt))))
+
+(define (write-js-code name out)
+  (display "import * as Graviton from '/js/graviton/graviton.mjs';" out)
+  (write-tree (reverse (hash-table-get *js-code-table* name)) out))
+
+(define (get-js-code name)
+  (cond
+    ((hash-table-exists? *js-code-table* name)
+     (call-with-output-string
+       (lambda (out)
+         (write-js-code name out))))
+    (else
+     #f)))
+
+(define (js-main-module-absolute-paths)
+  (map absolute-js-path (hash-table-keys *js-code-table*)))
+
+;;;
+
+;; TODO: Deprecate send-context
+(define-class <send-context> ()
+  ((buffer-output-port :init-keyword :buffer-output-port)
+   (output-buffer-storage :init-form (make-u8vector (* 1024 1024)))
+   (command-buffering? :init-value #f)))
+
+(define-application-context-slot send-context #f)
+
+(define current-send-context (make-parameter #f))
+
+(define (init-send-context)
+  (let1 send-context (make <send-context>)
+    (slot-set! send-context
+               'buffer-output-port
+               (open-output-uvector (slot-ref send-context 'output-buffer-storage) :extendable #t))
+    (application-context-slot-set! 'send-context send-context)))
+
+(add-hook! app-start-hook init-send-context)
+
+(define (with-send-context proc)
+  (cond
+    ((current-send-context)
+     (proc (current-send-context)))
+    (else
+     (application-context-slot-atomic-ref 'send-context
+       (lambda (ctx)
+         (parameterize ((current-send-context ctx))
+           (proc ctx)))))))
+
+(define (command-buffering?)
+  (with-send-context
+    (lambda (ctx)
+      (slot-ref ctx 'command-buffering?))))
+
+(define (set-command-buffering? val)
+  (with-send-context
+    (lambda (ctx)
+      (slot-set! ctx 'command-buffering? val))))
+
+(define (flush-commands)
+  (let1 output-data (with-send-context
+                      (lambda (ctx)
+                        (begin0
+                          (get-output-uvector (slot-ref ctx 'buffer-output-port) :shared #t)
+                          (slot-set! ctx 'buffer-output-port (open-output-uvector (slot-ref ctx 'output-buffer-storage))))))
+    (unless (= (uvector-length output-data) 0)
+      (send-binary-frame (application-context-slot-ref 'websocket-output-port) output-data))))
+
+;;;
+
+(define *jsargtype-serializer-table* (make-hash-table 'eq?))
+(define *jsargtype-datastream-method-table* (make-hash-table 'eq?))
+
+(define-syntax define-jsargtype
+  (syntax-rules ()
+    ((_ (type-name rest ...) datastream-method serializer)
+     (begin
+       (define-jsargtype type-name datastream-method serializer)
+       (define-jsargtype (rest ...) datastream-method serializer-body)))
+    ((_ type-name datastream-method serializer)
+     (begin
+       (hash-table-put! *jsargtype-serializer-table* 'type-name serializer)
+       (hash-table-put! *jsargtype-datastream-method-table* 'type-name 'datastream-method)))))
+
+(define-jsargtype f32 getFloat32 (lambda (v out)
+                                   (write-f32 v out 'little-endian)))
+(define-jsargtype f64 getFloat64 (lambda (v out)
+                                   (write-f64 v out 'little-endian)))
+(define-jsargtype s8 getInt8 (lambda (v out)
+                               (write-s8 v out 'little-endian)))
+(define-jsargtype s16 getInt16 (lambda (v out)
+                                 (write-s16 v out 'little-endian)))
+(define-jsargtype s32 getInt32 (lambda (v out)
+                                 (write-s32 v out 'little-endian)))
+(define-jsargtype u8 getUint8 (lambda (v out)
+                                (write-u8 v out 'little-endian)))
+(define-jsargtype u16 getUint16 (lambda (v out)
+                                  (write-u16 v out 'little-endian)))
+(define-jsargtype u32 getUint32 (lambda (v out)
+                                  (write-u32 v out 'little-endian)))
+(define-jsargtype u8vector getUint8Array (lambda (v out)
+                                           (write-u32 (u8vector-length v) out 'little-endian)
+                                           (write-uvector v out)))
+(define-jsargtype f64vector getFloat64Array (lambda (v out)
+                                              (write-u32 (f64vector-length v) out 'little-endian)
+                                              (write-uvector v out 0 -1 'little-endian)))
+(define-jsargtype boolean getBoolean (lambda (v out)
+                                       (write-u8 (if v 1 0) out 'little-endian)))
+(define-jsargtype future getUint32 (lambda (v out)
+                                     (write-u32 (allocate-future-id v) out 'little-endian)))
+(define-jsargtype object getObjectRefValue (lambda (v out)
+                                             (write-u32 (jsobject-id v) out 'little-endian)))
+(define-jsargtype object* getObjectRef (lambda (v out)
+                                         (write-u32 (jsobject-id v) out 'little-endian)))
+(define-jsargtype string getString (lambda (v out)
+                                     (let1 data (ces-convert-to <u8vector> v 'utf-8)
+                                       (write-u32 (u8vector-length data) out 'little-endian)
+                                       (write-uvector data out))))
+(define-jsargtype json getJson (lambda (v out)
+                                 ;; Make a vector to make JSON to satisfy RFC4627.
+                                 (let1 data (ces-convert-to <u8vector> (construct-json-string (vector v)) 'utf-8)
+                                   (write-u32 (u8vector-length data) out 'little-endian)
+                                   (write-uvector data out))))
+
+(define (write-command-args types args out)
+  (for-each (lambda (type arg)
+              (or (and-let1 serialize (hash-table-get *jsargtype-serializer-table* type #f)
+                    (serialize arg out)
+                    #t)
+                  (and (hash-table-contains? *enum-table* type)
+                       (write-u8 (enum-value type arg) out 'little-endian))
+                  (errorf "Invalid jsarg type: ~a" type)))
+            types args))
+
+
+(define (call-command command-id types args)
+  (with-send-context
+    (lambda (ctx)
+      (let1 out (slot-ref ctx 'buffer-output-port)
+        (write-u16 command-id out 'little-endian)
+        (write-command-args types args out))
+      (unless (command-buffering?)
+        (flush-commands)))))
+
+;;;
+
+(define (parse-arg-spec spec)
+  (match spec
+    ((? symbol? spec)
+     (parse-arg-spec (list (map string->symbol (string-split (symbol->string spec) "::")))))
+    (((? symbol? spec))
+     (let1 parts (map string->symbol (string-split (symbol->string spec) "::"))
+       (cond
+         ((= (length parts) 1)
+          (parse-arg-spec (append parts '(json))))
+         (else
+          (parse-arg-spec (list parts))))))
+    (((? symbol? spec) init-val)
+     (parse-arg-spec (list (map string->symbol (string-split (symbol->string spec) "::")) init-val)))
+    (((var type) init-val)
+     (list var type init-val))
+    (((var type))
+     (list var type var))
+    (((var) init-val)
+     (list var 'json init-val))))
+
+(define binary-command-next-id (make-id-generator #xffffffff))
+
+(define *enum-table* (make-hash-table))
+
+(define-class <jsprocedure> ()
+  ((types :init-keyword :types)
+   (command-id :init-keyword :command-id)))
+
+(define (compile-jslet arg-specs body)
+  (let* ((jsmodule-name (js-vm-current-main-module))
+         (var-type-list (map parse-arg-spec arg-specs))
+         (command-id (binary-command-next-id))
+         (name (gensym))
+         (ds (gensym)))
+    (register-js-stmt! jsmodule-name
+                       `(begin
+                          (define (,name ,ds)
+                            (let ,(map (match-lambda
+                                         ((var type _)
+                                          `(,var ,(or (and-let1 method (hash-table-get *jsargtype-datastream-method-table* type #f)
+                                                        `((~ ,ds ',method)))
+                                                      (and (hash-table-contains? *enum-table* type)
+                                                           `((~ ,ds 'getEnum) ,(symbol->string type)))
+                                                      (errorf "Invalid jsarg type: ~a" type)))))
+                                       var-type-list)
+                              ,@body))
+                          (Graviton.registerBinaryCommand ,command-id ,name)))
+    (make <jsprocedure> :command-id command-id :types (map (cut list-ref <> 1) var-type-list))))
+
+(define-jsise-macro raise
+  ((err)
+   `(Graviton.notifyException ((ref ,err toString)))))
+
+(define (jscall js-proc :rest args)
+  (let1 future (make <graviton-future>)
+    (call-command (slot-ref js-proc 'command-id)
+                  (slot-ref js-proc 'types)
+                  (cons future args))
+    future))
+
+(define (jsrun js-proc :rest args)
+  (call-command (slot-ref js-proc 'command-id)
+                (slot-ref js-proc 'types)
+                args))
+
+(define-macro (jslet var-spec :rest body)
+  (let1 jsrun jsrun
+    `(,jsrun ,(compile-jslet var-spec body)
+             ,@(map (lambda (spec)
+                      (list-ref (parse-arg-spec spec) 2))
+                    var-spec))))
+
+(define-macro (jslet/result var-spec :rest body)
+  (let1 jscall jscall
+    `(,jscall ,(compile-jslet (cons '%future-id::future var-spec) body)
+              ,@(map (lambda (spec)
+                       (list-ref (parse-arg-spec spec) 2))
+                     var-spec))))
+
+(define-class <jsenum> ()
+  ((symbol->value-table :init-form (make-hash-table))
+   (jsvalue->symbol-table :init-form (make-hash-table 'equal?))))
+
+(define (make-enum jsmodule-name enum-name symbol->jsvalue-list)
+  (let ((enum (make <jsenum>))
+        (jsvals '()))
+    (for-each-with-index (lambda (i symbol->jsvalue)
+                           (match symbol->jsvalue
+                             ((sym jsval)
+                              (hash-table-put! (slot-ref enum 'symbol->value-table) sym i)
+                              (hash-table-put! (slot-ref enum 'jsvalue->symbol-table) jsval sym)
+                              (push! jsvals jsval))))
+                         symbol->jsvalue-list)
+    (register-js-stmt! jsmodule-name
+                       `(Graviton.registerEnum ,(symbol->string enum-name) ,(list->vector (reverse jsvals))))
+    enum))
+
+(define-syntax define-jsenum
+  (syntax-rules ()
+    ((_ name symbol->jsvalue ...)
+     (let1 enum (make-enum (js-current-main-module) 'name '(symbol->jsvalue ...))
+       (hash-table-put! *enum-table* 'name enum)))))
+
+(define (enum-value name sym)
+  (let1 enum (hash-table-get *enum-table* name #f)
+    (unless enum
+      (errorf "enum ~a not found" enum))
+    (or (hash-table-get (slot-ref enum 'symbol->value-table) sym #f)
+        (errorf "enum symbol ~a not found" sym))))
+
+(define (enum-symbol name jsval)
+  (let1 enum (hash-table-get *enum-table* name #f)
+    (unless enum
+      (errorf "enum ~a not found" enum))
+    (or (hash-table-get (slot-ref enum 'jsvalue->symbol-table) jsval #f)
+        (errorf "enum jsvalue ~a not found" jsval))))
+
+;;;
+
+(define-record-type <id-range>
+  make-id-range id-range?
+  (start id-range-start set-id-range-start!)
+  (end id-range-end))
+
+(define (make-free-id-list id-size)
+  (cons #t
+        (cons (make-id-range 1 id-size)
+              #f)))
+
+(define (allocate-id! free-id-list)
+  (let1 cell (cdr free-id-list)
+    (cond
+      (cell
+       (let* ((id-range (car cell))
+              (s (id-range-start id-range)))
+         (if (= (+ s 1) (id-range-end id-range))
+             (set-cdr! free-id-list (cdr cell))
+             (set-id-range-start! id-range (+ s 1)))
+         s))
+      (else
+       #f))))
+
+(define (release-id! free-id-list id)
+  (let1 cell (let loop ((cell free-id-list))
+               (if (or (not (cdr cell))
+                       (< id (id-range-start (cadr cell))))
+                   cell
+                   (loop (cdr cell))))
+    (set-cdr! cell (cons (make-id-range id (+ id 1)) (cdr cell)))))
+
+(define-class <jsobject> ()
+  ((%free-id-list :allocation :class
+                  :init-form (atom (make-free-id-list #x100000000)))
+   (id :init-value #f)))
+
+(define-method initialize ((obj <jsobject>) initargs)
+  (next-method)
+  (or (and-let1 id (atomic (slot-ref obj '%free-id-list)
+                     (lambda (free-id-list)
+                       (allocate-id! free-id-list)))
+        (slot-set! obj 'id id)
+        #t)
+      (error "The jsobject ID space is exhausted.")))
+
+(define-method jsobject-id ((obj <jsobject>))
+  (or (slot-ref obj 'id)
+      (errorf "~s was invalidated" obj)))
+
+(define-method release-jsobject-id! ((obj <jsobject>))
+  (and-let1 id (slot-ref obj 'id)
+    (slot-set! obj 'id #f)
+    (atomic (slot-ref obj '%free-id-list)
+      (lambda (free-id-list)
+        (release-id! free-id-list id)))))
+
+(define-method invalidate! ((obj <jsobject>))
+  (jslet ((obj*::object* obj))
+      (obj*.invalidate))
+  (release-jsobject-id! obj))
+
+(define-method invalidate? ((obj <jsobject>))
+  (not (not (slot-ref obj 'id))))
+
+;;;
+
 (define (absolute-js-path js-path)
   (cond
     ((absolute-path? js-path)
@@ -525,28 +883,4 @@
 
 (define (load-js-list)
   (reverse *load-js-list*))
-
-;;;
-
-(define *js-code-table* (make-hash-table 'equal?))
-
-(define (register-js-stmt! name stmt)
-  (let1 env (find-js-env name)
-    (hash-table-push! *js-code-table* name (compile-jsise-stmt env stmt))))
-
-(define (write-js-code name out)
-  (display "import * as Graviton from '/js/graviton/graviton.mjs';" out)
-  (write-tree (reverse (hash-table-get *js-code-table* name)) out))
-
-(define (get-js-code name)
-  (cond
-    ((hash-table-exists? *js-code-table* name)
-     (call-with-output-string
-       (lambda (out)
-         (write-js-code name out))))
-    (else
-     #f)))
-
-(define (js-main-module-absolute-paths)
-  (map absolute-js-path (hash-table-keys *js-code-table*)))
 
