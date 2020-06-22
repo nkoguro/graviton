@@ -35,7 +35,7 @@
   (use gauche.uvector)
   (use graviton)
   (use graviton.config)
-  (use graviton.jsise)
+  (use graviton.jsbridge)
 
   (export load-audio
           play-audio

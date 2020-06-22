@@ -53,7 +53,7 @@
   (use graviton.async)
   (use graviton.comm)
   (use graviton.config)
-  (use graviton.jsise)
+  (use graviton.jsbridge)
   (use graviton.misc)
   (use graviton.scheduler)
   (use makiki)
@@ -114,14 +114,6 @@
           default-async-task-queue
 
           define-action
-
-          <jsobject>
-          jsobject-id
-          invalidate!
-          invalidate?
-          define-jsenum
-          jslet
-          jslet/result
 
           estimate-content-type
           resource-url

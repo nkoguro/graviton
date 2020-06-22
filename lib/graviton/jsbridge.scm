@@ -1,5 +1,5 @@
 ;;;
-;;; jsise.scm - Javascript in S-Expression
+;;; jsbridge.scm - Javascript in S-Expression
 ;;;
 ;;;   Copyright (c) 2019 KOGURO, Naoki (naoki@koguro.net)
 ;;;   All rights reserved.
@@ -30,7 +30,7 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
-(define-module graviton.jsise
+(define-module graviton.jsbridge
   (use binary.io)
   (use file.util)
   (use gauche.charconv)
@@ -52,20 +52,17 @@
   (use util.list)
   (use util.match)
 
-  (export define-jsise-stmt
-          define-jsise-macro
+  (export define-jsstmt
+          define-jsmacro
           define-jsvar
           define-jsfn
-          inline-js
-          write-js-code
+
           get-js-code
           js-main-module-absolute-paths
-          register-js-stmt!
+          load-js-list
+
           import-js
           load-js
-          load-js-list
-          js-current-main-module
-          js-vm-current-main-module
 
           <jsobject>
           jsobject-id
@@ -79,7 +76,7 @@
           set-command-buffering?
           flush-commands))
 
-(select-module graviton.jsise)
+(select-module graviton.jsbridge)
 
 (define env-counter-atom (atom -1))
 
@@ -152,7 +149,7 @@
 (define *statement-table* (make-hash-table))
 (define *macro-table* (make-hash-table))
 
-(define-syntax define-jsise-macro
+(define-syntax define-jsmacro
   (syntax-rules ()
     ((_ name (pat body ...) ...)
      (hash-table-put! *macro-table*
@@ -164,7 +161,7 @@
 (define (is-macro? name)
   (hash-table-contains? *macro-table* name))
 
-(define-jsise-macro cond
+(define-jsmacro cond
   ((('else else ...))
    `(begin ,@else))
   (((expr then ...))
@@ -174,7 +171,7 @@
   (((expr then ...) rest ...)
    `(if ,expr (begin ,@then) (cond ,@rest))))
 
-(define-jsise-macro ash
+(define-jsmacro ash
   ((v (? (^x (and (integer? x) (positive? x))) s))
    `(js-code "(" ,v "<<" ,s ")"))
   ((v (? (^x (and (integer? x) (negative? x))) s))
@@ -190,7 +187,7 @@
          (js-code "(" ,x "<<" ,y ")")
          (js-code "(" ,x ">>" "(-" ,y ")" ")"))))))
 
-(define-jsise-macro dotimes
+(define-jsmacro dotimes
   (((var num-expr) body ...)
    (let ((end (gensym)))
      `(let ((,var 0)
@@ -199,7 +196,7 @@
           ,@body
           (pre++ ,var))))))
 
-(define-jsise-macro let*
+(define-jsmacro let*
   ((() body ...)
    `(begin ,@body))
   (((var-spec rest ...) body ...)
@@ -207,7 +204,7 @@
       (let* ,rest
         ,@body))))
 
-(define-jsise-macro let1
+(define-jsmacro let1
   ((var expr body ...)
    `(let ((,var ,expr))
       ,@body)))
@@ -228,7 +225,7 @@
 (define (is-stmt? name)
   (hash-table-contains? *statement-table* name))
 
-(define-syntax define-jsise-stmt
+(define-syntax define-jsstmt
   (syntax-rules ()
     ((_ name env (pat body ...) ...)
      (hash-table-put! *statement-table*
@@ -238,19 +235,19 @@
                           (pat body ...) ...
                           (_ (errorf "Invalid syntax for statement '~a': ~s" 'name (cons 'name _)))))))))
 
-(define-jsise-stmt import env
+(define-jsstmt import env
   (((? symbol? var) name)
    (list "const " var "=require('" name "');"))
   (((? list? vars) name)
    (list "const {" (intersperse "," vars) "}=require('" name "');")))
 
-(define-jsise-stmt begin env
+(define-jsstmt begin env
   ((stmt ...)
    (list "{"
          (map (cut compile-jsise-stmt env <>) stmt)
          "}")))
 
-(define-jsise-stmt let env
+(define-jsstmt let env
   ((form body ...)
    (let1 env (make-env env (map (cut list-ref <> 0) form))
      (list "{"
@@ -261,7 +258,7 @@
            (map (cut compile-jsise-stmt env <>) body)
            "}"))))
 
-(define-jsise-stmt if env
+(define-jsstmt if env
   ((expr then)
    (list "if" "(" (compile-jsise-expr env expr) ")"
          (compile-jsise-stmt env then)))
@@ -271,32 +268,32 @@
          "else "
          (compile-jsise-stmt env else))))
 
-(define-jsise-stmt when env
+(define-jsstmt when env
   ((expr body ...)
    (compile-jsise-stmt env `(if ,expr (begin ,@body)))))
 
-(define-jsise-stmt unless env
+(define-jsstmt unless env
   ((expr body ...)
    (compile-jsise-stmt env `(if (not ,expr) (begin ,@body)))))
 
-(define-jsise-stmt while env
+(define-jsstmt while env
   ((expr body ...)
    (list "while" "(" (compile-jsise-expr env expr) ")" "{"
          (map (cut compile-jsise-stmt env <>) body)
          "}")))
 
-(define-jsise-stmt define env
+(define-jsstmt define env
   (((name args ...) body ...)
    (compile-jsise-stmt env `(define ,name (lambda ,args ,@body))))
   ((var val)
    (register-js-defvar! env var)
    (list "let " (resolve-js-var env var) "=" (compile-jsise-expr env val) ";")))
 
-(define-jsise-stmt for-each env
+(define-jsstmt for-each env
   ((proc coll)
    (list (compile-jsise-expr env coll) ".forEach(" (compile-jsise-expr env proc) ");")))
 
-(define-jsise-stmt case env
+(define-jsstmt case env
   ((key clauses ...)
    (list "switch(" (compile-jsise-expr env key) ")" "{"
          (map (lambda (clause)
@@ -314,7 +311,7 @@
               clauses)
          "}")))
 
-(define-jsise-stmt result env
+(define-jsstmt result env
   ((vals ...)
    (cond
      ((resolve-js-local-var env '%future-id)
@@ -324,7 +321,7 @@
      (else
       (error "result is called outside jslet/result.")))))
 
-(define-jsise-stmt return env
+(define-jsstmt return env
   (()
    (list "return;"))
   ((val)
@@ -484,23 +481,23 @@
 (define-syntax define-jsvar
   (syntax-rules ()
     ((_ name val)
-     (register-js-stmt! (js-current-main-module) '(define name val)))))
+     (register-jsstmt! (js-current-main-module) '(define name val)))))
 
 (define-syntax define-jsfn
   (syntax-rules ()
     ((_ (name args ...) body ...)
-     (register-js-stmt! (js-current-main-module) '(define (name args ...) body ...)))))
+     (register-jsstmt! (js-current-main-module) '(define (name args ...) body ...)))))
 
 (define-syntax inline-js
   (syntax-rules ()
     ((_ body ...)
-     (register-js-stmt! (js-current-main-module) '(begin body ...)))))
+     (register-jsstmt! (js-current-main-module) '(begin body ...)))))
 
 ;;;
 
 (define *js-code-table* (make-hash-table 'equal?))
 
-(define (register-js-stmt! name stmt)
+(define (register-jsstmt! name stmt)
   (let1 env (find-js-env name)
     (hash-table-push! *js-code-table* name (compile-jsise-stmt env stmt))))
 
@@ -682,7 +679,7 @@
          (command-id (binary-command-next-id))
          (name (gensym))
          (ds (gensym)))
-    (register-js-stmt! jsmodule-name
+    (register-jsstmt! jsmodule-name
                        `(begin
                           (define (,name ,ds)
                             (let ,(map (match-lambda
@@ -697,7 +694,7 @@
                           (Graviton.registerBinaryCommand ,command-id ,name)))
     (make <jsprocedure> :command-id command-id :types (map (cut list-ref <> 1) var-type-list))))
 
-(define-jsise-macro raise
+(define-jsmacro raise
   ((err)
    `(Graviton.notifyException ((ref ,err toString)))))
 
@@ -741,7 +738,7 @@
                               (hash-table-put! (slot-ref enum 'jsvalue->symbol-table) jsval sym)
                               (push! jsvals jsval))))
                          symbol->jsvalue-list)
-    (register-js-stmt! jsmodule-name
+    (register-jsstmt! jsmodule-name
                        `(Graviton.registerEnum ,(symbol->string enum-name) ,(list->vector (reverse jsvals))))
     enum))
 
@@ -871,7 +868,7 @@
      (begin))
     ((_ import-spec rest ...)
      (begin
-       (register-js-stmt! (js-current-main-module) (compile-import-spec 'import-spec))
+       (register-jsstmt! (js-current-main-module) (compile-import-spec 'import-spec))
        (import-js rest ...)))))
 
 ;;;

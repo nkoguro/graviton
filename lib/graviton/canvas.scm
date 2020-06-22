@@ -35,7 +35,7 @@
   (use gauche.parameter)
   (use graviton)
   (use graviton.config)
-  (use graviton.jsise)
+  (use graviton.jsbridge)
   (use util.list)
 
   (export make-canvas

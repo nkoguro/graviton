@@ -38,7 +38,7 @@
   (use graviton.app)
   (use graviton.async)
   (use graviton.config)
-  (use graviton.jsise)
+  (use graviton.jsbridge)
   (use util.match)
 
   (export <jsevent>
