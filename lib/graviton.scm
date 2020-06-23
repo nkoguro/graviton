@@ -402,31 +402,6 @@
         (process-output->string `("wslpath" "-w" ,config-file))
         config-file)))
 
-(define-class <client-config> ()
-  ((port :init-value 0
-         :init-keyword :port)
-   (title :init-value (if (and (list? (command-line))
-                               (<= (length (command-line)) 1))
-                          (path-sans-extension (sys-basename (list-ref (command-line) 0)))
-                          "Graviton"))
-   (background-color :init-value "#FFF")))
-
-(define-syntax set-config-param!
-  (syntax-rules ()
-    ((_ cfg)
-     cfg)
-    ((_ cfg param rest ...)
-     (begin
-       (unless (undefined? param)
-         (slot-set! cfg 'param param))
-       (set-config-param! cfg rest ...)))))
-
-(define-syntax config-with-params
-  (syntax-rules ()
-    ((_ config-class param ...)
-     (let1 cfg (make config-class)
-       (set-config-param! cfg param ...)))))
-
 (define-class <player-config> (<client-config>)
   ((type :init-value 'player)
    (window-size :init-value '(800 600))
