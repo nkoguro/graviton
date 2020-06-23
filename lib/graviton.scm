@@ -115,7 +115,8 @@
 
           define-action
 
-          estimate-content-type
+          define-url-path
+
           resource-url
 
           loop-frame))
@@ -128,40 +129,52 @@
 
 ;;;
 
-(define *js-path-map-alist* '())
+(define *url-path-map-alist* '())
 
-(define (register-js-path-map file-path url-path)
-  (set! *js-path-map-alist* (append *js-path-map-alist*
+(define (register-url-path! url-path file-path)
+  (set! *url-path-map-alist* (append *url-path-map-alist*
                                     (list
                                       (cons (simplify-path (string-append "/" url-path "/"))
                                             file-path)))))
 
-(register-js-path-map (graviton-js-directory) "graviton")
+(define-syntax define-url-path
+  (syntax-rules ()
+    ((_ url-path file-path)
+     (register-url-path! url-path file-path))))
 
-(define (resolve-js-path js-path)
-  (let1 js-path (simplify-path js-path)
-    (let loop ((path-map-alist *js-path-map-alist*))
+(define-url-path "graviton" (graviton-js-directory))
+
+(define (url->file-path path)
+  (let1 path (simplify-path path)
+    (let loop ((path-map-alist *url-path-map-alist*))
       (match path-map-alist
         (()
          #f)
         (((url-path . file-path) rest ...)
-         (or (and-let1 path (and (string-prefix? url-path js-path)
-                                 (build-path file-path (string-drop js-path (string-length url-path))))
+         (or (and-let1 path (and (string-prefix? url-path path)
+                                 (build-path file-path (string-drop path (string-length url-path))))
                (and (file-is-readable? path)
                     path))
              (loop rest)))))))
 
-(define-http-handler #/\/js(\/.*)/
+(define-http-handler #/(\/.*\/.*)/
   (lambda (req app)
-    (let1 js-path ((slot-ref req 'path-rxmatch) 1)
+    (let1 url-path (slot-ref req 'path)
       (cond
-        ((resolve-js-path js-path)
+        ((url->file-path url-path)
          => (lambda (file-path)
-              (respond/ok req `(file ,file-path) :content-type (estimate-content-type js-path))))
-        ((and (equal? (sys-dirname js-path) "/")
-              (get-js-code (sys-basename js-path)))
+              (respond/ok req `(file ,file-path) :content-type (estimate-content-type url-path))))
+        (else
+         (respond/ng req 404))))))
+
+(define-http-handler #/\/[^\/]+.m?js/
+  (lambda (req app)
+    (let1 url-path (slot-ref req 'path)
+      (cond
+        ((and (equal? (sys-dirname url-path) "/")
+              (get-js-code (sys-basename url-path)))
          => (lambda (js-code)
-              (respond/ok req js-code :content-type (estimate-content-type js-path))))
+              (respond/ok req js-code :content-type (estimate-content-type url-path))))
         (else
          (respond/ng req 404))))))
 

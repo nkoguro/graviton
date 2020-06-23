@@ -1,4 +1,4 @@
-import {registerInitializer} from '/js/graviton/graviton.mjs';
+import {registerInitializer} from '/graviton/graviton.mjs';
 
 export let audioContext = new AudioContext();
 export let audioChannels = [];

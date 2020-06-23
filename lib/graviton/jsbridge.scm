@@ -502,7 +502,7 @@
     (hash-table-push! *js-code-table* name (compile-jsise-stmt env stmt))))
 
 (define (write-js-code name out)
-  (display "import * as Graviton from '/js/graviton/graviton.mjs';" out)
+  (display "import * as Graviton from '/graviton/graviton.mjs';" out)
   (write-tree (reverse (hash-table-get *js-code-table* name)) out))
 
 (define (get-js-code name)
@@ -835,7 +835,7 @@
     ((absolute-path? js-path)
      js-path)
     (else
-     (build-path "/js" js-path))))
+     (build-path "/" js-path))))
 
 (define (compile-import-option import-options)
   (let ((as-param (get-keyword :as import-options #f))

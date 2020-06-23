@@ -1,4 +1,4 @@
-import {callAction} from '/js/graviton/graviton.mjs';
+import {callAction} from '/graviton/graviton.mjs';
 
 let eventHandlerTable = {};
 

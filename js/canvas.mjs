@@ -1,4 +1,4 @@
-import * as Graviton from '/js/graviton/graviton.mjs';
+import * as Graviton from '/graviton/graviton.mjs';
 
 export function createCanvas(width, height, z, visible) {
     let canvas = document.createElement('canvas');
