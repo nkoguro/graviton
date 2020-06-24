@@ -70,7 +70,7 @@
   (use text.tree)
   (use util.match)
 
-  (export grv-main
+  (export grv-start
           grv-begin
 
           grv-player
@@ -479,7 +479,7 @@
                      background-color)
   (set! *client-config* (config-with-params <browser-config> port title background-color)))
 
-(define (grv-main thunk)
+(define (grv-start thunk)
   (set! *initial-thunk* thunk)
   (let ((port (client-port)))
     (start-http-server :port port
@@ -500,4 +500,4 @@
 (define-syntax grv-begin
   (syntax-rules ()
     ((_ expr ...)
-     (grv-main (lambda () expr ...)))))
+     (grv-start (lambda () expr ...)))))
