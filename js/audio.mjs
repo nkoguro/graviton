@@ -1,5 +1,3 @@
-import {registerInitializer} from '/graviton/graviton.mjs';
-
 export let audioContext = new AudioContext();
 export let audioChannels = [];
 
@@ -11,7 +9,7 @@ function initAudioChannels() {
     }
 }
 
-registerInitializer(initAudioChannels);
+window.addEventListener('load', initAudioChannels);
 
 function registerAudioContextResumeHandler() {
     if (audioContext.state !== 'suspended') {
@@ -32,4 +30,4 @@ function registerAudioContextResumeHandler() {
     });
 }
 
-registerInitializer(registerAudioContextResumeHandler);
+window.addEventListener('load', registerAudioContextResumeHandler);

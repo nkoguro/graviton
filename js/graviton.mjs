@@ -1,11 +1,5 @@
 'use strict';
 
-let initializeFunctions = [];
-
-export function registerInitializer(func) {
-    initializeFunctions.push(func);
-}
-
 let webSocket;
 
 function connectServer() {
@@ -33,7 +27,7 @@ function connectServer() {
     };
 }
 
-registerInitializer(connectServer);
+window.addEventListener('load', connectServer);
 
 export function closeConnection() {
     if (webSocket) {
@@ -42,7 +36,6 @@ export function closeConnection() {
 }
 
 let enumTable = {};
-
 let objectRefTable = {};
 
 export class ObjectRef {
@@ -263,13 +256,3 @@ function dispatchBinaryMessage(abuf) {
         }
     }
 }
-
-/**
- * Window handler
- */
-
-window.addEventListener('load', () => {
-    initializeFunctions.forEach((func) => {
-        func();
-    });
-});

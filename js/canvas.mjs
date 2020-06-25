@@ -91,4 +91,4 @@ function initCanvas() {
     });
 }
 
-Graviton.registerInitializer(initCanvas);
+window.addEventListener('load', initCanvas);
