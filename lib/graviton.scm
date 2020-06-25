@@ -204,8 +204,15 @@
 (add-hook! task-end-hook (lambda ()
                            (flush-commands)))
 
-(define-action "notifyException" (err)
-  (raise (condition (&message (message err)) (&error))))
+(define-action "notifyException" (err stacktrace)
+  (with-output-to-port (current-error-port)
+    (lambda ()
+      (format #t "*** ~a\n" err)
+      (display "Stack Trace in client:\n")
+      (display "_______________________________________\n")
+      (display stacktrace)
+      (newline)))
+  (app-exit 70))
 
 (define-action "startApplication" ()
   (when *initial-thunk*

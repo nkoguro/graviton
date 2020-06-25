@@ -696,7 +696,7 @@
 
 (define-jsmacro raise
   ((err)
-   `(Graviton.notifyException ((ref ,err toString)))))
+   `(Graviton.notifyException err)))
 
 (define (jscall js-proc :rest args)
   (let1 future (make <graviton-future>)

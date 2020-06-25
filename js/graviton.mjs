@@ -17,12 +17,12 @@ function connectServer() {
     webSocket.onmessage = (event) => {
         try {
             if (typeof event.data === 'string') {
-                notifyException("Can't handle string data: " + event.data);
+                notifyException(new Error("Can't handle string data: " + event.data));
             } else {
                 dispatchBinaryMessage(event.data);
             }
         } catch (e) {
-            notifyException(e.toString());
+            notifyException(e);
         }
     };
 }
@@ -227,8 +227,21 @@ export function notifyValues(futureId, vals) {
 }
 
 export function notifyException(exception) {
-    callAction("notifyException", exception.toString());
+    callAction("notifyException", exception.toString(), exception.stack);
 }
+
+window.addEventListener('error', (e) => {
+    console.log('Unhandled exception: ' + e.toString());
+    console.log('stacktrace:\n' + e.stack);
+    try {
+        if (webSocket) {
+            notifyException(e);
+        }
+    } catch (err) {
+        console.log('notifyException failed: ' + err.toString());
+        console.log('stacktrace:\n' + err.stack);
+    }
+});
 
 /**
  * Graviton binary commands
@@ -249,10 +262,10 @@ function dispatchBinaryMessage(abuf) {
             try {
                 func(ds);
             } catch (e) {
-                notifyException(e.toString());
+                notifyException(e);
             }
         } else {
-            notifyException('Invalid binary command index: ' + commandIndex);
+            notifyException(new Error('Invalid binary command index: ' + commandIndex));
         }
     }
 }

@@ -274,7 +274,7 @@
                                  (result canvas.width canvas.height))))
             (set! img.onerror (lambda ()
                                 (*working-images*.delete img)
-                                (raise "Load image failed.")))))
+                                (raise (make Error "Load image failed."))))))
       (lambda (w h)
         (slot-set! canvas 'width w)
         (slot-set! canvas 'height h)

@@ -70,7 +70,7 @@
                                              (source-node.connect audioContext.destination)
                                              (result audio.duration))))
             (set! audio.onstalled (lambda ()
-                                    (raise "Load audio failed.")))))
+                                    (raise (make Error "Load audio failed."))))))
       (lambda (duration)
         (slot-set! node 'duration duration)
         node))))
@@ -109,9 +109,9 @@
                                                decoded-data.duration
                                                decoded-data.numberOfChannels))
                                      (lambda (reason)
-                                       (raise reason)))))
+                                       (raise (make Error reason))))))
                                  (else
-                                  (raise (+ "Load PCM failed. (status:" req.status ")"))))))
+                                  (raise (make Error (+ "Load PCM failed. (status:" req.status ")")))))))
             (req.send)))
       (lambda (sample-rate len duration num-of-channels)
         (slot-set! pcm 'sample-rate sample-rate)
