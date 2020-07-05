@@ -480,10 +480,7 @@
                           stdout-filename
                           stderr-filename)))
 
-(define (grv-browser :key
-                     port
-                     title
-                     background-color)
+(define (grv-browser :key port title background-color)
   (set! *client-config* (config-with-params <browser-config> port title background-color)))
 
 (define (grv-start thunk)
