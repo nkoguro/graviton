@@ -56,7 +56,7 @@
             (wsl
              "graviton-player.exe")
             (else
-             (string-join "graviton-player" (gauche-config 'executable-suffix) "."))))
+             (string-join (list "graviton-player" (gauche-config "--executable-suffix")) "."))))
 
 ;; Output
 (cf-output-default "lib/graviton/config-alist.scm")
