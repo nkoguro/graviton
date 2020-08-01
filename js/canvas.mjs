@@ -5,18 +5,14 @@ export function createCanvas(width, height, z, visible) {
     canvas.width = width;
     canvas.height = height;
 
-    centralizeCanvas(canvas);
-    canvas.style.zIndex = z;
-    document.getElementById('_on').appendChild(canvas);
-
-    if (window.isElectron) {
-        window.showBrowserWindow();
-    }
-
     if (visible) {
+        centralizeCanvas(canvas);
+        canvas.style.zIndex = z;
+        document.getElementById('_on').appendChild(canvas);
         canvas.style.visibility = 'visible';
-    } else {
-        canvas.style.visibility = 'hidden';
+        if (window.isElectron) {
+            window.showBrowserWindow();
+        }
     }
 
     return canvas;

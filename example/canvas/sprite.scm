@@ -79,8 +79,7 @@
             balls))
 
 (define (draw-balls sprite balls)
-  (set-fill-style! "#000")
-  (fill-rect 0 0 *canvas-width* *canvas-height*)
+  (clear-rect 0 0 *canvas-width* *canvas-height*)
   (for-each (lambda (ball)
               (draw-canvas sprite
                            (* (ball-pattern-id ball) *sprite-width*)
@@ -102,15 +101,18 @@
 ;; (trace update-balls!)
 
 (define (main args)
-  (grv-player :background-color "black")
+  (let-args (cdr args) ((num-sprites "s|sprites=i" 100)
+                        (use-browser? "b|browser" #f))
+    (if use-browser?
+      (grv-browser :background-color "black")
+      (grv-player :background-color "black"))
 
-  (let-args (cdr args) ((num-sprites "s|sprites=i" 100))
     (grv-begin
       (capture-jsevent (client-window) "keyup" '("key"))
 
       (let ((sprite (make-canvas (* *sprite-width* *num-patterns*) *sprite-height* :visible? #f))
-            (canvas0 (make-canvas *canvas-width* *canvas-height* :visible? #f))
-            (canvas1 (make-canvas *canvas-width* *canvas-height* :visible? #f))
+            (canvas (make-canvas *canvas-width* *canvas-height*))
+            (off-canvas (make-canvas *canvas-width* *canvas-height* :visible? #f))
             (balls (list-ec (: i num-sprites)
                             (make-ball (modulo i *num-patterns*)
                                        (random-integer *canvas-width*)
@@ -119,26 +121,24 @@
                                        (- (* (random-real) 400) 200)))))
         (prepare-ball-images sprite *sprite-width* *sprite-height* *num-patterns*)
 
-        (let1 visible-canvas 0
-          (do-generator (events all-events)
-            (frame-sync
-              (lambda ()
-                (with-jstransaction
-                  (lambda ()
-                    (set-canvas-visible! canvas0 (= visible-canvas 0))
-                    (set-canvas-visible! canvas1 (= visible-canvas 1))))
+        (do-generator (events all-events)
+          (frame-sync
+            (lambda ()
+              (with-jstransaction
+                (lambda ()
+                  (parameterize ((current-canvas canvas))
+                    (clear-rect 0 0 *canvas-width* *canvas-height*)
+                    (draw-canvas off-canvas 0 0))))
 
-                (for-each (match-lambda
-                            (('keyup _ "Escape")
-                             (event-stream-close))
-                            (_
-                             #f))
-                          events)
+              (for-each (match-lambda
+                          (('keyup _ "Escape")
+                           (event-stream-close))
+                          (_
+                           #f))
+                        events)
 
-                (with-jstransaction
-                  (lambda ()
-                    (current-canvas (if (= visible-canvas 0) canvas1 canvas0))
-                    (update-frame sprite balls)
-                    (set! visible-canvas (if (= visible-canvas 0) 1 0)))))))
-
-          0)))))
+              (with-jstransaction
+                (lambda ()
+                  (parameterize ((current-canvas off-canvas))
+                    (update-frame sprite balls))))))))
+          0)))
