@@ -1,5 +1,6 @@
 (use file.util)
 (use gauche.logger)
+(use gauche.threads)
 (use graviton)
 (use graviton.audio)
 
@@ -9,8 +10,8 @@
   (grv-player)
 
   (grv-begin
-    (let1 audio (await (load-audio "pipo.mp3"))
+    (let1 audio (force (load-audio "pipo.mp3"))
       (log-format "duration: ~a" (slot-ref audio 'duration))
       (play-audio audio)
-      (asleep 0.5))
-    (app-exit 0)))
+      (thread-sleep! 0.5))
+    0))

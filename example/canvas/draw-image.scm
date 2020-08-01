@@ -2,8 +2,7 @@
 (use gauche.uvector)
 (use graviton)
 (use graviton.canvas)
-(use graviton.event)
-(use math.const)
+(use util.match)
 
 (define *program-dir* (sys-dirname (current-load-path)))
 
@@ -11,12 +10,18 @@
   (grv-player :background-color "#000")
 
   (grv-begin
-    (add-event-listener! (client-window) "keyup"
-                         '("key")
-      (lambda (key)
-        (when (equal? key "Escape")
-          (client-close))))
+    (capture-jsevent (client-window) "keyup" '("key"))
 
     (let ((canvas (make-canvas 300 300))
           (loaded-image (load-canvas (build-path *program-dir* "../font_16x16.png") :visible? #f)))
-      (draw-canvas (await loaded-image) 0 0))))
+      (draw-canvas (force loaded-image) 0 0))
+
+
+    (port-for-each (match-lambda
+                     (('keyup _ "Escape")
+                      (event-stream-close))
+                     (_
+                      #f))
+                   next-event)
+
+    0))

@@ -1,17 +1,13 @@
 (use graviton)
 (use graviton.canvas)
-(use graviton.event)
 (use math.const)
+(use util.match)
 
 (define (main args)
   (grv-player)
 
   (grv-begin
-    (add-event-listener! (client-window) "keyup"
-                         '("key")
-      (lambda (key)
-        (when (equal? key "Escape")
-          (client-close))))
+    (capture-jsevent (client-window) "keyup" '("key"))
 
     (let1 canvas (make-canvas 300 150)
       ;; Tangential lines
@@ -41,4 +37,13 @@
       (set-fill-style! "red")
       (arc 200 130 5 0 (* 2 pi))
       (arc 50 20 5 0 (* 2 pi))
-      (fill))))
+      (fill)
+
+      (port-for-each (match-lambda
+                       (('keyup _ "Escape")
+                        (event-stream-close))
+                       (_
+                        #f))
+                     next-event)
+
+      0)))

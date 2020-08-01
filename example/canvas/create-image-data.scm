@@ -1,18 +1,13 @@
 (use gauche.uvector)
 (use graviton)
 (use graviton.canvas)
-(use graviton.event)
-(use math.const)
+(use util.match)
 
 (define (main args)
   (grv-player)
 
   (grv-begin
-    (add-event-listener! (client-window) "keyup"
-                         '("key")
-      (lambda (key)
-        (when (equal? key "Escape")
-          (client-close))))
+    (capture-jsevent (client-window) "keyup" '("key"))
 
     (let1 canvas (make-canvas 300 150)
       (let ((image (create-image-data 100 100))
@@ -25,4 +20,13 @@
           (u8vector-set! data (+ i 3) 255) ; A
           )
         (upload-image-data image data)
-        (put-image-data image 20 20)))))
+        (put-image-data image 20 20)))
+
+    (port-for-each (match-lambda
+                     (('keyup _ "Escape")
+                      (event-stream-close))
+                     (_
+                      #f))
+                   next-event)
+
+    0))

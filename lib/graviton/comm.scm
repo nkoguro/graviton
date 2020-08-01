@@ -32,6 +32,7 @@
 
 (define-module graviton.comm
   (use binary.io)
+  (use data.queue)
   (use gauche.hook)
   (use gauche.parameter)
   (use gauche.selector)
@@ -41,6 +42,7 @@
   (use graviton.async)
   (use graviton.misc)
   (use rfc.json)
+  (use srfi-1)
   (use util.match)
 
   (export send-text-frame
@@ -212,8 +214,8 @@
          (proc (hash-table-get json-command-table cmd #f)))
     (cond
       (proc
-       (submit-task (main-task-queue) (lambda ()
-                                        (apply proc args))))
+       (submit-task #f (lambda ()
+                         (apply proc args))))
       (else
        (log-error "Invalid data received: ~s" params)))))
 
@@ -247,7 +249,7 @@
 (define (with-future-table proc)
   (application-context-slot-atomic-ref 'future-table proc))
 
-(define (allocate-future-id future)
+(define (allocate-future-id queue)
   (with-future-table
     (lambda (tbl future-next-id)
       (define (loop)
@@ -257,19 +259,21 @@
             ((hash-table-contains? tbl id)
              (loop))
             (else
-             (hash-table-put! tbl id future)
+             (hash-table-put! tbl id queue)
              id))))
       (loop))))
 
 (define (notify-values future-id vals)
   (with-future-table
     (lambda (tbl future-next-id)
-      (let1 future (begin0
-                     (hash-table-get tbl future-id #f)
-                     (hash-table-delete! tbl future-id))
+      (let1 queue (begin0
+                    (hash-table-get tbl future-id #f)
+                    (hash-table-delete! tbl future-id))
         (cond
-          (future
-           (set-future-values! future vals))
+          (queue
+           (enqueue! queue (if (null? vals)
+                               (undefined)
+                               (first vals))))
           (else
            (errorf "[BUG] Invalid future ID: ~a" future-id)))))))
 

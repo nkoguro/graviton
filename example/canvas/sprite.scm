@@ -1,3 +1,5 @@
+(use data.queue)
+(use gauche.generator)
 (use gauche.logger)
 (use gauche.parameter)
 (use gauche.parseopt)
@@ -10,6 +12,7 @@
 (use math.const)
 (use srfi-27)
 (use srfi-42)
+(use util.match)
 
 (define *sprite-width* 64)
 (define *sprite-height* 64)
@@ -103,11 +106,7 @@
 
   (let-args (cdr args) ((num-sprites "s|sprites=i" 100))
     (grv-begin
-      (add-event-listener! (client-window) "keyup"
-                           '("key")
-        (lambda (key)
-          (when (equal? key "Escape")
-            (client-close))))
+      (capture-jsevent (client-window) "keyup" '("key"))
 
       (let ((sprite (make-canvas (* *sprite-width* *num-patterns*) *sprite-height* :visible? #f))
             (canvas0 (make-canvas *canvas-width* *canvas-height* :visible? #f))
@@ -119,11 +118,27 @@
                                        (- (* (random-real) 400) 200)
                                        (- (* (random-real) 400) 200)))))
         (prepare-ball-images sprite *sprite-width* *sprite-height* *num-patterns*)
+
         (let1 visible-canvas 0
-          (loop-frame
-            (lambda (break)
-              (set-canvas-visible! canvas0 (= visible-canvas 0))
-              (set-canvas-visible! canvas1 (= visible-canvas 1))
-              (current-canvas (if (= visible-canvas 0) canvas1 canvas0))
-              (update-frame sprite balls)
-              (set! visible-canvas (if (= visible-canvas 0) 1 0)))))))))
+          (do-generator (events all-events)
+            (frame-sync
+              (lambda ()
+                (with-jstransaction
+                  (lambda ()
+                    (set-canvas-visible! canvas0 (= visible-canvas 0))
+                    (set-canvas-visible! canvas1 (= visible-canvas 1))))
+
+                (for-each (match-lambda
+                            (('keyup _ "Escape")
+                             (event-stream-close))
+                            (_
+                             #f))
+                          events)
+
+                (with-jstransaction
+                  (lambda ()
+                    (current-canvas (if (= visible-canvas 0) canvas1 canvas0))
+                    (update-frame sprite balls)
+                    (set! visible-canvas (if (= visible-canvas 0) 1 0)))))))
+
+          0)))))

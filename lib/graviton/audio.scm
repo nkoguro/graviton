@@ -36,6 +36,7 @@
   (use graviton)
   (use graviton.config)
   (use graviton.jsbridge)
+  (use util.match)
 
   (export load-audio
           play-audio
@@ -60,20 +61,20 @@
 
 (define (load-audio filename :key (content-type #f))
   (let1 node (make <audio-media-element-node>)
-    (transform-future
-        (jslet/result ((node*::object* node)
-                       (url::string (resource-url filename :content-type content-type)))
-          (let ((audio (make Audio url)))
-            (set! audio.onloadedmetadata (lambda ()
-                                           (let ((source-node (audioContext.createMediaElementSource audio)))
-                                             (set! node*.value source-node)
-                                             (source-node.connect audioContext.destination)
-                                             (result audio.duration))))
-            (set! audio.onstalled (lambda ()
-                                    (raise (make Error "Load audio failed."))))))
-      (lambda (duration)
-        (slot-set! node 'duration duration)
-        node))))
+    (delay (let1 duration
+               (force
+                 (jslet/result ((node*::object* node)
+                                (url::string (resource-url filename :content-type content-type)))
+                   (let ((audio (make Audio url)))
+                     (set! audio.onloadedmetadata (lambda ()
+                                                    (let ((source-node (audioContext.createMediaElementSource audio)))
+                                                      (set! node*.value source-node)
+                                                      (source-node.connect audioContext.destination)
+                                                      (result audio.duration))))
+                     (set! audio.onstalled (lambda ()
+                                             (raise (make Error "Load audio failed.")))))))
+             (slot-set! node 'duration duration)
+             node))))
 
 (define (play-audio audio)
   (jslet ((audio::object))
@@ -91,34 +92,34 @@
 
 (define (load-pcm filename :key (content-type #f))
   (let1 pcm (make <audio-buffer>)
-    (transform-future
-        (jslet/result ((pcm*::object* pcm)
-                       (url::string (resource-url filename :content-type content-type)))
-          (let ((req (make XMLHttpRequest)))
-            (req.open "GET" url #t)
-            (set! req.responseType "arraybuffer")
-            (set! req.onload (lambda ()
-                               (cond
-                                 ((equal? req.status 200)
-                                  (let ((buf req.response))
-                                    ((ref (audioContext.decodeAudioData buf) 'then)
-                                     (lambda (decoded-data)
-                                       (set! pcm*.value decoded-data)
-                                       (result decoded-data.sampleRate
-                                               decoded-data.length
-                                               decoded-data.duration
-                                               decoded-data.numberOfChannels))
-                                     (lambda (reason)
-                                       (raise (make Error reason))))))
-                                 (else
-                                  (raise (make Error (+ "Load PCM failed. (status:" req.status ")")))))))
-            (req.send)))
-      (lambda (sample-rate len duration num-of-channels)
-        (slot-set! pcm 'sample-rate sample-rate)
-        (slot-set! pcm 'length len)
-        (slot-set! pcm 'duration duration)
-        (slot-set! pcm 'number-of-channels num-of-channels)
-        pcm))))
+    (delay (match-let1 #(sample-rate len duration num-of-channels)
+               (force
+                 (jslet/result ((pcm*::object* pcm)
+                                (url::string (resource-url filename :content-type content-type)))
+                   (let ((req (make XMLHttpRequest)))
+                     (req.open "GET" url #t)
+                     (set! req.responseType "arraybuffer")
+                     (set! req.onload (lambda ()
+                                        (cond
+                                          ((equal? req.status 200)
+                                           (let ((buf req.response))
+                                             ((ref (audioContext.decodeAudioData buf) 'then)
+                                              (lambda (decoded-data)
+                                                (set! pcm*.value decoded-data)
+                                                (result (vector decoded-data.sampleRate
+                                                                decoded-data.length
+                                                                decoded-data.duration
+                                                                decoded-data.numberOfChannels)))
+                                              (lambda (reason)
+                                                (raise (make Error reason))))))
+                                          (else
+                                           (raise (make Error (+ "Load PCM failed. (status:" req.status ")")))))))
+                     (req.send))))
+             (slot-set! pcm 'sample-rate sample-rate)
+             (slot-set! pcm 'length len)
+             (slot-set! pcm 'duration duration)
+             (slot-set! pcm 'number-of-channels num-of-channels)
+             pcm))))
 
 (define-method play-wave (channel-num type (freq <real>) len :optional (gain 1.0))
   (play-wave channel-num type (f64vector freq) len gain))

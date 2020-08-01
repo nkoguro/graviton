@@ -32,6 +32,7 @@
 
 (define-module graviton.jsbridge
   (use binary.io)
+  (use data.queue)
   (use file.util)
   (use gauche.charconv)
   (use gauche.collection)
@@ -73,8 +74,7 @@
           jslet/result
 
           command-buffering?
-          set-command-buffering?
-          flush-commands))
+          with-jstransaction))
 
 (select-module graviton.jsbridge)
 
@@ -312,11 +312,11 @@
          "}")))
 
 (define-jsstmt result env
-  ((vals ...)
+  ((val)
    (cond
      ((resolve-js-local-var env '%future-id)
       (compile-jsise-stmt env `(begin
-                                 (Graviton.notifyValues %future-id ,(list->vector vals))
+                                 (Graviton.notifyValues %future-id (vector ,val))
                                  (return))))
      (else
       (error "result is called outside jslet/result.")))))
@@ -382,6 +382,8 @@
      (let1 translator (hash-table-get *macro-table* macro)
        (compile-jsise-expr env (translator (cdr expr)))))
 
+    (('vector vals ...)
+     (list "[" (intersperse "," (map (cut compile-jsise-expr env <>) vals)) "]"))
     (('json obj)
      (list (construct-json-string obj)))
     (('object (key . val) ...)
@@ -563,9 +565,19 @@
                       (lambda (ctx)
                         (begin0
                           (get-output-uvector (slot-ref ctx 'buffer-output-port) :shared #t)
-                          (slot-set! ctx 'buffer-output-port (open-output-uvector (slot-ref ctx 'output-buffer-storage))))))
+                          (slot-set! ctx 'buffer-output-port (open-output-uvector (slot-ref ctx 'output-buffer-storage)
+                                                                                  :extendable #t)))))
     (unless (= (uvector-length output-data) 0)
       (send-binary-frame (application-context-slot-ref 'websocket-output-port) output-data))))
+
+(define (with-jstransaction thunk)
+  (let1 current-buffering? (command-buffering?)
+    (unwind-protect
+        (begin
+          (set-command-buffering? #t)
+          (thunk)
+          (flush-commands))
+      (set-command-buffering? current-buffering?))))
 
 ;;;
 
@@ -699,11 +711,11 @@
    `(Graviton.notifyException err)))
 
 (define (jscall js-proc :rest args)
-  (let1 future (make <graviton-future>)
+  (let1 queue (make-mtqueue)
     (call-command (slot-ref js-proc 'command-id)
                   (slot-ref js-proc 'types)
-                  (cons future args))
-    future))
+                  (cons queue args))
+    (delay (dequeue/wait! queue))))
 
 (define (jsrun js-proc :rest args)
   (call-command (slot-ref js-proc 'command-id)

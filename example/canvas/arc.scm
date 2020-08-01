@@ -1,9 +1,10 @@
+(use data.queue)
 (use gauche.logger)
 (use graviton)
 (use graviton.canvas)
-(use graviton.event)
 (use math.const)
 (use util.list)
+(use util.match)
 
 (define-class <mouse-event> (<jsevent>)
   ((width :js-property "target.width")
@@ -26,19 +27,13 @@
   (grv-player)
 
   (grv-begin
-    (receive (w h) (await (client-window-size))
+    (match-let1 (w h) (force (client-window-size))
       (log-format "window width=~a, height=~a" w h))
-    (add-event-listener! (client-window) "keyup"
-                         '("key")
-      (lambda (key)
-        (when (equal? key "Escape")
-          (client-close))))
+
+    (capture-jsevent (client-window) "keyup" '("key"))
 
     (let1 canvas (make-canvas 150 200)
-      (add-event-listener! canvas "click" <mouse-event>
-        (lambda (event)
-          #?=(slot-ref event 'x)
-          #?=(slot-ref event 'y)))
+      (capture-jsevent canvas "click" <mouse-event>)
 
       (dotimes (i 4)
         (dotimes (j 3)
@@ -51,5 +46,16 @@
             (begin-path)
             (arc x y radius start-angle end-angle anti-clockwise)
             (if (< 1 i)
-                (fill)
-                (stroke))))))))
+              (fill)
+              (stroke)))))
+
+      (port-for-each (match-lambda
+                       (('keyup _ "Escape")
+                        (event-stream-close))
+                       (('click _ mouse-event)
+                        (log-format "mouse: x=~a, y=~a" (slot-ref mouse-event 'x) (slot-ref mouse-event 'y)))
+                       (_
+                        #f))
+                     next-event)
+
+      0)))

@@ -1,7 +1,7 @@
 (use file.util)
 (use graviton)
 (use graviton.canvas)
-(use graviton.event)
+(use util.match)
 
 (define *program-dir* (sys-dirname (current-load-path)))
 
@@ -9,13 +9,18 @@
   (grv-player)
 
   (grv-begin
-    (add-event-listener! (client-window) "keyup"
-                         '("key")
-      (lambda (key)
-        (when (equal? key "Escape")
-          (client-close))))
+    (capture-jsevent (client-window) "keyup" '("key"))
 
     (let1 pat (load-canvas (build-path *program-dir* "Canvas_createpattern.png") :visible? #f)
       (make-canvas 300 300)
-      (set-fill-style! (pattern (await pat)))
-      (fill-rect 0 0 300 300))))
+      (set-fill-style! (pattern (force pat)))
+      (fill-rect 0 0 300 300))
+
+    (port-for-each (match-lambda
+                     (('keyup _ "Escape")
+                      (event-stream-close))
+                     (_
+                      #f))
+                   next-event)
+
+    0))

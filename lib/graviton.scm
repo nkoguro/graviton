@@ -53,6 +53,7 @@
   (use graviton.async)
   (use graviton.comm)
   (use graviton.config)
+  (use graviton.event)
   (use graviton.jsbridge)
   (use graviton.misc)
   (use graviton.scheduler)
@@ -72,34 +73,20 @@
 
   (export grv-start
           grv-begin
+          grv-exit
 
           grv-player
           grv-browser
           grv-log-config
 
-          make-task-queue
-          task-queue-min-num-threads
-          task-queue-min-num-threads-set!
-          task-queue-max-num-threads
-          task-queue-max-num-threads-set!
+          current-pool
           task-queue-worker-timeout
           task-queue-worker-timeout-set!
 
-          transform-future
           async-apply
           async
-          await
-          asleep
-          task-yield
-          make-channel
-          channel-send
-          channel-recv
-          channel-recv/await
-          channel-close
 
-          command-buffering?
-          set-command-buffering?
-          flush-commands
+          with-jstransaction
 
           client-window
           client-window-size
@@ -107,7 +94,6 @@
 
           app-start-hook
           app-close-hook
-          app-exit
 
           current-task-queue
           async-task-queue
@@ -119,7 +105,18 @@
 
           resource-url
 
-          loop-frame))
+          add-jsevent-listener!
+          remove-jsevent-listener!
+
+          <jsevent>
+          fire-event
+          next-event
+          all-events
+          event-stream-closed?
+          event-stream-close
+          capture-jsevent
+          set-frame-interval!
+          frame-sync))
 
 (select-module graviton)
 
@@ -201,9 +198,6 @@
 (define *initial-thunk* #f)
 (define *init-hook* (make-hook))
 
-(add-hook! task-end-hook (lambda ()
-                           (flush-commands)))
-
 (define-action "notifyException" (err stacktrace)
   (with-output-to-port (current-error-port)
     (lambda ()
@@ -217,7 +211,8 @@
 (define-action "startApplication" ()
   (when *initial-thunk*
     (run-hook *init-hook*)
-    (*initial-thunk*)))
+    (let1 exit-code (*initial-thunk*)
+      (app-exit (if (integer? exit-code) exit-code 70)))))
 
 (define (start-websocket-dispatcher! sock in out)
   (thread-start!
@@ -343,34 +338,14 @@
       win)))
 
 (define (client-window-size)
-  (jslet/result ()
-    (result window.innerWidth window.innerHeight)))
+  (delay (vector->list
+           (force
+             (jslet/result ()
+               (result (vector window.innerWidth window.innerHeight)))))))
 
 (define (client-close)
   (jslet ()
     (Graviton.closeConnection)))
-
-;;;
-
-(define (loop-frame proc :key (fps 30))
-  (let ((exit? #f)
-        (frame-sec (/. 1 fps))
-        (current-buffering-mode (command-buffering?)))
-    (define (break)
-      (set! exit? #t))
-    (set-command-buffering? #t)
-    (unwind-protect
-        (while (not exit?)
-          (let1 start-sec (time->seconds (current-time))
-            (proc break)
-            (flush-commands)
-            (let* ((elapse-sec (- (time->seconds (current-time)) start-sec)))
-              (when (< frame-sec elapse-sec)
-                (log-debug "Frame dropped. renderer procedure consumes ~a sec. It exceeds one frame sec: ~a"
-                           elapse-sec
-                           frame-sec))
-              (asleep (max 0 (- frame-sec elapse-sec))))))
-      (set-command-buffering? current-buffering-mode))))
 
 ;;;
 
@@ -505,3 +480,7 @@
   (syntax-rules ()
     ((_ expr ...)
      (grv-start (lambda () expr ...)))))
+
+(define (grv-exit code)
+  (app-exit code)
+  (task-quit))

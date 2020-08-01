@@ -109,11 +109,12 @@
 (define app-start-hook (make-hook))
 (define app-close-hook (make-hook))
 
-(define-application-context-slot control-out #f)
-
 ;;;
+
+(define-application-context-slot control-out #f)
 
 (define (app-exit code)
   (let1 out (application-context-slot-ref 'control-out)
     (write `(shutdown ,code) out)
     (flush out)))
+
