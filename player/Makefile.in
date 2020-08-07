@@ -1,0 +1,44 @@
+.PHONY: build-all zip-all build install clean
+
+PLATFORM_ARCHS := win32-x64 win32-ia32 darwin-x64 linux-x64 linux-armv7l linux-arm64
+DEFAULT_PLATFORM_ARCH := @GRAVITON_PLAYER_ARCH@
+
+BUILD_TARGETS :=
+ZIP_TARGETS :=
+
+SRCS := src/main.js src/renderer.js
+
+PLAYER_INSTALL_DIR := @GRAVITON_PLAYER_INSTALL_DIR@
+
+define player-template
+.PHONY: build-$(1)
+
+.build-$(1).done: $(SRCS)
+	(cd src; npx electron-packager . graviton-player --platform=$(word 1,$(subst -, ,$(1))) --arch=$(word 2,$(subst -, ,$(1))) --out=.. --verbose --overwrite)
+	touch .build-$(1).done
+
+build-$(1): .build-$(1).done
+
+BUILD_TARGETS := $(BUILD_TARGETS) build-$(1)
+
+graviton-player-$(1).zip: build-$(1)
+	zip -r $$@ graviton-player-$(1)
+
+ZIP_TARGETS := $(ZIP_TARGETS) graviton-player-$(1).zip
+
+endef
+
+$(foreach platform_arch,$(PLATFORM_ARCHS),$(eval $(call player-template,$(platform_arch))))
+
+build-all: $(BUILD_TARGETS)
+
+zip-all: $(ZIP_TARGETS)
+
+build: build-$(DEFAULT_PLATFORM_ARCH)
+
+install: build
+	mkdir -p $(PLAYER_INSTALL_DIR)
+	cp -R graviton-player-$(DEFAULT_PLATFORM_ARCH) $(PLAYER_INSTALL_DIR)
+
+clean:
+	rm -Rf graviton-player-* .build-*.done

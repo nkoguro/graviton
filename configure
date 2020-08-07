@@ -2,21 +2,17 @@
 ;; Configuring graviton
 ;; Run ./configure (or gosh ./configure) to generate Makefiles.
 
+(use file.util)
 (use gauche.config)
 (use gauche.configure)
+(use gauche.parameter)
+(use gauche.process)
 (use srfi-98)
 (use util.match)
 
 ;; Here you can define handlers of configure arguments by cf-arg-enable
 ;; and cf-arg-with.  Note that --with-local is handled implicitly if you use
 ;; cf-init-gauche-extension.
-
-
-;; Initialize configure.  This creates the global context, parses
-;; command-line args and sets up default values.
-(cf-init-gauche-extension)
-
-;; Here you can add feature tests and other cf-define's.
 
 (define wsl (let ((wslenv (get-environment-variable "WSLENV"))
                   (wsl-interop (get-environment-variable "WSL_INTEROP")))
@@ -27,6 +23,44 @@
                  "1")
                 (else
                  #f))))
+
+(cf-arg-with 'wsl
+             (cf-help-string
+               "--with-wsl"
+               "WSL version (1 or 2)")
+             (lambda (with-wsl)
+               (set! wsl with-wsl)))
+
+(cf-arg-with 'player-install-dir
+             (cf-help-string
+               "--with-player-install-dir"
+               "install directory for Graviton player.")
+             (lambda (with-player-install-dir)
+               (cf-subst 'GRAVITON_PLAYER_INSTALL_DIR with-player-install-dir))
+             (lambda ()
+               (cf-subst 'GRAVITON_PLAYER_INSTALL_DIR
+                         (if wsl
+                           (guard (e (else (report-error e)
+                                           (print "Failed to set up Graviton player install directory. Please specify the directory with --with-player-install-dir option."
+                                                  (current-error-port))
+                                           (exit 1)))
+                             (let1 curdir (current-directory)
+                               (unwind-protect
+                                   (begin
+                                     (current-directory "/mnt/c/Windows/System32")
+                                     (let* ((localappdata (process-output->string '("./cmd.exe" "/c" "echo %LOCALAPPDATA%")))
+                                            (player-path (build-path (process-output->string `("wslpath" "-u" ,localappdata))
+                                                                     "gauche-graviton")))
+                                       player-path))
+                                 (current-directory curdir))))
+                           (process-output->string
+                             "${graviton-data-dir}/player")))))
+
+;; Initialize configure.  This creates the global context, parses
+;; command-line args and sets up default values.
+(cf-init-gauche-extension)
+
+;; Here you can add feature tests and other cf-define's.
 
 (cf-subst 'WSL (or wsl ""))
 
@@ -59,7 +93,8 @@
              (string-join (list "graviton-player" (gauche-config "--executable-suffix")) "."))))
 
 ;; Output
-(cf-output-default "lib/graviton/config-alist.scm")
+(cf-output-default "lib/graviton/config-alist.scm"
+                   "player/Makefile")
 
 ;; Local variables:
 ;; mode: scheme
