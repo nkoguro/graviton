@@ -31,6 +31,7 @@
 ;;;
 
 (define-module graviton.canvas
+  (use data.queue)
   (use file.util)
   (use gauche.parameter)
   (use graviton)
@@ -117,7 +118,11 @@
           translate
           create-image-data
           upload-image-data
-          download-image-data))
+          download-image-data
+
+          enable-request-animation-frame
+          disable-request-animation-frame
+          frame-loop))
 
 (select-module graviton.canvas)
 
@@ -798,3 +803,27 @@
 (define (download-image-data image)
   (jslet/result ((image::object))
     (result image.data)))
+
+;;;
+
+(define frame-sync-queue (make-mtqueue))
+
+(define (enable-request-animation-frame)
+  (jslet ()
+    (Canvas.enableRequestAnimationFrame)))
+
+(define (disable-request-animation-frame)
+  (jslet ()
+    (Canvas.enableRequestAnimationFrame)))
+
+(define-action "requestAnimationFrame" (now-time)
+  (dequeue-all! frame-sync-queue)
+  (enqueue! frame-sync-queue now-time))
+
+(define (frame-loop proc)
+  (enable-request-animation-frame)
+  (unwind-protect
+      (call/cc (lambda (cont)
+                 (while #t
+                   (proc (dequeue/wait! frame-sync-queue) cont))))
+    (disable-request-animation-frame)))

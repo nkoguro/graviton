@@ -72,6 +72,24 @@ export function obj2style(ctx, style) {
     throw new Error('Invalid style: ' + style);
 }
 
+let isRequestAnimationFrameEnabled = false;
+
+function requestAnimationFrameCallback(time) {
+    if (isRequestAnimationFrameEnabled) {
+        Graviton.callAction("requestAnimationFrame", time);
+        window.requestAnimationFrame(requestAnimationFrameCallback);
+    }
+}
+
+export function enableRequestAnimationFrame() {
+    isRequestAnimationFrameEnabled = true;
+    window.requestAnimationFrame(requestAnimationFrameCallback);
+}
+
+export function disableRequestAnimationFrame() {
+    isRequestAnimationFrameEnabled = false;
+}
+
 function initCanvas() {
     let canvasDiv = document.createElement('div');
     canvasDiv.id = '_on';

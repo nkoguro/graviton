@@ -53,9 +53,7 @@
           all-events
           event-stream-closed?
           event-stream-close
-          capture-jsevent
-          set-frame-interval!
-          frame-sync))
+          capture-jsevent))
 
 (select-module graviton.event)
 
@@ -282,15 +280,3 @@
     (add-jsevent-listener! event-target event-type event-class-or-props
       (lambda args
         (fire-event event-type-sym (cons event-target args) priority)))))
-
-(define frame-interval-sec (/. 1 30))
-
-(define (set-frame-interval! sec)
-  (set! frame-interval-sec sec))
-
-(define (frame-sync thunk)
-  (let1 start-sec (time->seconds (current-time))
-    (thunk)
-    (let* ((end-sec (time->seconds (current-time)))
-           (elapse (- end-sec start-sec)))
-      (thread-sleep! (max 0 (- frame-interval-sec elapse))))))

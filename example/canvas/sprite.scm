@@ -19,7 +19,6 @@
 (define *num-patterns* 16)
 (define *canvas-width* 1024)
 (define *canvas-height* 768)
-(define *tick* (/. 1 30))
 
 (define-macro (trace name)
   (let ((args (gensym))
@@ -63,10 +62,10 @@
                (* 2 pi))
       (fill))))
 
-(define (update-balls! balls)
+(define (update-balls! balls tick)
   (for-each (lambda (ball)
-              (let ((x (+ (ball-x ball) (* (ball-vx ball) *tick*)))
-                    (y (+ (ball-y ball) (* (ball-vy ball) *tick*))))
+              (let ((x (+ (ball-x ball) (* (ball-vx ball) tick)))
+                    (y (+ (ball-y ball) (* (ball-vy ball) tick))))
                 (cond
                   ((and (<= 0 x (- *canvas-width* 1))
                         (<= 0 y (- *canvas-height* 1)))
@@ -92,9 +91,9 @@
                            *sprite-height*))
             balls))
 
-(define (update-frame sprite balls)
-  (draw-balls sprite balls)
-  (update-balls! balls))
+(define (update-frame sprite balls tick)
+  (update-balls! balls tick)
+  (draw-balls sprite balls))
 
 ;; (trace update-frame)
 ;; (trace draw-balls)
@@ -121,24 +120,24 @@
                                        (- (* (random-real) 400) 200)))))
         (prepare-ball-images sprite *sprite-width* *sprite-height* *num-patterns*)
 
-        (do-generator (events all-events)
-          (frame-sync
-            (lambda ()
-              (with-jstransaction
-                (lambda ()
-                  (parameterize ((current-canvas canvas))
-                    (clear-rect 0 0 *canvas-width* *canvas-height*)
-                    (draw-canvas off-canvas 0 0))))
-
+        (let1 prev-time #f
+          (frame-loop
+            (lambda (now-time break)
               (for-each (match-lambda
                           (('keyup _ "Escape")
-                           (event-stream-close))
+                           (break))
                           (_
                            #f))
-                        events)
+                        (all-events))
 
               (with-jstransaction
                 (lambda ()
                   (parameterize ((current-canvas off-canvas))
-                    (update-frame sprite balls))))))))
-          0)))
+                    (update-frame sprite balls (if prev-time (/ (- now-time prev-time) 1000) 0)))
+
+                  (set! prev-time now-time)
+
+                  (parameterize ((current-canvas canvas))
+                    (clear-rect 0 0 *canvas-width* *canvas-height*)
+                    (draw-canvas off-canvas 0 0))))))))
+      0)))
