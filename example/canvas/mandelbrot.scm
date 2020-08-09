@@ -74,10 +74,14 @@
           (('tile tile-data)
            (with-jstransaction
              (lambda ()
-               (for-each (match-lambda ((x y n)
-                                        (set-fill-style! (n->color n *max-n*))
-                                        (fill-rect x y 1 1)))
-                         tile-data))))
+               (let1 prev-color #f
+                 (for-each (match-lambda ((x y n)
+                                          (let1 color (n->color n *max-n*)
+                                            (unless (equal? prev-color color)
+                                              (set-fill-style! (n->color n *max-n*)))
+                                            (set! prev-color color))
+                                          (fill-rect x y 1 1)))
+                           tile-data)))))
           (_
            #f)))
 
