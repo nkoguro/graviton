@@ -386,22 +386,24 @@
                    (height . ,(list-ref win-size 1))
                    (url . ,url)
                    (background-color . ,(client-background-color))
-                   (open-dev-tools . ,(player-open-dev-tools?))))
+                   (open-dev-tools . ,(player-open-dev-tools?))
+                   (show . ,(player-show?))))
          (config-file (receive (out filename) (sys-mkstemp (build-path (temporary-directory) "grvcfg"))
                         (construct-json config out)
                         (close-port out)
                         (if (absolute-path? filename)
-                            filename
-                            (simplify-path (build-path (current-directory) filename))))))
+                          filename
+                          (simplify-path (build-path (current-directory) filename))))))
     (if (graviton-config 'wsl)
-        (process-output->string `("wslpath" "-w" ,config-file))
-        config-file)))
+      (process-output->string `("wslpath" "-w" ,config-file))
+      config-file)))
 
 (define-class <player-config> (<client-config>)
   ((type :init-value 'player)
    (window-size :init-value '(800 600))
    (open-dev-tools? :init-value #f)
    (close-on-exit? :init-value #t)
+   (show? :init-value #t)
    (stdout-filename :init-form (build-path (temporary-directory) (format "graviton-player.~a.out" (sys-getpid))))
    (stderr-filename :init-form (build-path (temporary-directory) (format "graviton-player.~a.err" (sys-getpid))))))
 
@@ -434,6 +436,9 @@
 (define (player-open-dev-tools?)
   (slot-ref *client-config* 'open-dev-tools?))
 
+(define (player-show?)
+  (slot-ref *client-config* 'show?))
+
 (define (player-stdout-filename)
   (slot-ref *client-config* 'stdout-filename))
 
@@ -445,6 +450,7 @@
                     open-dev-tools?
                     title
                     background-color
+                    show?
                     stdout-filename
                     stderr-filename)
   (set! *client-config* (config-with-params <player-config>
@@ -452,6 +458,7 @@
                           open-dev-tools?
                           title
                           background-color
+                          show?
                           stdout-filename
                           stderr-filename)))
 

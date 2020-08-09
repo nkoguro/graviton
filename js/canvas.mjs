@@ -10,9 +10,6 @@ export function createCanvas(width, height, z, visible) {
         canvas.style.zIndex = z;
         document.getElementById('_on').appendChild(canvas);
         canvas.style.visibility = 'visible';
-        if (window.isElectron) {
-            window.showBrowserWindow();
-        }
     }
 
     return canvas;

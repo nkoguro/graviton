@@ -22,18 +22,22 @@ if (!config) {
 var win = null;
 
 function createWindow() {
-    let windowInitiallyShown = config['open-dev-tools'] ? true : false;
     win = new BrowserWindow({
         width: config['width'],
         height: config['height'],
         useContentSize: true,
         backgroundColor: config['background-color'],
         resizable: false,
-        show: windowInitiallyShown,
+        show: false,
         webPreferences: {
             preload: path.join(__dirname, 'renderer.js'),
             enableRemoteModule: false,
             nodeIntegration: false
+        }
+    });
+    win.once('ready-to-show', () => {
+        if (config['show']) {
+            win.show();
         }
     });
     if (config['open-dev-tools']) {
@@ -42,12 +46,6 @@ function createWindow() {
     Menu.setApplicationMenu(null);
     win.loadURL(config['url']);
 }
-
-ipcMain.on('showWindow', (event, arg) => {
-    if (win) {
-        win.show();
-    }
-});
 
 ipcMain.on('closePlayer', (event, arg) => {
     app.exit(0);

@@ -7,7 +7,7 @@
 (current-directory (sys-dirname (current-load-path)))
 
 (define (main args)
-  (grv-player)
+  (grv-player :show? #f)
 
   (grv-begin
     (let1 audio (force (load-audio "pipo.mp3"))

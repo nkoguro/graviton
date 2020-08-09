@@ -3,7 +3,7 @@
 (use graviton.audio)
 
 (define (main args)
-  (grv-player)
+  (grv-player :show? #f)
 
   (grv-begin
     (play-wave 0 'square 2000 0.1)
