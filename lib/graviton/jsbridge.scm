@@ -73,7 +73,6 @@
           jslet
           jslet/result
 
-          command-buffering?
           with-jstransaction))
 
 (select-module graviton.jsbridge)
@@ -521,63 +520,28 @@
 
 ;;;
 
-;; TODO: Deprecate send-context
-(define-class <send-context> ()
-  ((buffer-output-port :init-keyword :buffer-output-port)
-   (output-buffer-storage :init-form (make-u8vector (* 1024 1024)))
-   (command-buffering? :init-value #f)))
+(define current-send-buffer (make-parameter #f))
 
-(define-application-context-slot send-context #f)
-
-(define current-send-context (make-parameter #f))
-
-(define (init-send-context)
-  (let1 send-context (make <send-context>)
-    (slot-set! send-context
-               'buffer-output-port
-               (open-output-uvector (slot-ref send-context 'output-buffer-storage) :extendable #t))
-    (application-context-slot-set! 'send-context send-context)))
-
-(add-hook! app-start-hook init-send-context)
-
-(define (with-send-context proc)
+(define (with-send-buffer proc)
   (cond
-    ((current-send-context)
-     (proc (current-send-context)))
+    ((current-send-buffer)
+     (proc (current-send-buffer)))
     (else
-     (application-context-slot-atomic-ref 'send-context
-       (lambda (ctx)
-         (parameterize ((current-send-context ctx))
-           (proc ctx)))))))
+     (let1 out (open-output-uvector)
+       (proc out)
+       (flush-commands out)))))
 
-(define (command-buffering?)
-  (with-send-context
-    (lambda (ctx)
-      (slot-ref ctx 'command-buffering?))))
-
-(define (set-command-buffering? val)
-  (with-send-context
-    (lambda (ctx)
-      (slot-set! ctx 'command-buffering? val))))
-
-(define (flush-commands)
-  (let1 output-data (with-send-context
-                      (lambda (ctx)
-                        (begin0
-                          (get-output-uvector (slot-ref ctx 'buffer-output-port) :shared #t)
-                          (slot-set! ctx 'buffer-output-port (open-output-uvector (slot-ref ctx 'output-buffer-storage)
-                                                                                  :extendable #t)))))
+(define (flush-commands buf-out)
+  (let1 output-data (get-output-uvector buf-out)
     (unless (= (uvector-length output-data) 0)
-      (send-binary-frame (application-context-slot-ref 'websocket-output-port) output-data))))
+      (application-context-slot-atomic-ref 'websocket-output-port
+        (lambda (out)
+          (send-binary-frame out output-data))))))
 
 (define (with-jstransaction thunk)
-  (let1 current-buffering? (command-buffering?)
-    (unwind-protect
-        (begin
-          (set-command-buffering? #t)
-          (thunk)
-          (flush-commands))
-      (set-command-buffering? current-buffering?))))
+  (parameterize ((current-send-buffer (open-output-uvector)))
+    (thunk)
+    (flush-commands (current-send-buffer))))
 
 ;;;
 
@@ -647,13 +611,10 @@
 
 
 (define (call-command command-id types args)
-  (with-send-context
-    (lambda (ctx)
-      (let1 out (slot-ref ctx 'buffer-output-port)
-        (write-u16 command-id out 'little-endian)
-        (write-command-args types args out))
-      (unless (command-buffering?)
-        (flush-commands)))))
+  (with-send-buffer
+    (lambda (out)
+      (write-u16 command-id out 'little-endian)
+      (write-command-args types args out))))
 
 ;;;
 
