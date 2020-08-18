@@ -80,15 +80,15 @@
 (define (draw-balls sprite balls)
   (clear-rect 0 0 *canvas-width* *canvas-height*)
   (for-each (lambda (ball)
-              (draw-canvas sprite
-                           (* (ball-pattern-id ball) *sprite-width*)
-                           0
-                           *sprite-width*
-                           *sprite-height*
-                           (round->exact (- (ball-x ball) (/. *sprite-width* 2)))
-                           (round->exact (- (ball-y ball) (/. *sprite-height* 2)))
-                           *sprite-width*
-                           *sprite-height*))
+              (draw-image sprite
+                          (* (ball-pattern-id ball) *sprite-width*)
+                          0
+                          *sprite-width*
+                          *sprite-height*
+                          (round->exact (- (ball-x ball) (/. *sprite-width* 2)))
+                          (round->exact (- (ball-y ball) (/. *sprite-height* 2)))
+                          *sprite-width*
+                          *sprite-height*))
             balls))
 
 (define (update-frame sprite balls tick)
@@ -139,5 +139,5 @@
 
                   (parameterize ((current-canvas canvas))
                     (clear-rect 0 0 *canvas-width* *canvas-height*)
-                    (draw-canvas off-canvas 0 0))))))))
+                    (draw-image off-canvas 0 0))))))))
       0)))

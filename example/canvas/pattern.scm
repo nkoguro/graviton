@@ -11,7 +11,7 @@
   (grv-begin
     (capture-jsevent (client-window) "keyup" '("key"))
 
-    (let1 pat (load-canvas (build-path *program-dir* "Canvas_createpattern.png") :visible? #f)
+    (let1 pat (load-image (build-path *program-dir* "Canvas_createpattern.png") :visible? #f)
       (make-canvas 300 300)
       (set-fill-style! (pattern (force pat)))
       (fill-rect 0 0 300 300))

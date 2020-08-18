@@ -13,8 +13,8 @@
     (capture-jsevent (client-window) "keyup" '("key"))
 
     (let ((canvas (make-canvas 300 300))
-          (loaded-image (load-canvas (build-path *program-dir* "../font_16x16.png") :visible? #f)))
-      (draw-canvas (force loaded-image) 0 0))
+          (loaded-image (load-image (build-path *program-dir* "../font_16x16.png") :visible? #f)))
+      (draw-image (force loaded-image) 0 0))
 
 
     (port-for-each (match-lambda

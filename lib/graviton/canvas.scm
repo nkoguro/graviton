@@ -41,7 +41,7 @@
   (use util.match)
 
   (export make-canvas
-          load-canvas
+          load-image
           current-canvas
           set-canvas-visible!
 
@@ -92,7 +92,7 @@
           clear-rect
           clip
           close-path
-          draw-canvas
+          draw-image
           ellipse
           fill
           fill-rect
@@ -261,7 +261,7 @@
       (current-canvas canvas))
     canvas))
 
-(define (load-canvas filename :key (z 0) (visible? #t) (content-type #f))
+(define (load-image filename :key (z 0) (visible? #t) (content-type #f))
   (let1 canvas (make <canvas> :z z :visible? visible?)
     (delay (match-let1 #(w h)
                (force
@@ -567,14 +567,14 @@
   (jslet ((canvas::object (current-canvas)))
     ((ref (canvas.getContext "2d") 'closePath))))
 
-(define-method draw-canvas ((src-canvas <canvas>) dx dy)
+(define-method draw-image ((src-canvas <canvas>) dx dy)
   (jslet ((canvas::object (current-canvas))
           (src-canvas::object)
           (dx::s32)
           (dy::s32))
     ((ref (canvas.getContext "2d") 'drawImage) src-canvas dx dy)))
 
-(define-method draw-canvas ((src-canvas <canvas>) dx dy dw dh)
+(define-method draw-image ((src-canvas <canvas>) dx dy dw dh)
   (jslet ((canvas::object (current-canvas))
           (src-canvas::object)
           (dx::s32)
@@ -583,7 +583,7 @@
           (dh::s32))
     ((ref (canvas.getContext "2d") 'drawImage) src-canvas dx dy dw dh)))
 
-(define-method draw-canvas ((src-canvas <canvas>) sx sy sw sh dx dy dw dh)
+(define-method draw-image ((src-canvas <canvas>) sx sy sw sh dx dy dw dh)
   (jslet ((canvas::object (current-canvas))
           (src-canvas::object)
           (sx::s32)
