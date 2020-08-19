@@ -43,7 +43,6 @@
   (export make-canvas
           load-image
           current-canvas
-          set-canvas-visible!
 
           linear-gradient
           radial-gradient
@@ -285,18 +284,6 @@
              (slot-set! canvas 'width w)
              (slot-set! canvas 'height h)
              canvas))))
-
-(define (set-canvas-visible! canvas visible?)
-  (jslet ((canvas::object)
-          (visible?::boolean))
-    (cond
-      (visible?
-       (set! canvas.style.visibility "visible")
-       (when window.isElectron
-         (window.showBrowserWindow)))
-      (else
-       (set! canvas.style.visibility "hidden"))))
-  (slot-set! canvas 'visible? visible?))
 
 (define (current-fill-style)
   (~ (current-canvas) 'context2d 'fill-style))
