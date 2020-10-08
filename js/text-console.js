@@ -2,8 +2,6 @@
 class TextConsoleManager {
     constructor() {
         this.controllers = new Set();
-        this.inputArea = this.createInputArea();
-        this.activeController = null;
 
         window.requestAnimationFrame((timestamp) => {
             this.refresh();
@@ -12,151 +10,20 @@ class TextConsoleManager {
 
     register(controller) {
         this.controllers.add(controller);
-        if (!this.activeController) {
-            this.activate(controller);
-        }
     }
 
     remove(controller) {
         this.controllers.delete(controller);
-        if (this.activeController === controller) {
-            this.removeInputArea();
-        }
-    }
-
-    activate(controller) {
-        if (this.controllers.has(controller)) {
-            this.inputArea.blur();
-            this.injectInputArea(controller);
-            this.inputArea.focus();
-            this.activeController = controller;
-        }
-    }
-
-    createInputArea() {
-        let inputArea = document.createElement('span');
-        inputArea.classList.add('input-area');
-        inputArea.tabIndex = 0;
-        inputArea.contentEditable = true;
-        inputArea.innerText = '';
-
-        inputArea.addEventListener('input', (e) => {
-            this.handleInput(e);
-        });
-        inputArea.addEventListener('compositionstart', (e) => {
-            this.handleCompositionStart(e);
-        });
-        inputArea.addEventListener('compositionend', (e) => {
-            this.handleCompositionEnd(e);
-        });
-        inputArea.addEventListener('keydown', (e) => {
-            this.handleKey(e);
-        });
-
-        return inputArea;
-    }
-
-    injectInputArea(controller) {
-        let cursors = controller.view.getElementsByClassName(MAIN_CURSOR_CLASS);
-        if (cursors.length > 0) {
-            let cursor = cursors[0];
-            let parent = cursor.parentElement;
-            parent.insertBefore(this.inputArea, cursor);
-        }
-    }
-
-    removeInputArea() {
-        let currentInputAreaLine = this.inputArea.parentElement;
-        if (!currentInputAreaLine) {
-            return;
-        }
-        this.inputArea.blur();
-        currentInputAreaLine.removeChild(this.inputArea);
-    }
-
-    extractInputContent() {
-        if (!this.inputArea.firstChild) {
-            return '';
-        }
-
-        return this.inputArea.firstChild.textContent;
-    }
-
-    clearInputContent() {
-        this.inputArea.innerText = '';
-    }
-
-    enableInputAreaIMEStyle() {
-        this.inputArea.style.opacity = 1.0;
-    }
-
-    disableInputAreaIMEStyle() {
-        this.inputArea.style.opacity = 0;
     }
 
     refresh() {
-        let hasFocus = document.activeElement === this.inputArea;
-
         this.controllers.forEach((controller) => {
-            if (controller.isRefreshNeeded()) {
-                let hasInputArea = (this.activeController === controller);
-                if (hasInputArea) {
-                    this.removeInputArea();
-                }
                 controller.refresh();
-                if (hasInputArea) {
-                    this.injectInputArea(controller);
-                    if (hasFocus) {
-                        this.inputArea.focus();
-                    }
-                }
-            }
         });
 
         window.requestAnimationFrame((timestamp) => {
             this.refresh();
         });
-    }
-
-    handleInput(event) {
-        if (!this.activeController) {
-            return;
-        }
-
-        if (!event.isComposing) {
-            this.activeController.insertText(this.extractInputContent());
-            this.clearInputContent();
-        }
-    }
-
-    handleCompositionStart(event) {
-        if (!this.activeController) {
-            return;
-        }
-
-        this.enableInputAreaIMEStyle();
-    }
-
-    handleCompositionEnd(event) {
-        if (!this.activeController) {
-            return;
-        }
-
-        this.activeController.insertText(this.extractInputContent());
-        this.clearInputContent();
-        this.disableInputAreaIMEStyle();
-    }
-
-    handleKey(event) {
-        if (!this.activeController) {
-            return;
-        }
-
-        if (event.isComposing) {
-            return;
-        }
-
-        this.activeController.handleKey(event);
     }
 }
 
@@ -315,6 +182,8 @@ class TextConsoleController {
 
         this.cursor = new TextCursor(this);
 
+        this.inputArea = this.createInputArea();
+
         this.view = view;
         let viewStyle = window.getComputedStyle(view);
         this.view.style.setProperty(BACKGROUND_COLOR_PROPERTY, viewStyle['background-color']);
@@ -347,6 +216,9 @@ class TextConsoleController {
             this.handleMouse(e, 'Leave');
         });
         this.refresh();
+        if (document.activeElement instanceof HTMLBodyElement) {
+            this.inputArea.focus();
+        }
 
         let styleTabSize = viewStyle['tabSize'];
         if (styleTabSize === '') {
@@ -405,6 +277,69 @@ class TextConsoleController {
 
     line(row = this.cursor.row) {
         return new TextLine(this, row, this.attrCharsList[row]);
+    }
+
+    ///
+
+    createInputArea() {
+        let inputArea = document.createElement('span');
+        inputArea.classList.add('input-area');
+        inputArea.tabIndex = 0;
+        inputArea.contentEditable = true;
+        inputArea.innerText = '';
+
+        inputArea.addEventListener('input', (e) => {
+            this.handleInput(e);
+        });
+        inputArea.addEventListener('compositionstart', (e) => {
+            this.handleCompositionStart(e);
+        });
+        inputArea.addEventListener('compositionend', (e) => {
+            this.handleCompositionEnd(e);
+        });
+        inputArea.addEventListener('keydown', (e) => {
+            this.handleKey(e);
+        });
+
+        return inputArea;
+    }
+
+    injectInputArea() {
+        let cursors = this.view.getElementsByClassName(MAIN_CURSOR_CLASS);
+        if (cursors.length > 0) {
+            let cursor = cursors[0];
+            let parent = cursor.parentElement;
+            parent.insertBefore(this.inputArea, cursor);
+        }
+    }
+
+    removeInputArea() {
+        let currentInputAreaLine = this.inputArea.parentElement;
+        if (!currentInputAreaLine) {
+            return;
+        }
+        this.inputArea.blur();
+        currentInputAreaLine.removeChild(this.inputArea);
+    }
+
+    extractInputContent() {
+        if (!this.inputArea.firstChild) {
+            return '';
+        }
+
+        return this.inputArea.firstChild.textContent;
+    }
+
+    clearInputContent() {
+        this.inputArea.innerText = '';
+    }
+
+    enableInputAreaIMEStyle() {
+        this.inputArea.style.opacity = 1.0;
+    }
+
+    disableInputAreaIMEStyle() {
+        this.inputArea.style.opacity = 0;
     }
 
     ///
@@ -867,6 +802,13 @@ class TextConsoleController {
     }
 
     refresh() {
+        if (this.updatedRowSet.size === 0) {
+            return;
+        }
+
+        let hasFocus = document.activeElement === this.inputArea;
+        this.removeInputArea();
+
         let context = new UpdateContext(this.cursor, this.mark);
         let lineDivNodes = this.view.childNodes;
         this.updatedRowSet.forEach((row) => {
@@ -887,6 +829,11 @@ class TextConsoleController {
             this.refreshRow(context, row, attrChars, lineDiv);
         });
         this.updatedRowSet.clear();
+
+        this.injectInputArea();
+        if (hasFocus) {
+            this.inputArea.focus();
+        }
     }
 
     refreshRow(context, row, attrChars, lineDiv) {
@@ -910,6 +857,23 @@ class TextConsoleController {
 
     // Keyboard event
 
+    handleInput(event) {
+        if (!event.isComposing) {
+            this.insertText(this.extractInputContent());
+            this.clearInputContent();
+        }
+    }
+
+    handleCompositionStart(event) {
+        this.enableInputAreaIMEStyle();
+    }
+
+    handleCompositionEnd(event) {
+        this.insertText(this.extractInputContent());
+        this.clearInputContent();
+        this.disableInputAreaIMEStyle();
+    }
+
     keyboardEvent2String(keyboardEvent) {
         let str = '';
         if (keyboardEvent.altKey && keyboardEvent.key !== 'Alt') {
@@ -929,6 +893,10 @@ class TextConsoleController {
     }
 
     handleKey(keyboardEvent) {
+        if (keyboardEvent.isComposing) {
+            return;
+        }
+
         if (keyboardEvent.key === 'Unidentified') {
             return;
         }
@@ -967,7 +935,7 @@ class TextConsoleController {
     handleMouse(event, eventType) {
         let eventName = this.mouseEvent2String(event, eventType);
         if (eventName === 'Down-Button0') {
-            textConsoleManager.activate(this);
+            this.inputArea.focus();
         }
 
         let handler = this.mouseMap[this.mouseEvent2String(event, eventType)];
