@@ -179,46 +179,52 @@ const TEXT_CONSOLE_STYLE = `
     white-space: pre-wrap;
 }
 
-@keyframes box-cursor-blink-animation {
+@keyframes block-cursor-blink-animation {
     0% {
-        background: black;
+        background: var(--grv-text-edit-background-color);
     }
     50% {
-        background: white;
+        background: var(--grv-text-edit-cursor-color);
     }
     100% {
-        background: black;
+        background: var(--grv-text-edit-background-color);
     }
 }
 
-.box-cursor-blink {
-    animation-name: box-cursor-blink-animation;
+.block-cursor-blink {
+    animation-name: block-cursor-blink-animation;
     animation-duration: 1s;
     animation-timing-function: step-start;
     animation-delay: 0s;
     animation-iteration-count: infinite;
-    white-space: pre-wrap;
 }
 
-@keyframes horizontal-cursor-blink-animation {
+.block-cursor {
+    background: var(--grv-text-edit-cursor-color)
+}
+
+@keyframes underline-cursor-blink-animation {
     0% {
-        background: black;
+        background: var(--grv-text-edit-background-color);
     }
     50% {
-        background: linear-gradient(0deg, white, white 10%, black 10%, black);
+        background: linear-gradient(0deg, var(--grv-text-edit-cursor-color), var(--grv-text-edit-cursor-color) 10%, var(--grv-text-edit-background-color) 10%, var(--grv-text-edit-background-color));
     }
     100% {
-        background: black;
+        background: var(--grv-text-edit-background-color);
     }
 }
 
-.horizontal-cursor-blink {
-    animation-name: horizontal-cursor-blink-animation;
+.underline-cursor-blink {
+    animation-name: underline-cursor-blink-animation;
     animation-duration: 1s;
     animation-timing-function: step-start;
     animation-delay: 0s;
     animation-iteration-count: infinite;
-    white-space: pre-wrap;
+}
+
+.underline-cursor {
+    background: linear-gradient(0deg, var(--grv-text-edit-cursor-color), var(--grv-text-edit-cursor-color) 10%, var(--grv-text-edit-background-color) 10%, var(--grv-text-edit-background-color));
 }
 
 @keyframes vertical-cursor-blink-animation {
@@ -226,7 +232,7 @@ const TEXT_CONSOLE_STYLE = `
         background: var(--grv-text-edit-background-color);
     }
     50% {
-        background: linear-gradient(90deg, white, white 4px, var(--grv-text-edit-background-color) 4px, var(--grv-text-edit-background-color));
+        background: linear-gradient(90deg, var(--grv-text-edit-cursor-color), var(--grv-text-edit-cursor-color) 4px, var(--grv-text-edit-background-color) 4px, var(--grv-text-edit-background-color));
     }
     100% {
         background: var(--grv-text-edit-background-color);
@@ -239,7 +245,10 @@ const TEXT_CONSOLE_STYLE = `
     animation-timing-function: step-start;
     animation-delay: 0s;
     animation-iteration-count: infinite;
-    white-space: pre-wrap;
+}
+
+.vertical-cursor {
+    background: linear-gradient(90deg, var(--grv-text-edit-cursor-color), var(--grv-text-edit-cursor-color) 4px, var(--grv-text-edit-background-color) 4px, var(--grv-text-edit-background-color));
 }
 
 .text-edit {
@@ -260,6 +269,7 @@ const TEXT_CONSOLE_STYLE = `
 
 const BACKGROUND_COLOR_PROPERTY = '--grv-text-edit-background-color';
 const COLOR_PROPERTY = '--grv-text-edit-color';
+const CURSOR_COLOR_PROPERTY = '--grv-text-edit-cursor-color';
 
 const SPAN_ROW = 'grv--row';
 const SPAN_START_COLUMN = 'grv--start-column';
@@ -327,10 +337,24 @@ class GrvTextEdit extends HTMLElement {
         textEditRefreshController.remove(this);
     }
 
+    convertColorNameToRGBA(colorName) {
+        let canvas = document.createElement('canvas');
+        canvas.width = 1;
+        canvas.height = 1;
+        let ctx = canvas.getContext('2d');
+        ctx.fillStyle = colorName;
+        ctx.fillRect(0, 0, 1, 1);
+        return ctx.getImageData(0, 0, 1, 1).data;
+    }
+
     initStyle() {
         let viewStyle = window.getComputedStyle(this);
         this.view.style.setProperty(BACKGROUND_COLOR_PROPERTY, viewStyle['background-color']);
-        this.view.style.setProperty(COLOR_PROPERTY, viewStyle['color']);
+        let color = viewStyle['color'];
+        this.view.style.setProperty(COLOR_PROPERTY, color);
+        let colorRGBA = this.convertColorNameToRGBA(color);
+        let cursorColor = `rgba(${colorRGBA[0]},${colorRGBA[1]},${colorRGBA[2]},0.8)`;
+        this.view.style.setProperty(CURSOR_COLOR_PROPERTY, cursorColor);
         let styleTabSize = viewStyle['tabSize'];
         if (styleTabSize === '') {
             this.view.style['tabSize'] = '8';
@@ -1545,7 +1569,8 @@ class TextCursor {
         this.textEdit = textEdit;
         this._column = 0;
         this._row = 0;
-        this.attribute = TextAttribute.fromCssClass('vertical-cursor-blink');
+        this._mode = 'vertical-blink';
+        this.visible = true;
     }
 
     get column() {
@@ -1577,6 +1602,25 @@ class TextCursor {
         this.textEdit.requestUpdateRow(prevRow, this.row);
     }
 
+    get mode() {
+        return this._mode;
+    }
+
+    set mode(mode) {
+        if (!CURSOR_ATTRIBUTE_TABLE[mode]) {
+            throw new RangeError('Invalid cursor mode');
+        }
+        this._mode = mode;
+    }
+
+    get attribute() {
+        if (this.visible) {
+            return CURSOR_ATTRIBUTE_TABLE[this._mode];
+        } else {
+            return DEFAULT_ATTRIBUTE;
+        }
+    }
+
     atBeginningOfLine() {
         return this.column === 0;
     }
@@ -1603,6 +1647,14 @@ class TextCursor {
 
     existsAt(col, row) {
         return this.column === col && this.row === row; 
+    }
+
+    show() {
+        this.visible = true;
+    }
+
+    hide() {
+        this.visible = false;
     }
 }
 
@@ -1737,10 +1789,20 @@ const DEFAULT_MARK_ATTR = TextAttribute.fromStyleJson({
     'color': 'white'
 });
 
+const CURSOR_ATTRIBUTE_TABLE = {
+    'block-blink': TextAttribute.fromCssClass('block-cursor-blink'),
+    'block': TextAttribute.fromCssClass('block-cursor'),
+    'underline-blink': TextAttribute.fromCssClass('underline-cursor-blink'),
+    'underline': TextAttribute.fromCssClass('underline-cursor'),
+    'vertical-blink': TextAttribute.fromCssClass('vertical-cursor-blink'),
+    'vertical': TextAttribute.fromCssClass('vertical-cursor')
+};
+
 ///
 
 function initText() {
     let textEdit = document.getElementById('console');
+    textEdit.cursor.mode = 'vertical-blink';
     textEdit.insertText('Hello, world!0123\n456\u001b[31mfoobarbaz\u001b[1;32m\u001b[2;3Habc');
     textEdit.focus();
 }
