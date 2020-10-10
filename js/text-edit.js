@@ -1,5 +1,5 @@
 
-class TextConsoleManager {
+class TextEditRefreshController {
     constructor() {
         this.textEdits = new Set();
 
@@ -27,7 +27,7 @@ class TextConsoleManager {
     }
 }
 
-let textConsoleManager = new TextConsoleManager();
+let textEditRefreshController = new TextEditRefreshController();
 
 let DEFAULT_KEYMAP = {
     'Backspace': (textEdit) => {
@@ -319,12 +319,12 @@ class GrvTextEdit extends HTMLElement {
     }
 
     connectedCallback() {
-        textConsoleManager.register(this);
+        textEditRefreshController.register(this);
         this.initStyle();
     }
 
     disconnectedCallback() {
-        textConsoleManager.remove(this);
+        textEditRefreshController.remove(this);
     }
 
     initStyle() {
@@ -416,9 +416,8 @@ class GrvTextEdit extends HTMLElement {
     }
 
     injectInputArea() {
-        let cursors = this.view.getElementsByClassName(MAIN_CURSOR_CLASS);
-        if (cursors.length > 0) {
-            let cursor = cursors[0];
+        let cursor = this.shadowRoot.getElementById(MAIN_CURSOR_ID);
+        if (cursor) {
             let parent = cursor.parentElement;
             parent.insertBefore(this.inputArea, cursor);
         }
@@ -935,8 +934,9 @@ class GrvTextEdit extends HTMLElement {
                 newLineDiv.appendChild(document.createElement('br'));
                 this.view.appendChild(newLineDiv);
             }
-            let lineDiv = lineDivNodes[row];
-            this.refreshRow(context, row, attrChars, lineDiv);
+            let spanIter = new SpanIterator(lineDivNodes[row]);
+            let updater = new LineUpdater(context, row, attrChars, spanIter);
+            updater.update();
         });
         this.updatedRowSet.clear();
 
@@ -945,19 +945,6 @@ class GrvTextEdit extends HTMLElement {
         if (hasFocus) {
             this.focus();
         }
-    }
-
-    refreshRow(context, row, attrChars, lineDiv) {
-        let iter = new AttributedCharacterIterator(context, row, attrChars);
-        let spanIter = new SpanIterator(lineDiv);
-        let currentSpan = null;
-        while (iter.hasNext()) {
-            let [attr, c] = iter.nextAttributeAndCharacter();
-            currentSpan = spanIter.next();
-            attr.updateSpan(currentSpan);
-            currentSpan.innerText = c;
-        }
-        spanIter.purge();
     }
 
     // Keyboard event
@@ -1472,62 +1459,50 @@ class UpdateContext {
     }
 }
 
-class AttributedCharacterIterator {
-    constructor(context, row, attrChars) {
+class LineUpdater {
+    constructor(context, row, attrChars, spanIter) {
         this.context = context;
         this.row = row;
         this.attrChars = attrChars;
-        this.index = 0;
-        this.nextAttr = null;
-        this.nextCharacter = null;
-
-        this.updateNextAttributeAndCharacter();
+        this.spanIter = spanIter;
     }
 
-    isCursorPosition() {
-        return this.row === this.context.cursor.row && this.index === this.context.cursor.column;
-    }
-
-    computeNextAttr(attr, endOfLine) {
+    computeAttr(attr, col, endOfLine) {
         let computedAttr = attr;
-        if (this.isCursorPosition()) {
-            computedAttr = computedAttr.concatClasses(this.context.cursor.cssClasses);
+        if (this.context.cursor.existsAt(col, this.row)) {
+            computedAttr = computedAttr.blend(this.context.cursor.attribute);
         }
         if (this.context.mark && !endOfLine) {
-            computedAttr = computedAttr.blend(this.context.mark.attrAt(this.index, this.row));
+            computedAttr = computedAttr.blend(this.context.mark.attrAt(col, this.row));
         }
         return computedAttr;
     }
 
-    updateNextAttributeAndCharacter() {
-        if (this.attrChars.length <= this.index) {
-            if (this.isCursorPosition()) {
-                this.nextAttr = this.computeNextAttr(DEFAULT_ATTRIBUTE, true);
-                this.nextCharacter = ' ';
-                ++this.index;
+    update() {
+        let i = 0;
+        for (i = 0; i < this.attrChars.length; ++i) {
+            let attrChar = this.attrChars[i];
+            let attr = this.computeAttr(attrChar.attribute, i, false);
+            let c = attrChar.character;
+            let span = this.spanIter.next();
+            if (this.context.cursor.existsAt(i, this.row)) {
+                span.id = MAIN_CURSOR_ID;
             } else {
-                this.nextAttr = null;
-                this.nextCharacter = null;
+                span.removeAttribute('id'); 
             }
-        } else {
-            let chunk = this.attrChars[this.index];
-            let attr = chunk.attribute;
-            let c = chunk.character;
-            this.nextAttr = this.computeNextAttr(attr, false);
-            this.nextCharacter = c;
-            ++this.index;
+            attr.updateSpan(span);
+            span.innerText = c;
         }
-    }
 
-    hasNext() {
-        return this.nextAttr && this.nextCharacter;
-    }
+        if (this.context.cursor.existsAt(i, this.row)) {
+            let attr = this.computeAttr(DEFAULT_ATTRIBUTE, i, true);
+            let span = this.spanIter.next();
+            span.id = MAIN_CURSOR_ID;
+            attr.updateSpan(span);
+            span.innerText = ' ';
+        }
 
-    nextAttributeAndCharacter() {
-        let attr = this.nextAttr;
-        let c = this.nextCharacter;
-        this.updateNextAttributeAndCharacter();
-        return [attr, c];
+        this.spanIter.purge();
     }
 }
 
@@ -1563,14 +1538,14 @@ class SpanIterator {
     }
 }
 
-const MAIN_CURSOR_CLASS = 'grv-main-cursor';
+const MAIN_CURSOR_ID = 'grv-main-cursor-id';
 
 class TextCursor {
     constructor(textEdit) {
         this.textEdit = textEdit;
         this._column = 0;
         this._row = 0;
-        this.cssClasses = [MAIN_CURSOR_CLASS, 'vertical-cursor-blink'];
+        this.attribute = TextAttribute.fromCssClass('vertical-cursor-blink');
     }
 
     get column() {
@@ -1625,6 +1600,10 @@ class TextCursor {
     atEndOfConsole() {
         return this.inLastLine() && this.atEndOfLine();
     }
+
+    existsAt(col, row) {
+        return this.column === col && this.row === row; 
+    }
 }
 
 class TextLine {
@@ -1669,6 +1648,10 @@ class TextAttribute {
 
     static fromStyleJson(cssStyleJson) {
         return new TextAttribute([], cssStyleJson);
+    }
+
+    static fromCssClass(cssClass) {
+        return new TextAttribute([cssClass], {});
     }
 
     withCharacters(chars) {
@@ -1724,13 +1707,13 @@ class TextAttribute {
     }
 
     updateSpan(span) {
-        span.className = '';
+        span.removeAttribute('class');
         this.cssClasses.forEach((cssClass) => {
             if (cssClass.length > 0) {
                 span.classList.add(cssClass);
             }
         })
-        span.style.cssText = '';
+        span.removeAttribute('style');
         Object.keys(this.cssStyleJson).forEach((key) => {
             let value = this.cssStyleJson[key];
             span.style[key] = value;
