@@ -1,24 +1,24 @@
 
 class TextConsoleManager {
     constructor() {
-        this.controllers = new Set();
+        this.textEdits = new Set();
 
         window.requestAnimationFrame((timestamp) => {
             this.refresh();
         });
     }
 
-    register(controller) {
-        this.controllers.add(controller);
+    register(textEdit) {
+        this.textEdits.add(textEdit);
     }
 
-    remove(controller) {
-        this.controllers.delete(controller);
+    remove(textEdit) {
+        this.textEdits.delete(textEdit);
     }
 
     refresh() {
-        this.controllers.forEach((controller) => {
-                controller.refresh();
+        this.textEdits.forEach((textEdit) => {
+            textEdit.refresh();
         });
 
         window.requestAnimationFrame((timestamp) => {
@@ -30,77 +30,77 @@ class TextConsoleManager {
 let textConsoleManager = new TextConsoleManager();
 
 let DEFAULT_KEYMAP = {
-    'Backspace': (controller) => {
-        controller.backwardDeleteChar();
+    'Backspace': (textEdit) => {
+        textEdit.backwardDeleteChar();
     },
-    'Delete': (controller) => {
-        controller.deleteChar();
+    'Delete': (textEdit) => {
+        textEdit.deleteChar();
     },
-    'ArrowLeft': (controller) => {
-        controller.previousChar();
+    'ArrowLeft': (textEdit) => {
+        textEdit.previousChar();
     },
-    'ArrowRight': (controller) => {
-        controller.forwardChar();
+    'ArrowRight': (textEdit) => {
+        textEdit.forwardChar();
     },
-    'ArrowUp': (controller) => {
-        controller.previousLine();
+    'ArrowUp': (textEdit) => {
+        textEdit.previousLine();
     },
-    'ArrowDown': (controller) => {
-        controller.nextLine();
+    'ArrowDown': (textEdit) => {
+        textEdit.nextLine();
     },
-    'S-ArrowLeft': (controller) => {
-        controller.previousChar(1, true);
+    'S-ArrowLeft': (textEdit) => {
+        textEdit.previousChar(1, true);
     },
-    'S-ArrowRight': (controller) => {
-        controller.forwardChar(1, true);
+    'S-ArrowRight': (textEdit) => {
+        textEdit.forwardChar(1, true);
     },
-    'S-ArrowUp': (controller) => {
-        controller.previousLine(1, true);
+    'S-ArrowUp': (textEdit) => {
+        textEdit.previousLine(1, true);
     },
-    'S-ArrowDown': (controller) => {
-        controller.nextLine(1, true);
+    'S-ArrowDown': (textEdit) => {
+        textEdit.nextLine(1, true);
     },
-    'Home': (controller) => {
-        controller.moveBeginningOfLine(false);
+    'Home': (textEdit) => {
+        textEdit.moveBeginningOfLine(false);
     },
-    'End': (controller) => {
-        controller.moveEndOfLine(false)
+    'End': (textEdit) => {
+        textEdit.moveEndOfLine(false)
     },
-    'S-Home': (controller) => {
-        controller.moveBeginningOfLine(true);
+    'S-Home': (textEdit) => {
+        textEdit.moveBeginningOfLine(true);
     },
-    'S-End': (controller) => {
-        controller.moveEndOfLine(true)
+    'S-End': (textEdit) => {
+        textEdit.moveEndOfLine(true)
     },
-    'C-x': (controller) => {
-        controller.processMarkRegion(true, true);
+    'C-x': (textEdit) => {
+        textEdit.processMarkRegion(true, true);
     },
-    'C-c': (controller) => {
-        controller.processMarkRegion(false, true);
+    'C-c': (textEdit) => {
+        textEdit.processMarkRegion(false, true);
     },
-    'C-v': (controller) => {
-        controller.paste();
+    'C-v': (textEdit) => {
+        textEdit.paste();
     },
-    'Tab': (controller) => {
-        controller.insertText('\t');
+    'Tab': (textEdit) => {
+        textEdit.insertText('\t');
     },
-    'C-Space': (controller) => {
-        controller.toggleMark();
+    'C-Space': (textEdit) => {
+        textEdit.toggleMark();
     }
 };
 
 const DEFAULT_MOUSEMAP = {
-    'Down-Button0': (controller, event) => {
-        controller.startMouseSelection(event);
+    'Down-Button0': (textEdit, event) => {
+        textEdit.startMouseSelection(event);
     },
-    'Up-Button0': (controller, event) => {
-        controller.endMouseSelection(event);
+    'Up-Button0': (textEdit, event) => {
+        textEdit.endMouseSelection(event);
     },
-    'Move': (controller, event) => {
-        controller.updateMouseSelection(event);
+    'Move': (textEdit, event) => {
+        textEdit.updateMouseSelection(event);
     },
-    'Leave': (controller, event) => {
-        controller.endMouseSelection(event);
+    'Leave': (textEdit, event) => {
+        textEdit.endMouseSelection(event);
     }
 };
 
@@ -164,14 +164,110 @@ class TextMark {
     }
 }
 
-const BACKGROUND_COLOR_PROPERTY = '--grv-text-console-background-color';
-const COLOR_PROPERTY = '--grv-text-console-color';
+const TEXT_CONSOLE_STYLE = `
+:host {
+    background-color: black;
+    color: white;
+    display: block;
+    font-family: Consolas, SFMono-Regular, 'Roboto Mono', 'Courier New', Courier, monospace;
+    font-weight: normal;
+    outline: none;
+    overflow-wrap: break-word;
+    overflow-x: auto;
+    overflow-y: auto;
+    word-break: break-all;
+    white-space: pre-wrap;
+}
+
+@keyframes box-cursor-blink-animation {
+    0% {
+        background: black;
+    }
+    50% {
+        background: white;
+    }
+    100% {
+        background: black;
+    }
+}
+
+.box-cursor-blink {
+    animation-name: box-cursor-blink-animation;
+    animation-duration: 1s;
+    animation-timing-function: step-start;
+    animation-delay: 0s;
+    animation-iteration-count: infinite;
+    white-space: pre-wrap;
+}
+
+@keyframes horizontal-cursor-blink-animation {
+    0% {
+        background: black;
+    }
+    50% {
+        background: linear-gradient(0deg, white, white 10%, black 10%, black);
+    }
+    100% {
+        background: black;
+    }
+}
+
+.horizontal-cursor-blink {
+    animation-name: horizontal-cursor-blink-animation;
+    animation-duration: 1s;
+    animation-timing-function: step-start;
+    animation-delay: 0s;
+    animation-iteration-count: infinite;
+    white-space: pre-wrap;
+}
+
+@keyframes vertical-cursor-blink-animation {
+    0% {
+        background: var(--grv-text-edit-background-color);
+    }
+    50% {
+        background: linear-gradient(90deg, white, white 4px, var(--grv-text-edit-background-color) 4px, var(--grv-text-edit-background-color));
+    }
+    100% {
+        background: var(--grv-text-edit-background-color);
+    }
+}
+
+.vertical-cursor-blink {
+    animation-name: vertical-cursor-blink-animation;
+    animation-duration: 1s;
+    animation-timing-function: step-start;
+    animation-delay: 0s;
+    animation-iteration-count: infinite;
+    white-space: pre-wrap;
+}
+
+.text-edit {
+    width: 100%;
+    height: 100%;
+}
+
+.input-area {
+    opacity: 0;
+    outline: none;
+    caret-color: transparent;
+    display: inline-block;
+    /* For IME */
+    color: black;
+    background-color: white;
+}
+`
+
+const BACKGROUND_COLOR_PROPERTY = '--grv-text-edit-background-color';
+const COLOR_PROPERTY = '--grv-text-edit-color';
 
 const SPAN_ROW = 'grv--row';
 const SPAN_START_COLUMN = 'grv--start-column';
 
-class TextConsoleController {
-    constructor(view) {
+class GrvTextEdit extends HTMLElement {
+    constructor() {
+        super();
+
         this.attrCharsList = [[]];
         this.updatedRowSet = new Set([0]);
         this.currentAttribute = DEFAULT_ATTRIBUTE;
@@ -184,10 +280,13 @@ class TextConsoleController {
 
         this.inputArea = this.createInputArea();
 
-        this.view = view;
-        let viewStyle = window.getComputedStyle(view);
-        this.view.style.setProperty(BACKGROUND_COLOR_PROPERTY, viewStyle['background-color']);
-        this.view.style.setProperty(COLOR_PROPERTY, viewStyle['color']);
+        this.attachShadow({ mode: 'open', delegatesFocus: true });
+        let style = document.createElement('style');
+        style.textContent = TEXT_CONSOLE_STYLE;
+        this.shadowRoot.appendChild(style);
+        this.view = document.createElement('div');
+        this.view.classList.add('text-edit');
+        this.shadowRoot.appendChild(this.view);
         this.view.addEventListener('mousedown', (e) => {
             this.handleMouse(e, 'Down');
         });
@@ -215,11 +314,23 @@ class TextConsoleController {
         this.view.addEventListener('mouseleave', (e) => {
             this.handleMouse(e, 'Leave');
         });
-        this.refresh();
-        if (document.activeElement instanceof HTMLBodyElement) {
-            this.inputArea.focus();
-        }
 
+        this.refresh();
+    }
+
+    connectedCallback() {
+        textConsoleManager.register(this);
+        this.initStyle();
+    }
+
+    disconnectedCallback() {
+        textConsoleManager.remove(this);
+    }
+
+    initStyle() {
+        let viewStyle = window.getComputedStyle(this);
+        this.view.style.setProperty(BACKGROUND_COLOR_PROPERTY, viewStyle['background-color']);
+        this.view.style.setProperty(COLOR_PROPERTY, viewStyle['color']);
         let styleTabSize = viewStyle['tabSize'];
         if (styleTabSize === '') {
             this.view.style['tabSize'] = '8';
@@ -230,9 +341,9 @@ class TextConsoleController {
         this.isSoftTab = false;
         this.foregroundColor = viewStyle['color'];
         this.backgroundColor = viewStyle['backgroundColor'];
-
-        textConsoleManager.register(this);
     }
+
+    ///
 
     get rows() {
         return this.attrCharsList.length;
@@ -318,7 +429,6 @@ class TextConsoleController {
         if (!currentInputAreaLine) {
             return;
         }
-        this.inputArea.blur();
         currentInputAreaLine.removeChild(this.inputArea);
     }
 
@@ -806,7 +916,7 @@ class TextConsoleController {
             return;
         }
 
-        let hasFocus = document.activeElement === this.inputArea;
+        let hasFocus = document.activeElement === this;
         this.removeInputArea();
 
         let context = new UpdateContext(this.cursor, this.mark);
@@ -831,26 +941,21 @@ class TextConsoleController {
         this.updatedRowSet.clear();
 
         this.injectInputArea();
+
         if (hasFocus) {
-            this.inputArea.focus();
+            this.focus();
         }
     }
 
     refreshRow(context, row, attrChars, lineDiv) {
         let iter = new AttributedCharacterIterator(context, row, attrChars);
         let spanIter = new SpanIterator(lineDiv);
-        let currentAttr = null;
         let currentSpan = null;
         while (iter.hasNext()) {
             let [attr, c] = iter.nextAttributeAndCharacter();
-            if (currentAttr && currentAttr.equals(attr)) {
-                currentSpan.innerText += c;
-            } else {
-                currentSpan = spanIter.next();
-                attr.updateSpan(currentSpan);
-                currentSpan.innerText = c;
-                currentAttr = attr;
-            }
+            currentSpan = spanIter.next();
+            attr.updateSpan(currentSpan);
+            currentSpan.innerText = c;
         }
         spanIter.purge();
     }
@@ -935,7 +1040,8 @@ class TextConsoleController {
     handleMouse(event, eventType) {
         let eventName = this.mouseEvent2String(event, eventType);
         if (eventName === 'Down-Button0') {
-            this.inputArea.focus();
+            //            this.inputArea.focus();
+            this.focus();
         }
 
         let handler = this.mouseMap[this.mouseEvent2String(event, eventType)];
@@ -946,9 +1052,11 @@ class TextConsoleController {
     }
 }
 
+customElements.define('grv-text-edit', GrvTextEdit);
+
 class ANSIEscapeSequenceInterpreter {
-    constructor(controller) {
-        this.controller = controller;
+    constructor(textEdit) {
+        this.textEdit = textEdit;
         this.cursorSaveStack = [];
     }
 
@@ -959,7 +1067,7 @@ class ANSIEscapeSequenceInterpreter {
             if (c === '\u001b') {
                 this.processEscapeSequence(chars);
             } else {
-                this.controller.insertCharacter(c);
+                this.textEdit.insertCharacter(c);
             }
         }
     }
@@ -982,50 +1090,50 @@ class ANSIEscapeSequenceInterpreter {
         switch (c) {
             // Cursor Up
             case 'A':
-                this.controller.moveCursorFreely(
+                this.textEdit.moveCursorFreely(
                     this.cursor.column,
                     Math.max(0, this.cursor.row - (stack[0] || 1)));
                 break;
             // Cursor Down
             case 'B':
-                this.controller.moveCursorFreely(
+                this.textEdit.moveCursorFreely(
                     this.cursor.column,
                     this.cursor.row + (stack[0] || 1));
                 break;
             // Cursor Forward
             case 'C':
-                this.controller.moveCursorFreely(
+                this.textEdit.moveCursorFreely(
                     this.cursor.column + 1,
                     this.cursor.row);
                 break;
             // Cursor Back
             case 'D':
-                this.controller.moveCursorFreely(
+                this.textEdit.moveCursorFreely(
                     Math.max(0, this.cursor.column - 1),
                     this.cursor.row);
                 break;
             // Cursor Next Line
             case 'E':
-                this.controller.moveCursorFreely(
+                this.textEdit.moveCursorFreely(
                     0,
                     this.cursor.row + (stack[0] || 1));
                 break;
             // Cursor Previous Line
             case 'F':
-                this.controller.moveCursorFreely(
+                this.textEdit.moveCursorFreely(
                     0,
                     Math.max(0, this.cursor.row - (stack[0] || 1)));
                 break;
             // Cursor Horizontal Absolute
             case 'G':
-                this.controller.moveCursorFreely(
-                    (stack[0] || this.controller.cursor.column + 1) - 1,
+                this.textEdit.moveCursorFreely(
+                    (stack[0] || this.textEdit.cursor.column + 1) - 1,
                     this.cursor.row);
                 break;
             // Cursor Position
             case 'H':
             case 'f':
-                this.controller.moveCursorFreely((stack[1] || 1) - 1, (stack[0] || 1) - 1);
+                this.textEdit.moveCursorFreely((stack[1] || 1) - 1, (stack[0] || 1) - 1);
                 break;
             // Erase in Display
             case 'J':
@@ -1037,18 +1145,18 @@ class ANSIEscapeSequenceInterpreter {
                 break;
             // Select Graphic Rendition
             case 'm':
-                this.controller.attribute = this.parseAttribute(stack);
+                this.textEdit.attribute = this.parseAttribute(stack);
                 break;
             // Save Current Cursor Position
             case 's':
-                this.cursorSaveStack.push([this.controller.cursor.column, this.controller.cursor.row]);
+                this.cursorSaveStack.push([this.textEdit.cursor.column, this.textEdit.cursor.row]);
                 break;
             // Restore Saved Cursor Position
             case 'u':
                 if (this.cursorSaveStack.length > 0) {
                     let [col, row] = this.cursorSaveStack.pop();
-                    this.controller.cursor.column = col;
-                    this.controller.cursor.row = row;
+                    this.textEdit.cursor.column = col;
+                    this.textEdit.cursor.row = row;
                 }
                 break;
             default:
@@ -1086,21 +1194,21 @@ class ANSIEscapeSequenceInterpreter {
     }
 
     clearLineAfterCursor() {
-        let line = this.controller.line();
-        let col = this.controller.cursor.column;
+        let line = this.textEdit.line();
+        let col = this.textEdit.cursor.column;
         line.splice(col, line.length - col);
     }
 
     clearLineBeforeCursor() {
-        let line = this.controller.line();
-        let col = this.controller.cursor.column;
+        let line = this.textEdit.line();
+        let col = this.textEdit.cursor.column;
         let filler = new Array(col + 1).fill(DEFAULT_ATTRIBUTE.withCharacter(' '));
         line.splice(0, Math.min(col + 1, line.length), ...filler);
     }
 
     clearScreenAfterCursor() {
         this.clearLineAfterCursor();
-        let numRows = this.controller.rows;
+        let numRows = this.textEdit.rows;
         for (let i = numRows - 1; i > this.cursor.row; --i) {
             this.removeLine(i);
         }
@@ -1109,7 +1217,7 @@ class ANSIEscapeSequenceInterpreter {
     clearScreenBeforeCursor() {
         this.clearLineBeforeCursor();
         for (let i = 0; i < this.cursor.row; ++i) {
-            let line = this.controller.line(i);
+            let line = this.textEdit.line(i);
             line.splice(0, line.length);
         }
     }
@@ -1258,8 +1366,8 @@ class ANSIEscapeSequenceInterpreter {
 
         let style = {};
         if (reverse) {
-            style['color'] = backgroundColor || this.controller.backgroundColor;
-            style['background-color'] = foregroundColor || this.controller.foregroundColor;
+            style['color'] = backgroundColor || this.textEdit.backgroundColor;
+            style['background-color'] = foregroundColor || this.textEdit.foregroundColor;
         } else {
             if (foregroundColor) {
                 style['color'] = this.color2rgb(foregroundColor);
@@ -1458,15 +1566,15 @@ class SpanIterator {
 const MAIN_CURSOR_CLASS = 'grv-main-cursor';
 
 class TextCursor {
-    constructor(controller) {
-        this.controller = controller;
+    constructor(textEdit) {
+        this.textEdit = textEdit;
         this._column = 0;
         this._row = 0;
         this.cssClasses = [MAIN_CURSOR_CLASS, 'vertical-cursor-blink'];
     }
 
     get column() {
-        return Math.min(this._column, this.controller.line().length);
+        return Math.min(this._column, this.textEdit.line().length);
     }
 
     get rawColumn() {
@@ -1482,16 +1590,16 @@ class TextCursor {
             throw new RangeError('Invalid cursor column');
         }
         this._column = col;
-        this.controller.requestUpdateRow(this.row);
+        this.textEdit.requestUpdateRow(this.row);
     }
 
     set row(row) {
-        if (row < 0 || this.controller.rows <= row) {
+        if (row < 0 || this.textEdit.rows <= row) {
             throw new RangeError('Invalid cursor row');
         }
         let prevRow = this.row;
         this._row = row;
-        this.controller.requestUpdateRow(prevRow, this.row);
+        this.textEdit.requestUpdateRow(prevRow, this.row);
     }
 
     atBeginningOfLine() {
@@ -1499,7 +1607,7 @@ class TextCursor {
     }
 
     atEndOfLine() {
-        return this.column === this.controller.line().length;
+        return this.column === this.textEdit.line().length;
     }
 
     inFirstLine() {
@@ -1507,7 +1615,7 @@ class TextCursor {
     }
 
     inLastLine() {
-        return this.row === this.controller.rows - 1;
+        return this.row === this.textEdit.rows - 1;
     }
 
     atBeginningOfConsole() {
@@ -1520,8 +1628,8 @@ class TextCursor {
 }
 
 class TextLine {
-    constructor(controller, row, attrChars = []) {
-        this.controller = controller;
+    constructor(textEdit, row, attrChars = []) {
+        this.textEdit = textEdit;
         this.row = row;
         this.attributedCharacters = attrChars;
     }
@@ -1532,7 +1640,7 @@ class TextLine {
 
     splice(start, deleteCount, ...attrChars) {
         this.attributedCharacters.splice(start, deleteCount, ...attrChars);
-        this.controller.requestUpdateRow(this.row);
+        this.textEdit.requestUpdateRow(this.row);
     }
 
     slice(start = 0, end = this.attributedCharacters.length) {
@@ -1649,19 +1757,9 @@ const DEFAULT_MARK_ATTR = TextAttribute.fromStyleJson({
 ///
 
 function initText() {
-    let textConsole = document.getElementById('console');
-    let controller = new TextConsoleController(textConsole);
-    controller.insertText('Hello, world!0123\n456\u001b[31mfoobarbaz\u001b[1;32m\u001b[2;3Habc');
-/*
-    controller.insertText('Hello, world!');
-    controller.insertText('0123\n456');
-    controller.style = { 'color': 'red' };
-    controller.insertText('foobarbaz');
-    controller.style = { 'color': 'green', 'font-weight': 'bold' };
-    controller.cursor.column = 2;
-    controller.cursor.row = 1;
-    controller.insertText('abc');
-    */
+    let textEdit = document.getElementById('console');
+    textEdit.insertText('Hello, world!0123\n456\u001b[31mfoobarbaz\u001b[1;32m\u001b[2;3Habc');
+    textEdit.focus();
 }
 
 window.addEventListener('load', initText);
