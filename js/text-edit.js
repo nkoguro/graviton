@@ -252,8 +252,8 @@ const TEXT_CONSOLE_STYLE = `
 }
 
 .text-edit {
-    width: 100%;
-    height: 100%;
+    min-width: 100%;
+    min-height: 100%;
 }
 
 .input-area {
@@ -285,6 +285,7 @@ class GrvTextEdit extends HTMLElement {
         this.mark = null;
         this.mouseMap = DEFAULT_MOUSEMAP;
         this.isMouseSelecting = false;
+        this.autoScrollHandle = undefined;
 
         this.cursor = new TextCursor(this);
 
@@ -910,6 +911,11 @@ class GrvTextEdit extends HTMLElement {
     }
 
     updateMouseSelection(event) {
+        if (this.autoScrollHandle) {
+            clearTimeout(this.autoScrollHandle);
+            this.autoScrollHandle = undefined;
+        }
+
         if (!this.isMouseSelecting) {
             return;
         }
@@ -926,6 +932,28 @@ class GrvTextEdit extends HTMLElement {
         }
         for (let i = Math.min(prevRow, row); i <= Math.max(prevRow, row); ++i) {
             this.requestUpdateRow(i);
+        }
+
+        const SCROLL_LINE_PER_SEC = 10;
+        const INTERVAL_MS = 10;
+        const SCROLL_START_LINE = 1;
+        let lineHeight = this.view.firstChild.clientHeight;
+        let clientRect = this.shadowRoot.host.getBoundingClientRect();
+        let yFromTop = event.clientY;
+        let yFromBottom = (clientRect.bottom - clientRect.top) - event.clientY;
+        let deltaUnit = SCROLL_LINE_PER_SEC * lineHeight * INTERVAL_MS / 1000;
+        if (yFromTop < SCROLL_START_LINE * lineHeight) {
+            this.shadowRoot.host.scrollTop -= deltaUnit * (1 - yFromTop / (SCROLL_START_LINE * lineHeight));
+            this.autoScrollHandle = setTimeout(() => {
+                this.autoScrollHandle = undefined;
+                this.updateMouseSelection(event);
+            }, INTERVAL_MS);
+        } else if (yFromBottom < SCROLL_START_LINE * lineHeight) {
+            this.shadowRoot.host.scrollTop += deltaUnit * (1 - yFromBottom / (SCROLL_START_LINE * lineHeight));
+            this.autoScrollHandle = setTimeout(() => {
+                this.autoScrollHandle = undefined;
+                this.updateMouseSelection(event);
+            }, INTERVAL_MS);
         }
     }
 
