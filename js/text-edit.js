@@ -486,7 +486,7 @@ class GrvTextEdit extends HTMLElement {
                 return [row, lineDiv];
             }
         }
-        return [undefined, undefined];
+        return [lineDivList.length - 1, lineDivList[lineDivList.length - 1]];
     }
 
     computeColumn(row, lineDiv, clientX, clientY) {
@@ -899,10 +899,14 @@ class GrvTextEdit extends HTMLElement {
         if (col === void 0 || row === void 0) {
             return;
         }
+
+        if (!this.isMouseSelecting) {
+            this.clearMark();
+            this.isMouseSelecting = true;
+        }
+
         this.cursor.column = col;
         this.cursor.row = row;
-        this.clearMark();
-        this.isMouseSelecting = true;
     }
 
     updateMouseSelection(event) {
@@ -914,10 +918,14 @@ class GrvTextEdit extends HTMLElement {
         if (col === void 0 || row === void 0) {
             return;
         }
+        let prevRow = this.cursor.row;
         this.cursor.column = col;
         this.cursor.row = row;
         if (!this.mark) {
             this.setMark(true);
+        }
+        for (let i = Math.min(prevRow, row); i <= Math.max(prevRow, row); ++i) {
+            this.requestUpdateRow(i);
         }
     }
 
@@ -1512,7 +1520,7 @@ class LineUpdater {
             if (this.context.cursor.existsAt(i, this.row)) {
                 span.id = MAIN_CURSOR_ID;
             } else {
-                span.removeAttribute('id'); 
+                span.removeAttribute('id');
             }
             attr.updateSpan(span);
             span.innerText = c;
@@ -1646,7 +1654,7 @@ class TextCursor {
     }
 
     existsAt(col, row) {
-        return this.column === col && this.row === row; 
+        return this.column === col && this.row === row;
     }
 
     show() {
