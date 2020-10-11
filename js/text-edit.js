@@ -72,6 +72,18 @@ let DEFAULT_KEYMAP = {
     'S-End': (textEdit) => {
         textEdit.moveEndOfLine(true)
     },
+    'PageUp': (textEdit) => {
+        textEdit.pageUp(1, false);
+    },
+    'PageDown': (textEdit) => {
+        textEdit.pageDown(1, false);
+    },
+    'S-PageUp': (textEdit) => {
+        textEdit.pageUp(1, true);
+    },
+    'S-PageDown': (textEdit) => {
+        textEdit.pageDown(1, true);
+    },
     'C-x': (textEdit) => {
         textEdit.processMarkRegion(true, true);
     },
@@ -331,7 +343,7 @@ class GrvTextEdit extends HTMLElement {
 
     connectedCallback() {
         textEditRefreshController.register(this);
-        this.initStyle();
+        this.updateStyle();
     }
 
     disconnectedCallback() {
@@ -348,7 +360,7 @@ class GrvTextEdit extends HTMLElement {
         return ctx.getImageData(0, 0, 1, 1).data;
     }
 
-    initStyle() {
+    updateStyle() {
         let viewStyle = window.getComputedStyle(this);
         this.view.style.setProperty(BACKGROUND_COLOR_PROPERTY, viewStyle['background-color']);
         let color = viewStyle['color'];
@@ -366,6 +378,12 @@ class GrvTextEdit extends HTMLElement {
         this.isSoftTab = false;
         this.foregroundColor = viewStyle['color'];
         this.backgroundColor = viewStyle['backgroundColor'];
+
+        let dummyDiv = document.createElement('div');
+        dummyDiv.innerText = 'M';
+        this.view.appendChild(dummyDiv);
+        this.lineHeight = dummyDiv.clientHeight;
+        this.view.removeChild(dummyDiv);
     }
 
     ///
@@ -842,6 +860,9 @@ class GrvTextEdit extends HTMLElement {
         }
         this.cursor.row = newRow;
         this.cursor.column = this.computeColumnFromTabAwareLength(taLen, newRow);
+        for (let i = curRow; i <= newRow; ++i) {
+            this.requestUpdateRow(i);
+        }
         return newRow - curRow;
     }
 
@@ -856,6 +877,9 @@ class GrvTextEdit extends HTMLElement {
         }
         this.cursor.row = newRow;
         this.cursor.column = this.computeColumnFromTabAwareLength(taLen, newRow);
+        for (let i = newRow; i <= curRow; ++i) {
+            this.requestUpdateRow(i);
+        }
         return curRow - newRow;
     }
 
@@ -869,6 +893,26 @@ class GrvTextEdit extends HTMLElement {
         this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
 
         this.cursor.column = this.line().length;
+    }
+
+    scrollUp(n = 1) {
+        this.shadowRoot.host.scrollTop -= n * this.lineHeight;
+    }
+
+    scrollDown(n = 1) {
+        this.shadowRoot.host.scrollTop += n * this.lineHeight;
+    }
+
+    get pageSize() {
+        return Math.max(1, Math.floor(this.shadowRoot.host.clientHeight / this.lineHeight) - 1);
+    }
+
+    pageUp(n = 1, shiftMark = false) {
+        this.previousLine(n * this.pageSize, shiftMark);
+    }
+
+    pageDown(n = 1, shiftMark = false) {
+        this.nextLine(n * this.pageSize, shiftMark);
     }
 
     setMark(transient) {
@@ -937,19 +981,18 @@ class GrvTextEdit extends HTMLElement {
         const SCROLL_LINE_PER_SEC = 10;
         const INTERVAL_MS = 10;
         const SCROLL_START_LINE = 1;
-        let lineHeight = this.view.firstChild.clientHeight;
         let clientRect = this.shadowRoot.host.getBoundingClientRect();
         let yFromTop = event.clientY;
         let yFromBottom = (clientRect.bottom - clientRect.top) - event.clientY;
-        let deltaUnit = SCROLL_LINE_PER_SEC * lineHeight * INTERVAL_MS / 1000;
-        if (yFromTop < SCROLL_START_LINE * lineHeight) {
-            this.shadowRoot.host.scrollTop -= deltaUnit * (1 - yFromTop / (SCROLL_START_LINE * lineHeight));
+        let deltaUnit = SCROLL_LINE_PER_SEC * this.lineHeight * INTERVAL_MS / 1000;
+        if (yFromTop < SCROLL_START_LINE * this.lineHeight) {
+            this.shadowRoot.host.scrollTop -= deltaUnit * (1 - yFromTop / (SCROLL_START_LINE * this.lineHeight));
             this.autoScrollHandle = setTimeout(() => {
                 this.autoScrollHandle = undefined;
                 this.updateMouseSelection(event);
             }, INTERVAL_MS);
-        } else if (yFromBottom < SCROLL_START_LINE * lineHeight) {
-            this.shadowRoot.host.scrollTop += deltaUnit * (1 - yFromBottom / (SCROLL_START_LINE * lineHeight));
+        } else if (yFromBottom < SCROLL_START_LINE * this.lineHeight) {
+            this.shadowRoot.host.scrollTop += deltaUnit * (1 - yFromBottom / (SCROLL_START_LINE * this.lineHeight));
             this.autoScrollHandle = setTimeout(() => {
                 this.autoScrollHandle = undefined;
                 this.updateMouseSelection(event);
