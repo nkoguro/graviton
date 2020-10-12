@@ -185,8 +185,8 @@ const TEXT_CONSOLE_STYLE = `
     font-weight: normal;
     outline: none;
     overflow-wrap: break-word;
-    overflow-x: auto;
-    overflow-y: auto;
+    overflow-x: hidden;
+    overflow-y: hidden;
     word-break: break-all;
     white-space: pre-wrap;
 }
