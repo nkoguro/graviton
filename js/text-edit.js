@@ -706,7 +706,7 @@ class GrvTextEdit extends HTMLElement {
                 }
                 break;
             case '\b':
-                this.backwardDeleteChar();
+                this.backwardChar();
                 break;
             case '\r':
                 this.moveBeginningOfLine();
@@ -882,6 +882,7 @@ class GrvTextEdit extends HTMLElement {
         }
         return curRow - newRow;
     }
+
 
     moveBeginningOfLine(shiftMark = false) {
         this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
@@ -1178,6 +1179,11 @@ class ANSIEscapeSequenceInterpreter {
         this.parseCSIParams(chars, stack);
         let c = chars.shift();
         switch (c) {
+            case ' ':
+                if (chars.shift() === 'q') {
+                    this.processDECSCUSR(stack[0] || 0);
+                }
+                break;
             // Cursor Up
             case 'A':
                 this.textEdit.moveCursorFreely(
@@ -1249,8 +1255,126 @@ class ANSIEscapeSequenceInterpreter {
                     this.textEdit.cursor.row = row;
                 }
                 break;
+            case '?':
+                this.processCSIQuestionSequence(chars);
+                break;
+            case '>':
+                this.processCSIGTSequence(chars);
+                break;
             default:
                 return;
+        }
+    }
+
+    processCSIQuestionSequence(chars) {
+        let stack = [];
+        this.parseCSIParams(chars, stack);
+        let c = chars.shift();
+        switch (c) {
+            // DECSET
+            case 'h':
+                processDECSET(stack[0] || 0);
+                break;
+            case 'l':
+                processDECRST(stack[0] || 0);
+                break;
+            default:
+                break;
+        }
+    }
+
+    processCSIGTSequence(chars) {
+        let stack = [];
+        this.parseCSIParams(chars, stack);
+        let c = chars.shift();
+        switch (c) {
+            // DECSET
+            case 'h':
+                if (stack[0] === 5) {
+                    this.textEdit.cursor.hide();
+                }
+                break;
+            case 'l':
+                if (stack[0] === 5) {
+                    this.textEdit.cursor.show();
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    processDECSET(mode) {
+        switch (mode) {
+            // XT_CBLINK
+            case 12:
+                if (this.textEdit.cursor.mode === 'block-blink') {
+                    this.textEdit.cursor.mode = 'block';
+                } else if (this.textEdit.cursor.mode === 'underline-blink') {
+                    this.textEdit.cursor.mode = 'underline';
+                } else if (this.textEdit.cursor.mode === 'vertical-blink') {
+                    this.textEdit.cursor.mode = 'vertical';
+                }
+                break;
+            // DECTCEM
+            case 25:
+                this.textEdit.cursor.show();
+                break;
+            default:
+                break;
+        }
+    }
+
+    processDECRST(mode) {
+        switch (mode) {
+            // XT_CBLINK
+            case 12:
+                if (this.textEdit.cursor.mode === 'block') {
+                    this.textEdit.cursor.mode = 'block-blink';
+                } else if (this.textEdit.cursor.mode === 'underline') {
+                    this.textEdit.cursor.mode = 'underline-blink';
+                } else if (this.textEdit.cursor.mode === 'vertical') {
+                    this.textEdit.cursor.mode = 'vertical-blink';
+                }
+                break;
+            // DECTCEM
+            case 25:
+                this.textEdit.cursor.hide();
+                break;
+            default:
+                break;
+        }
+    }
+
+    processDECSCUSR(mode) {
+        switch (mode) {
+            // blink block cursor
+            case 0:
+            case 1:
+                this.textEdit.cursor.mode = 'block-blink';
+                break;
+            // non-blink block cursor
+            case 2:
+                this.textEdit.cursor.mode = 'block';
+                break;
+            // blink underline
+            case 3:
+                this.textEdit.cursor.mode = 'underline-blink';
+                break;
+            // non-blink underline
+            case 4:
+                this.textEdit.cursor.mode = 'underline';
+                break;
+            // blink vertical
+            case 5:
+                this.textEdit.cursor.mode = 'vertical-blink';
+                break;
+            // non-blink vertical
+            case 6:
+                this.textEdit.cursor.mode = 'vertical';
+                break;
+            default:
+                break;
         }
     }
 
