@@ -829,20 +829,21 @@ class GrvTextEdit extends HTMLElement {
                 let lines = text.split('\n');
                 for (let i = 0; i < lines.length; ++i) {
                     let enterHandler = this.keyMap.get('Enter');
-                    console.log(`lines[${i}]='${lines[i]}'`);
-                    if (lines[i] !== '') {
-                        console.log(`editable:${this.editable}`);
+                    let line = lines[i];
+                    if (line.charAt(line.length - 1) === '\r') {
+                        line = line.substring(0, line.length - 1);
+                    }
+                    if (line !== '') {
                         if (this.editable) {
-                            this.insertText(lines[i]);
+                            this.insertText(line);
                         } else {
                             this.lineEditPendingInputBuffer.push(() => {
-                                this.insertText(lines[i]);
+                                this.insertText(line);
                             });
                         }
                     }
                     if (i !== lines.length - 1 && enterHandler) {
                         let event = new KeyboardEvent('keydown');
-                        console.log(`[Enter]editable:${this.editable}`);
                         if (this.editable) {
                             enterHandler(this, event);
                         } else {
@@ -882,7 +883,7 @@ class GrvTextEdit extends HTMLElement {
                 this.backwardChar();
                 break;
             case '\r':
-                // this.moveBeginningOfLine();
+                this.moveBeginningOfLine();
                 break;
             case '\u007f':
                 this.deleteChar();
@@ -1434,10 +1435,28 @@ class ANSIEscapeSequenceInterpreter {
         let chars = Array.from(string);
         while (chars.length > 0) {
             let c = chars.shift();
-            if (c === '\u001b') {
-                this.processEscapeSequence(chars);
-            } else {
-                this.textEdit.insertCharacter(c);
+            switch (c) {
+                case '\u001b': {
+                    this.processEscapeSequence(chars);
+                    break;
+                }
+                case '\r': {
+
+                    let nc = chars.shift();
+                    if (nc === '\n') {
+                        this.textEdit.insertCharacter(nc);
+                    } else {
+                        this.textEdit.insertCharacter(c);
+                        if (nc) {
+                            this.textEdit.insertCharacter(nc);
+                        }
+                    }
+                    break;
+                }
+                default: {
+                    this.textEdit.insertCharacter(c);
+                    break;
+                }
             }
         }
     }
