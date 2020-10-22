@@ -29,7 +29,51 @@ class TextEditRefreshController {
 
 let textEditRefreshController = new TextEditRefreshController();
 
-let DEFAULT_KEYMAP = {
+class EventMap {
+    constructor(parent) {
+        this.parent = parent;
+        this.map = new Map();
+    }
+
+    static create(map = {}) {
+        let eventMap = new EventMap(null);
+        eventMap.setAll(map);
+        return eventMap;
+    }
+
+    createChild(map = {}) {
+        let eventMap = new EventMap(this);
+        eventMap.setAll(map);
+        return eventMap;
+    }
+
+    get(event) {
+        let val = this.map[event];
+        if (val === false) {
+            return undefined;
+        } else if (val) {
+            return val;
+        }
+
+        if (this.parent) {
+            return this.parent.get(event);
+        }
+
+        return undefined;
+    }
+
+    set(event, val) {
+        this.map[event] = val;
+    }
+
+    setAll(map) {
+        Object.keys(map).forEach((key) => {
+            this.map[key] = map[key];
+        });
+    }
+}
+
+let SCREEN_KEYMAP = EventMap.create({
     'Backspace': (textEdit) => {
         textEdit.backwardDeleteChar();
     },
@@ -98,23 +142,64 @@ let DEFAULT_KEYMAP = {
     },
     'C-Space': (textEdit) => {
         textEdit.toggleMark();
-    }
-};
-
-const DEFAULT_MOUSEMAP = {
-    'Down-Button0': (textEdit, event) => {
+    },
+    'Mouse-Down-Button0': (textEdit, event) => {
         textEdit.startMouseSelection(event);
     },
-    'Up-Button0': (textEdit, event) => {
+    'Mouse-Up-Button0': (textEdit, event) => {
         textEdit.endMouseSelection(event);
     },
-    'Move': (textEdit, event) => {
+    'Mouse-Move': (textEdit, event) => {
         textEdit.updateMouseSelection(event);
     },
-    'Leave': (textEdit, event) => {
+    'Mouse-Leave': (textEdit, event) => {
         textEdit.endMouseSelection(event);
     }
-};
+});
+
+const TERMINAL_KEYMAP = SCREEN_KEYMAP.createChild({
+    'Backspace': (textEdit) => {
+        textEdit.backwardDeleteCharInLine();
+    },
+    'Delete': (textEdit) => {
+        textEdit.deleteCharInLine();
+    },
+    'ArrowLeft': (textEdit) => {
+        textEdit.previousCharInLine();
+    },
+    'ArrowRight': (textEdit) => {
+        textEdit.forwardCharInLine();
+    },
+    'ArrowUp': false,
+    'ArrowDown': false,
+    'S-ArrowLeft': (textEdit) => {
+        textEdit.previousCharInLine(1, true);
+    },
+    'S-ArrowRight': (textEdit) => {
+        textEdit.forwardCharInLine(1, true);
+    },
+    'S-ArrowUp': false,
+    'S-ArrowDown': false,
+    'Home': (textEdit) => {
+        textEdit.moveStartColumn(false);
+    },
+    'S-Home': (textEdit) => {
+        textEdit.moveStartColumn(true);
+    },
+    'PageUp': false,
+    'PageDown': false,
+    'S-PageUp': false,
+    'S-PageDown': false,
+    'Enter': (textEdit) => {
+        textEdit.finishLineEdit();
+    },
+    'Mouse-Up-Button0': (textEdit, event) => {
+        textEdit.endMouseSelectionAndCopy(event);
+    },
+    'Mouse-Leave': (textEdit, event) => {
+        textEdit.endMouseSelectionAndCopy(event);
+    }
+});
 
 class TextMark {
     constructor(cursor, fragile) {
@@ -293,11 +378,15 @@ class GrvTextEdit extends HTMLElement {
         this.attrCharsList = [[]];
         this.updatedRowSet = new Set([0]);
         this.currentAttribute = DEFAULT_ATTRIBUTE;
-        this.keyMap = DEFAULT_KEYMAP;
         this.mark = null;
-        this.mouseMap = DEFAULT_MOUSEMAP;
         this.isMouseSelecting = false;
         this.autoScrollHandle = undefined;
+        this.editable = false;
+        this.lineEditStartColumn = 0;
+        this.savedCursorPosition = undefined;
+        this.savedEditable = undefined;
+        this.lastLineEditTextContent = '';
+        this.lineEditPendingInputBuffer = [];
 
         this.cursor = new TextCursor(this);
 
@@ -343,6 +432,17 @@ class GrvTextEdit extends HTMLElement {
 
     connectedCallback() {
         textEditRefreshController.register(this);
+
+        this.mode = this.getAttribute('mode');
+        switch (this.mode) {
+            case 'terminal':
+                this.keyMap = TERMINAL_KEYMAP;
+                break;
+            default:
+                this.keyMap = SCREEN_KEYMAP;
+                break;
+        }
+
         this.updateStyle();
     }
 
@@ -568,6 +668,48 @@ class GrvTextEdit extends HTMLElement {
 
     /// Editing operations
 
+    startLineEdit(prompt = '') {
+        this.insertText(prompt);
+        this.lineEditStartColumn = this.cursor.column;
+        this.editable = true;
+
+        this.processPendingInput();
+    }
+
+    processPendingInput() {
+        if (this.lineEditPendingInputBuffer.length === 0) {
+            return;
+        }
+
+        setTimeout(() => {
+            let handler = this.lineEditPendingInputBuffer.shift();
+            if (handler) {
+                handler();
+                this.processPendingInput();
+            }
+        }, 0);
+    }
+
+    enableEdit() {
+        this.editable = true;
+    }
+
+    disableEdit() {
+        this.editable = false;
+    }
+
+    finishLineEdit(insertNewline = true) {
+        this.lastLineEditTextContent = this.attrCharsList[this.cursor.row].slice(this.lineEditStartColumn).map((attrChar) => attrChar.character).join('');
+
+        if (insertNewline) {
+            this.insertNewline();
+        }
+        this.editable = false;
+
+        let event = new Event('change');
+        this.dispatchEvent(event);
+    }
+
     moveCursorFreely(col, row) {
         if (col < 0 || row < 0) {
             throw new RangeError('Invalid column or row');
@@ -654,15 +796,17 @@ class GrvTextEdit extends HTMLElement {
         } else {
             let lastLine = this.line(endRow);
             str = this.attrChars2String(lastLine.slice(0, endCol));
-            lastLine.splice(0, endCol);
+            if (remove) {
+                lastLine.splice(0, endCol);
+            }
             for (let row = endRow - 1; row >= startRow + 1; --row) {
-                str = this.attrChars2String(this.attrCharsList[row]) + str;
+                str = this.attrChars2String(this.attrCharsList[row]) + '\n' + str;
                 if (remove) {
                     this.removeLine(row);
                 }
             }
             let firstLine = this.line(startRow);
-            str = firstLine.slice(startCol) + str;
+            str = this.attrChars2String(firstLine.slice(startCol)) + '\n' + str;
             if (remove) {
                 firstLine.splice(startCol, firstLine.length - startCol);
                 this.concatLine(startRow);
@@ -681,7 +825,36 @@ class GrvTextEdit extends HTMLElement {
 
     paste() {
         navigator.clipboard.readText().then((text) => {
-            this.insertText(text);
+            if (this.mode === 'terminal') {
+                let lines = text.split('\n');
+                for (let i = 0; i < lines.length; ++i) {
+                    let enterHandler = this.keyMap.get('Enter');
+                    console.log(`lines[${i}]='${lines[i]}'`);
+                    if (lines[i] !== '') {
+                        console.log(`editable:${this.editable}`);
+                        if (this.editable) {
+                            this.insertText(lines[i]);
+                        } else {
+                            this.lineEditPendingInputBuffer.push(() => {
+                                this.insertText(lines[i]);
+                            });
+                        }
+                    }
+                    if (i !== lines.length - 1 && enterHandler) {
+                        let event = new KeyboardEvent('keydown');
+                        console.log(`[Enter]editable:${this.editable}`);
+                        if (this.editable) {
+                            enterHandler(this, event);
+                        } else {
+                            this.lineEditPendingInputBuffer.push(() => {
+                                enterHandler(this, event);
+                            });
+                        }
+                    }
+                }
+            } else if (this.editable) {
+                this.insertText(text);
+            }
         });
     }
 
@@ -709,7 +882,7 @@ class GrvTextEdit extends HTMLElement {
                 this.backwardChar();
                 break;
             case '\r':
-                this.moveBeginningOfLine();
+                // this.moveBeginningOfLine();
                 break;
             case '\u007f':
                 this.deleteChar();
@@ -757,6 +930,23 @@ class GrvTextEdit extends HTMLElement {
         return n;
     }
 
+    backwardDeleteCharInLine(n = 1) {
+        if (this.mark) {
+            this.processMarkRegion(true, false);
+            return;
+        }
+
+        for (let i = 0; i < n; ++i) {
+            if (this.cursor.column <= this.lineEditStartColumn) {
+                return i;
+            } else {
+                this.cursor.column -= 1;
+                this.line().splice(this.cursor.column, 1);
+            }
+        }
+        return n;
+    }
+
     deleteChar(n = 1) {
         if (this.mark) {
             this.processMarkRegion(true, false);
@@ -768,6 +958,22 @@ class GrvTextEdit extends HTMLElement {
                 return i;
             } else if (this.cursor.atEndOfLine()) {
                 this.concatLine();
+            } else {
+                this.line().splice(this.cursor.column, 1);
+            }
+        }
+        return n;
+    }
+
+    deleteCharInLine(n = 1) {
+        if (this.mark) {
+            this.processMarkRegion(true, false);
+            return;
+        }
+
+        for (let i = 0; i < n; ++i) {
+            if (this.cursor.atEndOfLine()) {
+                return i;
             } else {
                 this.line().splice(this.cursor.column, 1);
             }
@@ -799,6 +1005,19 @@ class GrvTextEdit extends HTMLElement {
         return n;
     }
 
+    forwardCharInLine(n = 1, shiftMark = false) {
+        this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
+
+        for (let i = 0; i < n; ++i) {
+            if (this.cursor.atEndOfLine()) {
+                return i;
+            } else {
+                this.cursor.column += 1;
+            }
+        }
+        return n;
+    }
+
     previousChar(n = 1, shiftMark = false) {
         this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
 
@@ -808,6 +1027,19 @@ class GrvTextEdit extends HTMLElement {
             } else if (this.cursor.atBeginningOfLine()) {
                 this.cursor.row -= 1;
                 this.cursor.column = this.line().length;
+            } else {
+                this.cursor.column -= 1;
+            }
+        }
+        return n;
+    }
+
+    previousCharInLine(n = 1, shiftMark = false) {
+        this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
+
+        for (let i = 0; i < n; ++i) {
+            if (this.cursor.column <= this.lineEditStartColumn) {
+                return i;
             } else {
                 this.cursor.column -= 1;
             }
@@ -890,6 +1122,12 @@ class GrvTextEdit extends HTMLElement {
         this.cursor.column = 0;
     }
 
+    moveStartColumn(shiftMark = false) {
+        this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
+
+        this.cursor.column = this.lineEditStartColumn;
+    }
+
     moveEndOfLine(shiftMark = false) {
         this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
 
@@ -951,6 +1189,9 @@ class GrvTextEdit extends HTMLElement {
             this.isMouseSelecting = true;
         }
 
+        this.savedCursorPosition = [this.cursor.column, this.cursor.row];
+        this.savedEditable = this.editable;
+
         this.cursor.column = col;
         this.cursor.row = row;
     }
@@ -1001,11 +1242,28 @@ class GrvTextEdit extends HTMLElement {
         }
     }
 
-    endMouseSelection(event, copyToClipboard) {
+    endMouseSelection(event) {
         this.isMouseSelecting = false;
-        if (copyToClipboard) {
-            this.processMarkRegion(false, true);
+
+        this.savedCursorPosition = undefined;
+        if (this.savedEditable !== undefined) {
+            this.editable = this.savedEditable;
         }
+        this.savedEditable = undefined;
+    }
+
+    endMouseSelectionAndCopy(event) {
+        this.isMouseSelecting = false;
+        if (this.savedEditable !== undefined) {
+            this.editable = this.savedEditable;
+        }
+        this.savedEditable = undefined;
+
+        this.processMarkRegion(false, true);
+        if (this.savedCursorPosition) {
+            [this.cursor.column, this.cursor.row] = this.savedCursorPosition;
+        }
+        this.savedCursorPosition = undefined;
     }
 
     /// Refresh Console element.
@@ -1054,10 +1312,19 @@ class GrvTextEdit extends HTMLElement {
     // Keyboard event
 
     handleInput(event) {
-        if (!event.isComposing) {
-            this.insertText(this.extractInputContent());
-            this.clearInputContent();
+        if (event.isComposing) {
+            return;
         }
+
+        let str = this.extractInputContent();
+        if (this.editable) {
+            this.insertText(str);
+        } else if (this.mode === 'terminal') {
+            this.lineEditPendingInputBuffer.push(() => {
+                this.insertText(str);
+            });
+        }
+        this.clearInputContent();
     }
 
     handleCompositionStart(event) {
@@ -1065,7 +1332,14 @@ class GrvTextEdit extends HTMLElement {
     }
 
     handleCompositionEnd(event) {
-        this.insertText(this.extractInputContent());
+        let str = this.extractInputContent();
+        if (this.editable) {
+            this.insertText(str);
+        } else if (this.mode === 'terminal') {
+            this.lineEditPendingInputBuffer.push(() => {
+                this.insertText(str);
+            });
+        }
         this.clearInputContent();
         this.disableInputAreaIMEStyle();
     }
@@ -1098,10 +1372,16 @@ class GrvTextEdit extends HTMLElement {
         }
 
         let eventName = this.keyboardEvent2String(keyboardEvent);
-        let handler = this.keyMap[eventName];
+        let handler = this.keyMap.get(eventName);
         if (handler) {
             keyboardEvent.preventDefault();
-            handler(this, keyboardEvent);
+            if (this.editable) {
+                handler(this, keyboardEvent);
+            } else if (this.mode === 'terminal') {
+                this.lineEditPendingInputBuffer.push(() => {
+                    handler(this, keyboardEvent);
+                });
+            }
         }
     }
 
@@ -1109,7 +1389,7 @@ class GrvTextEdit extends HTMLElement {
 
     mouseEvent2String(mouseEvent, eventType) {
         if (eventType === 'Enter' || eventType === 'Leave' || eventType === 'Move' || eventType === 'Out' || eventType === 'Over') {
-            return eventType;
+            return `Mouse-${eventType}`;
         }
 
         let keyPrefix = '';
@@ -1125,17 +1405,16 @@ class GrvTextEdit extends HTMLElement {
         if (mouseEvent.shiftKey) {
             keyPrefix += 'S-';
         }
-        return `${keyPrefix}${eventType}-Button${mouseEvent.button}`;
+        return `${keyPrefix}Mouse-${eventType}-Button${mouseEvent.button}`;
     }
 
     handleMouse(event, eventType) {
         let eventName = this.mouseEvent2String(event, eventType);
-        if (eventName === 'Down-Button0') {
-            //            this.inputArea.focus();
+        if (eventName === 'Mouse-Down-Button0') {
             this.focus();
         }
 
-        let handler = this.mouseMap[this.mouseEvent2String(event, eventType)];
+        let handler = this.keyMap.get(this.mouseEvent2String(event, eventType));
         if (handler) {
             event.preventDefault();
             handler(this, event);
@@ -1996,6 +2275,7 @@ const CURSOR_ATTRIBUTE_TABLE = {
     'block-blink': TextAttribute.fromCssClass('block-cursor-blink'),
     'block': TextAttribute.fromCssClass('block-cursor'),
     'underline-blink': TextAttribute.fromCssClass('underline-cursor-blink'),
+
     'underline': TextAttribute.fromCssClass('underline-cursor'),
     'vertical-blink': TextAttribute.fromCssClass('vertical-cursor-blink'),
     'vertical': TextAttribute.fromCssClass('vertical-cursor')
@@ -2007,6 +2287,15 @@ function initText() {
     let textEdit = document.getElementById('console');
     textEdit.cursor.mode = 'vertical-blink';
     textEdit.insertText('Hello, world!0123\n456\u001b[31mfoobarbaz\u001b[1;32m\u001b[2;3Habc');
+
+    textEdit.moveEndOfLine();
+    textEdit.insertText('\n');
+    textEdit.addEventListener('change', (event) => {
+        console.log('Input => ' + textEdit.lastLineEditTextContent);
+        textEdit.insertText(`Input => "${textEdit.lastLineEditTextContent}"\n`);
+        textEdit.startLineEdit('% ');
+    });
+    textEdit.startLineEdit('% ');
     textEdit.focus();
 }
 
