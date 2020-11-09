@@ -371,7 +371,7 @@ const CURSOR_COLOR_PROPERTY = '--grv-text-edit-cursor-color';
 const SPAN_ROW = 'grv--row';
 const SPAN_START_COLUMN = 'grv--start-column';
 
-class GrvTextEdit extends HTMLElement {
+class GrvText extends HTMLElement {
     constructor() {
         super();
 
@@ -432,17 +432,6 @@ class GrvTextEdit extends HTMLElement {
 
     connectedCallback() {
         textEditRefreshController.register(this);
-
-        this.mode = this.getAttribute('mode');
-        switch (this.mode) {
-            case 'terminal':
-                this.keyMap = TERMINAL_KEYMAP;
-                break;
-            default:
-                this.keyMap = SCREEN_KEYMAP;
-                break;
-        }
-
         this.updateStyle();
     }
 
@@ -1423,7 +1412,26 @@ class GrvTextEdit extends HTMLElement {
     }
 }
 
+class GrvTextEdit extends GrvText {
+    constructor() {
+        super();
+
+        this.mode = 'screen';
+        this.keyMap = SCREEN_KEYMAP;
+    }
+}
+
+class GrvTextTerminal extends GrvText {
+    constructor() {
+        super();
+
+        this.mode = 'terminal';
+        this.keyMap = TERMINAL_KEYMAP;
+    }
+}
+
 customElements.define('grv-text-edit', GrvTextEdit);
+customElements.define('grv-text-terminal', GrvTextTerminal);
 
 class ANSIEscapeSequenceInterpreter {
     constructor(textEdit) {
