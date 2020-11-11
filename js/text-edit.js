@@ -74,9 +74,6 @@ class EventMap {
 }
 
 let SCREEN_KEYMAP = EventMap.create({
-    '_InputText': (textEdit, text) => {
-        textEdit.insertText(text);
-    },
     'Backspace': (textEdit) => {
         textEdit.backwardDeleteChar();
     },
@@ -161,9 +158,6 @@ let SCREEN_KEYMAP = EventMap.create({
 });
 
 const TERMINAL_KEYMAP = EventMap.create({
-    '_InputText': (textEdit, text) => {
-        textEdit.insertInputText(text);
-    },
     'Backspace': (textEdit) => {
         textEdit.backwardDeleteCharInputLine();
     },
@@ -787,10 +781,7 @@ class GrvText extends HTMLElement {
 
     paste() {
         navigator.clipboard.readText().then((text) => {
-            let handler = this.keyMap.get('_InputText');
-            if (handler) {
-                handler(this, text);
-            }
+            this.handleInputText(text);
         });
     }
 
@@ -1159,16 +1150,16 @@ class GrvText extends HTMLElement {
 
     // Keyboard event
 
+    handleInputText(text) {
+    }
+
     handleInput(event) {
         if (event.isComposing) {
             return;
         }
 
         let text = this.extractInputContent();
-        let handler = this.keyMap.get('_InputText');
-        if (handler) {
-            handler(this, text);
-        }
+        this.handleInputText(text);
         this.clearInputContent();
     }
 
@@ -1178,10 +1169,7 @@ class GrvText extends HTMLElement {
 
     handleCompositionEnd(event) {
         let text = this.extractInputContent();
-        let handler = this.keyMap.get('_InputText');
-        if (handler) {
-            handler(this, text);
-        }
+        this.handleInputText(text);
         this.clearInputContent();
         this.disableInputAreaIMEStyle();
     }
@@ -1264,6 +1252,10 @@ class GrvTextEdit extends GrvText {
 
         this.mode = 'screen';
         this.keyMap = SCREEN_KEYMAP;
+    }
+
+    handleInputText(text) {
+        this.insertText(text);
     }
 }
 
@@ -1449,6 +1441,10 @@ class GrvTextTerminal extends GrvText {
                 }
             }
         }
+    }
+
+    handleInputText(text) {
+        this.insertInputText(text);
     }
 
     // Mouse selection
