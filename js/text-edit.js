@@ -1257,6 +1257,10 @@ class GrvTextEdit extends GrvText {
     handleInputText(text) {
         this.insertText(text);
     }
+
+    get textContent() {
+        return this.attrCharsList.map(this.attrChars2String).join('\n');
+    }
 }
 
 class GrvTextTerminal extends GrvText {
