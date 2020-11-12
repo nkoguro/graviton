@@ -1270,12 +1270,28 @@ class GrvTextTerminal extends GrvText {
         this.startColumn = 0;
         this.textContent = '';
         this.pendingEditHandlers = [];
+        this._pendingEditHandlerMaxLength = 1000;
         this.savedCursorPosition = undefined;
+    }
+
+    get pendingEditHandlerMaxLength() {
+        return this._pendingEditHandlerMaxLength;
+    }
+
+    set pendingEditHandlerMaxLength(len) {
+        this._pendingEditHandlerMaxLength = len;
+        this.pendingEditHandlers.splice(len);
+    }
+
+    pushEditHandler(handler) {
+        if (this.pendingEditHandlers.length < this._pendingEditHandlerMaxLength) {
+            this.pendingEditHandlers.push(handler);
+        }
     }
 
     moveBeginningOfInputLine(shiftMark = false) {
         if (!this.editable) {
-            this.pendingEditHandlers.push(() => {
+            this.pushEditHandler(() => {
                 this.moveBeginningOfInputLine(shiftMark);
             });
             return;
@@ -1288,7 +1304,7 @@ class GrvTextTerminal extends GrvText {
 
     backwardDeleteCharInputLine(n = 1) {
         if (!this.editable) {
-            this.pendingEditHandlers.push(() => {
+            this.pushEditHandler(() => {
                 this.backwardDeleteCharInputLine(n);
             });
             return;
@@ -1312,7 +1328,7 @@ class GrvTextTerminal extends GrvText {
 
     deleteCharInputLine(n = 1) {
         if (!this.editable) {
-            this.pendingEditHandlers.push(() => {
+            this.pushEditHandler(() => {
                 this.deleteCharInputLine(n);
             });
             return;
@@ -1335,7 +1351,7 @@ class GrvTextTerminal extends GrvText {
 
     forwardCharInputLine(n = 1, shiftMark = false) {
         if (!this.editable) {
-            this.pendingEditHandlers.push(() => {
+            this.pushEditHandler(() => {
                 this.forwardCharInputLine(n, shiftMark);
             });
             return;
@@ -1355,7 +1371,7 @@ class GrvTextTerminal extends GrvText {
 
     previousCharInputLine(n = 1, shiftMark = false) {
         if (!this.editable) {
-            this.pendingEditHandlers.push(() => {
+            this.pushEditHandler(() => {
                 this.previousCharInputLine(n, shiftMark);
             });
             return;
@@ -1426,7 +1442,7 @@ class GrvTextTerminal extends GrvText {
             if (this.editable) {
                 this.insertText(str);
             } else {
-                this.pendingEditHandlers.push(() => {
+                this.pushEditHandler(() => {
                     this.insertText(str);
                 });
             }
@@ -1435,7 +1451,7 @@ class GrvTextTerminal extends GrvText {
                 if (this.editable) {
                     enterHandler(this, event);
                 } else {
-                    this.pendingEditHandlers.push(() => {
+                    this.pushEditHandler(() => {
                         enterHandler(this, event);
                     });
                 }
