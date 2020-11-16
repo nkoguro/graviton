@@ -387,6 +387,50 @@ const CURSOR_COLOR_PROPERTY = '--grv-text-edit-cursor-color';
 const SPAN_ROW = 'grv--row';
 const SPAN_START_COLUMN = 'grv--start-column';
 
+class AlternateScreen {
+    constructor(grvText) {
+        this.attrCharsList = [[]];
+        this.scrollTop = 0;
+        this.cursor = new TextCursor(grvText);
+        this.grvText = grvText;
+        this.alternateScreenShown = false;
+    }
+
+    swap() {
+        this.grvText.requestAllUpdate();
+
+        let attrCharsList = this.grvText.attrCharsList;
+        let scrollTop = this.grvText.shadowRoot.host.scrollTop;
+        let cursor = this.grvText.cursor;
+
+        this.grvText.attrCharsList = this.attrCharsList;
+        this.grvText.shadowRoot.host.scrollTop = this.scrollTop;
+        this.grvText.cursor = this.cursor;
+        this.grvText.clearMark();
+        this.grvText.requestAllUpdate();
+
+        this.attrCharsList = attrCharsList;
+        this.scrollTop = scrollTop;
+        this.cursor = cursor;
+    }
+
+    show() {
+        if (this.alternateScreenShown) {
+            return;
+        }
+        this.swap();
+        this.alternateScreenShown = true;
+    }
+
+    hide() {
+        if (!this.alternateScreenShown) {
+            return;
+        }
+        this.swap();
+        this.alternateScreenShown = false;
+    }
+}
+
 class GrvText extends HTMLElement {
     constructor() {
         super();
@@ -397,8 +441,11 @@ class GrvText extends HTMLElement {
         this.mark = null;
         this.isMouseSelecting = false;
         this.autoScrollHandler = undefined;
+        this.newlineMode = true;
 
         this.cursor = new TextCursor(this);
+
+        this.alternateScreen = new AlternateScreen(this);
 
         this.inputArea = this.createInputArea();
 
@@ -526,6 +573,12 @@ class GrvText extends HTMLElement {
         rows.forEach((row) => {
             this.updatedRowSet.add(row);
         })
+    }
+
+    requestAllUpdate() {
+        for (let i = 0; i < this.rows; ++i) {
+            this.updatedRowSet.add(i);
+        }
     }
 
     line(row = this.cursor.row) {
@@ -793,7 +846,7 @@ class GrvText extends HTMLElement {
         let attr = this.currentAttribute;
         switch (c) {
             case '\n':
-                this.insertNewline();
+                this.moveCursorFreely(this.newlineMode ? 0 : this.cursor.column, this.cursor.row + 1);
                 break;
             case '\t':
                 if (this.isSoftTab) {
@@ -822,8 +875,19 @@ class GrvText extends HTMLElement {
     }
 
     insertText(text) {
-        let interpreter = new ANSIEscapeSequenceInterpreter(this);
-        interpreter.processString(text);
+        let interpreter = new ANSIEscapeSequenceInterpreter(this, (c) => { this.insertCharacter(c); });
+        let strLines = text.split('\n');
+        for (let i = 0; i < strLines.length; ++i) {
+            let str = strLines[i];
+            let isLastStr = i === strLines.length - 1;
+            if (!isLastStr && str[str.length - 1] === '\r') {
+                str = str.substring(0, str.length - 1);
+            }
+            interpreter.processString(str);
+            if (!isLastStr) {
+                this.insertNewline();
+            }
+        }
     }
 
     insertNewline() {
@@ -834,6 +898,46 @@ class GrvText extends HTMLElement {
         this.splitLine();
         this.cursor.column = 0;
         this.cursor.row += 1;
+    }
+
+    printCharacter(c) {
+        if (this.mark) {
+            this.processMarkRegion(true, false);
+        }
+
+        let attr = this.currentAttribute;
+        switch (c) {
+            case '\n':
+                this.moveCursorFreely(this.newlineMode ? 0 : this.cursor.column, this.cursor.row + 1);
+                break;
+            case '\t':
+                if (this.isSoftTab) {
+                    let spaceLen = this.computeTabSpaceWidthAt(this.cursor.column);
+                    this.line().splice(this.cursor.column, spaceLen, ...attr.withCharacters(new Array(spaceLen).fill(' ')));
+                    this.cursor.column += spaceLen;
+                } else {
+                    this.line().splice(this.cursor.column, 1, attr.withCharacter(c));
+                    ++this.cursor.column;
+                }
+                break;
+            case '\b':
+                if (this.cursor.column > 0) {
+                    this.moveCursorFreely(this.cursor.column - 1, this.cursor.row);
+                }
+                break;
+            case '\r':
+                this.moveCursorFreely(0, this.cursor.row);
+                break;
+            default:
+                this.line().splice(this.cursor.column, 1, attr.withCharacter(c));
+                ++this.cursor.column;
+                break;
+        }
+    }
+
+    printText(text) {
+        let interpreter = new ANSIEscapeSequenceInterpreter(this, (c) => { this.printCharacter(c); });
+        interpreter.processString(text);
     }
 
     backwardDeleteChar(n = 1) {
@@ -1476,7 +1580,7 @@ class GrvTextTerminal extends GrvText {
 
     endMouseSelection(event) {
         super.endMouseSelection(event);
-        
+
         this.processMarkRegion(false, true);
         if (this.savedCursorPosition) {
             [this.cursor.column, this.cursor.row] = this.savedCursorPosition;
@@ -1489,9 +1593,10 @@ customElements.define('grv-text-edit', GrvTextEdit);
 customElements.define('grv-text-terminal', GrvTextTerminal);
 
 class ANSIEscapeSequenceInterpreter {
-    constructor(textEdit) {
+    constructor(textEdit, writeChar) {
         this.textEdit = textEdit;
         this.cursorSaveStack = [];
+        this.writeChar = writeChar;
     }
 
     processString(string) {
@@ -1503,21 +1608,8 @@ class ANSIEscapeSequenceInterpreter {
                     this.processEscapeSequence(chars);
                     break;
                 }
-                case '\r': {
-
-                    let nc = chars.shift();
-                    if (nc === '\n') {
-                        this.textEdit.insertCharacter(nc);
-                    } else {
-                        this.textEdit.insertCharacter(c);
-                        if (nc) {
-                            this.textEdit.insertCharacter(nc);
-                        }
-                    }
-                    break;
-                }
                 default: {
-                    this.textEdit.insertCharacter(c);
+                    this.writeChar(c);
                     break;
                 }
             }
@@ -1634,10 +1726,10 @@ class ANSIEscapeSequenceInterpreter {
         switch (c) {
             // DECSET
             case 'h':
-                processDECSET(stack[0] || 0);
+                this.processDECSET(stack[0] || 0);
                 break;
             case 'l':
-                processDECRST(stack[0] || 0);
+                this.processDECRST(stack[0] || 0);
                 break;
             default:
                 break;
@@ -1669,6 +1761,7 @@ class ANSIEscapeSequenceInterpreter {
         switch (mode) {
             // XT_CBLINK
             case 12:
+            case 33:
                 if (this.textEdit.cursor.mode === 'block-blink') {
                     this.textEdit.cursor.mode = 'block';
                 } else if (this.textEdit.cursor.mode === 'underline-blink') {
@@ -1677,9 +1770,17 @@ class ANSIEscapeSequenceInterpreter {
                     this.textEdit.cursor.mode = 'vertical';
                 }
                 break;
+            // LNM
+            case 20:
+                this.textEdit.newlineMode = true;
+                break;
             // DECTCEM
             case 25:
                 this.textEdit.cursor.show();
+                break;
+            // XT_ALTSCRN
+            case 47:
+                this.textEdit.alternateScreen.show();
                 break;
             default:
                 break;
@@ -1690,6 +1791,7 @@ class ANSIEscapeSequenceInterpreter {
         switch (mode) {
             // XT_CBLINK
             case 12:
+            case 33:
                 if (this.textEdit.cursor.mode === 'block') {
                     this.textEdit.cursor.mode = 'block-blink';
                 } else if (this.textEdit.cursor.mode === 'underline') {
@@ -1698,9 +1800,17 @@ class ANSIEscapeSequenceInterpreter {
                     this.textEdit.cursor.mode = 'vertical-blink';
                 }
                 break;
+            // LNM
+            case 20:
+                this.textEdit.newlineMode = false;
+                break;
             // DECTCEM
             case 25:
                 this.textEdit.cursor.hide();
+                break;
+            // XT_ALTSCRN
+            case 47:
+                this.textEdit.alternateScreen.hide();
                 break;
             default:
                 break;
@@ -1777,8 +1887,9 @@ class ANSIEscapeSequenceInterpreter {
     clearLineBeforeCursor() {
         let line = this.textEdit.line();
         let col = this.textEdit.cursor.column;
-        let filler = new Array(col + 1).fill(DEFAULT_ATTRIBUTE.withCharacter(' '));
-        line.splice(0, Math.min(col + 1, line.length), ...filler);
+        let len = Math.min(col + 1, line.length);
+        let filler = new Array(len).fill(DEFAULT_ATTRIBUTE.withCharacter(' '));
+        line.splice(0, len, ...filler);
     }
 
     clearScreenAfterCursor() {
@@ -2375,6 +2486,11 @@ function initText() {
     textEdit.addEventListener('change', (event) => {
         console.log('Input => ' + textEdit.textContent);
         textEdit.insertText(`Input => "${textEdit.textContent}"\n`);
+        if (textEdit.textContent === 'show') {
+            textEdit.printText('\u001b[?47h');
+        } else if (textEdit.textContent === 'hide') {
+            textEdit.printText('\u001b[?47l');
+        }
         textEdit.startLineEdit('% ');
     });
     textEdit.startLineEdit('% ');
