@@ -940,6 +940,13 @@ class GrvText extends HTMLElement {
         interpreter.processString(text);
     }
 
+    printNewline() {
+        if (this.mark) {
+            this.processMarkRegion(true, false);
+        }
+        this.moveCursorFreely(0, this.cursor.row + 1);
+    }
+
     backwardDeleteChar(n = 1) {
         if (this.mark) {
             this.processMarkRegion(true, false);
@@ -1376,10 +1383,10 @@ class GrvTextTerminal extends GrvText {
 
         this.editable = false;
         this.startColumn = 0;
-        this.textContent = '';
         this.pendingEditHandlers = [];
         this._pendingEditHandlerMaxLength = 1000;
         this.savedCursorPosition = undefined;
+        this.lineEditHandler = undefined;
     }
 
     get pendingEditHandlerMaxLength() {
@@ -1497,9 +1504,10 @@ class GrvTextTerminal extends GrvText {
         return n;
     }
 
-    startLineEdit(prompt = '', focus = true) {
-        this.insertText(prompt);
+    startLineEdit(handler, prompt = '', focus = true) {
+        this.printText(prompt);
         this.startColumn = this.cursor.column;
+        this.lineEditHandler = handler;
         this.editable = true;
         if (focus) {
             this.focus();
@@ -1525,13 +1533,16 @@ class GrvTextTerminal extends GrvText {
     finishLineEdit() {
         this.moveEndOfLine();
 
-        this.textContent = this.attrCharsList[this.cursor.row].slice(this.startColumn).map((attrChar) => attrChar.character).join('');
+        let content = this.attrCharsList[this.cursor.row].slice(this.startColumn).map((attrChar) => attrChar.character).join('');
 
         this.editable = false;
-        this.insertNewline();
+        this.printNewline();
 
-        let event = new Event('change');
-        this.dispatchEvent(event);
+        if (this.lineEditHandler) {
+            let handler = this.lineEditHandler;
+            this.lineEditHandler = undefined;
+            handler(content);
+        }
     }
 
     insertInputText(text) {
@@ -1539,7 +1550,7 @@ class GrvTextTerminal extends GrvText {
         let enterHandler = this.keyMap.get('Enter');
         if (!enterHandler) {
             enterHandler = (controller, event) => {
-                this.insertNewline();
+                this.printNewline();
             };
         }
         for (let i = 0; i < strs.length; ++i) {
@@ -1548,10 +1559,10 @@ class GrvTextTerminal extends GrvText {
                 str = str.substring(0, str.length - 1);
             }
             if (this.editable) {
-                this.insertText(str);
+                this.printText(str);
             } else {
                 this.pushEditHandler(() => {
-                    this.insertText(str);
+                    this.printText(str);
                 });
             }
             if (i !== strs.length - 1) {
@@ -2483,18 +2494,22 @@ function initText() {
 
     textEdit.moveEndOfLine();
     textEdit.insertText('\n');
-    textEdit.addEventListener('change', (event) => {
-        console.log('Input => ' + textEdit.textContent);
-        textEdit.insertText(`Input => "${textEdit.textContent}"\n`);
-        if (textEdit.textContent === 'show') {
-            textEdit.printText('\u001b[?47h');
-        } else if (textEdit.textContent === 'hide') {
-            textEdit.printText('\u001b[?47l');
+    let handler = (content) => {
+        console.log('Input => ' + content);
+        switch (content) {
+            case 'show':
+                textEdit.printText('\u001b[?47h');
+                break;
+            case 'hide':
+                textEdit.printText('\u001b[?47l');
+                break;
+            default:
+                textEdit.printText(`Input => "${content}"\n`);
+                break;
         }
-        textEdit.startLineEdit('% ');
-    });
-    textEdit.startLineEdit('% ');
-    textEdit.focus();
+        textEdit.startLineEdit(handler, '% ');
+    };
+    textEdit.startLineEdit(handler, '% ');
 }
 
 window.addEventListener('load', initText);
