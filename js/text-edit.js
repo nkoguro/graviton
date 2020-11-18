@@ -143,6 +143,9 @@ let SCREEN_KEYMAP = EventMap.create({
     'C-Space': (textEdit) => {
         textEdit.toggleMark();
     },
+    'Insert': (textEdit) => {
+        textEdit.toggleInsertMode();
+    },
     'Mouse-Down-Button0': (textEdit, event) => {
         textEdit.startMouseSelection(event);
     },
@@ -202,6 +205,9 @@ const TERMINAL_KEYMAP = EventMap.create({
     },
     'Enter': (textEdit) => {
         textEdit.finishLineEdit();
+    },
+    'Insert': (textEdit) => {
+        textEdit.toggleInsertMode();
     },
     'Mouse-Down-Button0': (textEdit, event) => {
         textEdit.startMouseSelection(event);
@@ -442,6 +448,7 @@ class GrvText extends HTMLElement {
         this.isMouseSelecting = false;
         this.autoScrollHandler = undefined;
         this.newlineMode = true;
+        this.insertMode = true;
 
         this.cursor = new TextCursor(this);
 
@@ -719,6 +726,28 @@ class GrvText extends HTMLElement {
     }
 
     /// Editing operations
+    toggleInsertMode(changeCursorStyle = true) {
+        if (this.insertMode) {
+            this.setOverwriteMode(changeCursorStyle);
+        } else {
+            this.setInsertMode(changeCursorStyle);
+        }
+    }
+
+    setInsertMode(changeCursorStyle = true) {
+        this.insertMode = true;
+        if (changeCursorStyle) {
+            this.cursor.mode = 'vertical-blink';
+        }
+    }
+
+    setOverwriteMode(changeCursorStyle = true) {
+        this.insertMode = false;
+        if (changeCursorStyle) {
+            this.cursor.mode = 'block-blink';
+        }
+    }
+
     moveCursorFreely(col, row) {
         if (col < 0 || row < 0) {
             throw new RangeError('Invalid column or row');
@@ -1366,7 +1395,11 @@ class GrvTextEdit extends GrvText {
     }
 
     handleInputText(text) {
-        this.insertText(text);
+        if (this.insertMode) {
+            this.insertText(text);
+        } else {
+            this.printText(text);
+        }
     }
 
     get textContent() {
@@ -1559,10 +1592,18 @@ class GrvTextTerminal extends GrvText {
                 str = str.substring(0, str.length - 1);
             }
             if (this.editable) {
-                this.printText(str);
+                if (this.insertMode) {
+                    this.insertText(str);
+                } else {
+                    this.printText(str);
+                }
             } else {
                 this.pushEditHandler(() => {
-                    this.printText(str);
+                    if (this.insertMode) {
+                        this.insertText(str);
+                    } else {
+                        this.printText(str);
+                    }
                 });
             }
             if (i !== strs.length - 1) {
@@ -1770,6 +1811,10 @@ class ANSIEscapeSequenceInterpreter {
 
     processDECSET(mode) {
         switch (mode) {
+            // IRM
+            case 4:
+                this.textEdit.setInsertMode();
+                break;
             // XT_CBLINK
             case 12:
             case 33:
@@ -1800,6 +1845,10 @@ class ANSIEscapeSequenceInterpreter {
 
     processDECRST(mode) {
         switch (mode) {
+            // IRM
+            case 4:
+                this.textEdit.setOverwriteMode();
+                break;
             // XT_CBLINK
             case 12:
             case 33:
@@ -2297,6 +2346,7 @@ class TextCursor {
             throw new RangeError('Invalid cursor mode');
         }
         this._mode = mode;
+        this.textEdit.requestUpdateRow(this.row);
     }
 
     get attribute() {
