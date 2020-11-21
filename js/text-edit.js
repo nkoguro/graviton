@@ -93,40 +93,40 @@ let SCREEN_KEYMAP = EventMap.create({
         textEdit.nextLine();
     },
     'S-ArrowLeft': (textEdit) => {
-        textEdit.previousChar(1, true);
+        textEdit.previousChar();
     },
     'S-ArrowRight': (textEdit) => {
-        textEdit.forwardChar(1, true);
+        textEdit.forwardChar();
     },
     'S-ArrowUp': (textEdit) => {
-        textEdit.previousLine(1, true);
+        textEdit.previousLine();
     },
     'S-ArrowDown': (textEdit) => {
-        textEdit.nextLine(1, true);
+        textEdit.nextLine();
     },
     'Home': (textEdit) => {
-        textEdit.moveBeginningOfLine(false);
+        textEdit.moveBeginningOfLine();
     },
     'End': (textEdit) => {
-        textEdit.moveEndOfLine(false)
+        textEdit.moveEndOfLine()
     },
     'S-Home': (textEdit) => {
-        textEdit.moveBeginningOfLine(true);
+        textEdit.moveBeginningOfLine();
     },
     'S-End': (textEdit) => {
-        textEdit.moveEndOfLine(true)
+        textEdit.moveEndOfLine()
     },
     'PageUp': (textEdit) => {
-        textEdit.pageUp(1, false);
+        textEdit.pageUp();
     },
     'PageDown': (textEdit) => {
-        textEdit.pageDown(1, false);
+        textEdit.pageDown();
     },
     'S-PageUp': (textEdit) => {
-        textEdit.pageUp(1, true);
+        textEdit.pageUp();
     },
     'S-PageDown': (textEdit) => {
-        textEdit.pageDown(1, true);
+        textEdit.pageDown();
     },
     'C-x': (textEdit) => {
         textEdit.processMarkRegion(true, true);
@@ -174,22 +174,22 @@ const TERMINAL_KEYMAP = EventMap.create({
         textEdit.forwardCharInputLine();
     },
     'S-ArrowLeft': (textEdit) => {
-        textEdit.previousCharInputLine(1, true);
+        textEdit.previousCharInputLine();
     },
     'S-ArrowRight': (textEdit) => {
-        textEdit.forwardCharInputLine(1, true);
+        textEdit.forwardCharInputLine();
     },
     'Home': (textEdit) => {
-        textEdit.moveBeginningOfInputLine(false);
+        textEdit.moveBeginningOfInputLine();
     },
     'End': (textEdit) => {
-        textEdit.moveEndOfLine(false)
+        textEdit.moveEndOfLine();
     },
     'S-Home': (textEdit) => {
-        textEdit.moveBeginningOfInputLine(true);
+        textEdit.moveBeginningOfInputLine();
     },
     'S-End': (textEdit) => {
-        textEdit.moveEndOfLine(true)
+        textEdit.moveEndOfLine()
     },
     'C-x': (textEdit) => {
         textEdit.processMarkRegion(true, true);
@@ -437,6 +437,28 @@ class AlternateScreen {
     }
 }
 
+class InputContext {
+    constructor() {
+        this.isShift = false;
+        this.isAlt = false;
+        this.isControl = false;
+        this.isMeta = false;
+    }
+
+    static defaultInstance() {
+        return new InputContext();
+    }
+
+    static fromEvent(evt) {
+        let ctx = new InputContext();
+        ctx.isShift = evt.shiftKey;
+        ctx.isAlt = evt.altKey;
+        ctx.isControl = evt.ctrlKey;
+        ctx.isMeta = evt.metaKey;
+        return ctx;
+    }
+}
+
 class GrvText extends HTMLElement {
     constructor() {
         super();
@@ -449,6 +471,7 @@ class GrvText extends HTMLElement {
         this.autoScrollHandler = undefined;
         this.newlineMode = true;
         this.insertMode = true;
+        this.inputContext = InputContext.defaultInstance();
 
         this.cursor = new TextCursor(this);
 
@@ -1015,16 +1038,16 @@ class GrvText extends HTMLElement {
         return n;
     }
 
-    updateMarkBeforeCursorMovementIfNeeded(shiftMark) {
-        if (shiftMark && !this.mark) {
+    updateMarkBeforeCursorMovementIfNeeded() {
+        if (this.inputContext.isShift && !this.mark) {
             this.setMark(true);
-        } else if (!shiftMark && this.mark && this.mark.isFragile) {
+        } else if (!this.inputContext.isShift && this.mark && this.mark.isFragile) {
             this.clearMark();
         }
     }
 
-    forwardChar(n = 1, shiftMark = false) {
-        this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
+    forwardChar(n = 1) {
+        this.updateMarkBeforeCursorMovementIfNeeded();
 
         for (let i = 0; i < n; ++i) {
             if (this.cursor.atEndOfConsole()) {
@@ -1039,8 +1062,8 @@ class GrvText extends HTMLElement {
         return n;
     }
 
-    previousChar(n = 1, shiftMark = false) {
-        this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
+    previousChar(n = 1) {
+        this.updateMarkBeforeCursorMovementIfNeeded();
 
         for (let i = 0; i < n; ++i) {
             if (this.cursor.atBeginningOfConsole()) {
@@ -1089,8 +1112,8 @@ class GrvText extends HTMLElement {
         return i + (taLen - l);
     }
 
-    nextLine(n = 1, shiftMark = false) {
-        this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
+    nextLine(n = 1) {
+        this.updateMarkBeforeCursorMovementIfNeeded();
 
         let curRow = this.cursor.row;
         let taLen = this.computeTabAwareLengthFromColumn(this.cursor.rawColumn, curRow);
@@ -1106,8 +1129,8 @@ class GrvText extends HTMLElement {
         return newRow - curRow;
     }
 
-    previousLine(n = 1, shiftMark = false) {
-        this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
+    previousLine(n = 1) {
+        this.updateMarkBeforeCursorMovementIfNeeded();
 
         let curRow = this.cursor.row;
         let taLen = this.computeTabAwareLengthFromColumn(this.cursor.rawColumn, curRow);
@@ -1124,14 +1147,14 @@ class GrvText extends HTMLElement {
     }
 
 
-    moveBeginningOfLine(shiftMark = false) {
-        this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
+    moveBeginningOfLine() {
+        this.updateMarkBeforeCursorMovementIfNeeded();
 
         this.cursor.column = 0;
     }
 
-    moveEndOfLine(shiftMark = false) {
-        this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
+    moveEndOfLine() {
+        this.updateMarkBeforeCursorMovementIfNeeded();
 
         this.cursor.column = this.line().length;
     }
@@ -1148,12 +1171,12 @@ class GrvText extends HTMLElement {
         return Math.max(1, Math.floor(this.shadowRoot.host.clientHeight / this.lineHeight) - 1);
     }
 
-    pageUp(n = 1, shiftMark = false) {
-        this.previousLine(n * this.pageSize, shiftMark);
+    pageUp(n = 1) {
+        this.previousLine(n * this.pageSize);
     }
 
-    pageDown(n = 1, shiftMark = false) {
-        this.nextLine(n * this.pageSize, shiftMark);
+    pageDown(n = 1) {
+        this.nextLine(n * this.pageSize);
     }
 
     setMark(transient) {
@@ -1345,7 +1368,13 @@ class GrvText extends HTMLElement {
         let handler = this.keyMap.get(eventName);
         if (handler) {
             keyboardEvent.preventDefault();
-            handler(this, keyboardEvent);
+            let savedContext = this.inputContext;
+            try {
+                this.inputContext = InputContext.fromEvent(keyboardEvent);
+                handler(this, keyboardEvent);    
+            } finally {
+                this.inputContext = savedContext;
+            }
         }
     }
 
@@ -1381,7 +1410,13 @@ class GrvText extends HTMLElement {
         let handler = this.keyMap.get(this.mouseEvent2String(event, eventType));
         if (handler) {
             event.preventDefault();
-            handler(this, event);
+            let savedContext = this.inputContext;
+            try {
+                this.inputContext = InputContext.fromEvent(event);
+                handler(this, event);
+            } finally {
+                this.inputContext = savedContext;
+            }
         }
     }
 }
@@ -1433,19 +1468,28 @@ class GrvTextTerminal extends GrvText {
 
     pushEditHandler(handler) {
         if (this.pendingEditHandlers.length < this._pendingEditHandlerMaxLength) {
-            this.pendingEditHandlers.push(handler);
+            let currentContext = this.inputContext;
+            this.pendingEditHandlers.push(() => {
+                let savedContext = this.inputContext;
+                try {
+                    this.inputContext = currentContext;
+                    handler();
+                } finally {
+                    this.inputContext = savedContext;
+                }
+            });
         }
     }
 
-    moveBeginningOfInputLine(shiftMark = false) {
+    moveBeginningOfInputLine() {
         if (!this.editable) {
             this.pushEditHandler(() => {
-                this.moveBeginningOfInputLine(shiftMark);
+                this.moveBeginningOfInputLine();
             });
             return;
         }
 
-        this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
+        this.updateMarkBeforeCursorMovementIfNeeded();
 
         this.cursor.column = this.startColumn;
     }
@@ -1497,15 +1541,15 @@ class GrvTextTerminal extends GrvText {
         return n;
     }
 
-    forwardCharInputLine(n = 1, shiftMark = false) {
+    forwardCharInputLine(n = 1) {
         if (!this.editable) {
             this.pushEditHandler(() => {
-                this.forwardCharInputLine(n, shiftMark);
+                this.forwardCharInputLine(n);
             });
             return;
         }
 
-        this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
+        this.updateMarkBeforeCursorMovementIfNeeded();
 
         for (let i = 0; i < n; ++i) {
             if (this.cursor.atEndOfLine()) {
@@ -1517,15 +1561,15 @@ class GrvTextTerminal extends GrvText {
         return n;
     }
 
-    previousCharInputLine(n = 1, shiftMark = false) {
+    previousCharInputLine(n = 1) {
         if (!this.editable) {
             this.pushEditHandler(() => {
-                this.previousCharInputLine(n, shiftMark);
+                this.previousCharInputLine(n);
             });
             return;
         }
 
-        this.updateMarkBeforeCursorMovementIfNeeded(shiftMark);
+        this.updateMarkBeforeCursorMovementIfNeeded();
 
         for (let i = 0; i < n; ++i) {
             if (this.cursor.column <= this.startColumn) {
