@@ -184,8 +184,12 @@
                        (html:head
                         (html:meta :charset "UTF-8")
                         (html:link :rel "icon" :href "data:png;base64,")
-                        (html:title (client-title)))
-                       (apply html:body :style (format "background-color: ~a" (client-background-color))
+                        (html:title (client-title))
+                       (apply html:body :style (string-join
+                                                 (append
+                                                   '("overflow: hidden")
+                                                   (list (format "background-color: ~a" (client-background-color))))
+                                                 ";")
                               (append
                                 (map (lambda (js-path)
                                        (html:script :src js-path))
@@ -387,7 +391,8 @@
                    (url . ,url)
                    (background-color . ,(client-background-color))
                    (open-dev-tools . ,(player-open-dev-tools?))
-                   (show . ,(player-show?))))
+                   (show . ,(player-show?))
+                   (resizable . ,(player-resizable?))))
          (config-file (receive (out filename) (sys-mkstemp (build-path (temporary-directory) "grvcfg"))
                         (construct-json config out)
                         (close-port out)
@@ -404,6 +409,7 @@
    (open-dev-tools? :init-value #f)
    (close-on-exit? :init-value #t)
    (show? :init-value #t)
+   (resizable? :init-value #f)
    (stdout-filename :init-form (build-path (temporary-directory) (format "graviton-player.~a.out" (sys-getpid))))
    (stderr-filename :init-form (build-path (temporary-directory) (format "graviton-player.~a.err" (sys-getpid))))))
 
@@ -439,6 +445,9 @@
 (define (player-show?)
   (slot-ref *client-config* 'show?))
 
+(define (player-resizable?)
+  (slot-ref *client-config* 'resizable?))
+
 (define (player-stdout-filename)
   (slot-ref *client-config* 'stdout-filename))
 
@@ -451,6 +460,7 @@
                     title
                     background-color
                     show?
+                    resizable?
                     stdout-filename
                     stderr-filename)
   (set! *client-config* (config-with-params <player-config>
@@ -459,6 +469,7 @@
                           title
                           background-color
                           show?
+                          resizable?
                           stdout-filename
                           stderr-filename)))
 

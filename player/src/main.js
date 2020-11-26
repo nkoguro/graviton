@@ -27,7 +27,10 @@ function createWindow() {
         height: config['height'],
         useContentSize: true,
         backgroundColor: config['background-color'],
-        resizable: false,
+        // BrowserWindow's actual height will be incorrect if resizable = false,
+        // even though useContentSize = true. So set true here and set the
+        // actual value later.
+        resizable: true,
         show: false,
         webPreferences: {
             preload: path.join(__dirname, 'renderer.js'),
@@ -37,6 +40,7 @@ function createWindow() {
     });
     win.once('ready-to-show', () => {
         if (config['show']) {
+            win.resizable = config['resizable'];
             win.show();
         }
     });
