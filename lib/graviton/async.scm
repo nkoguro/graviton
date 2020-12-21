@@ -31,7 +31,6 @@
 ;;;
 
 (define-module graviton.async
-  (use control.thread-pool)
   (use data.queue)
   (use gauche.hook)
   (use gauche.parameter)
@@ -39,7 +38,6 @@
   (use gauche.threads)
   (use graviton.app)
   (use graviton.misc)
-  (use graviton.scheduler)
   (use srfi-1)
   (use srfi-42)
   (use util.match)
