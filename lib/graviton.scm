@@ -56,7 +56,6 @@
   (use graviton.event)
   (use graviton.jsbridge)
   (use graviton.misc)
-  (use graviton.scheduler)
   (use makiki)
   (use rfc.base64)
   (use rfc.json)
@@ -71,7 +70,10 @@
   (use text.tree)
   (use util.match)
 
+  (extend graviton.async graviton.browser-objects graviton.event graviton.canvas graviton.audio)
+
   (export grv-start
+          grv-started?
           grv-begin
           grv-exit
 
@@ -79,50 +81,32 @@
           grv-browser
           grv-log-config
 
-          current-pool
-          task-queue-worker-timeout
-          task-queue-worker-timeout-set!
-
-          async-apply
-          async
-
           with-jstransaction
-
-          client-window
-          client-window-size
-          client-close
-
-          app-start-hook
-          app-close-hook
-
-          current-task-queue
-          async-task-queue
-          default-async-task-queue
-
-          define-action
 
           define-url-path
 
           resource-url
 
-          add-jsevent-listener!
-          remove-jsevent-listener!
+          define-document-content
 
-          <jsevent>
-          fire-event
-          next-event
-          all-events
-          event-stream-closed?
-          event-stream-close
-          capture-jsevent
-          set-frame-interval!
-          frame-sync))
+          make-jsobject
+          ))
 
 (select-module graviton)
 
 ;;;
 
 (log-open #t)
+
+;;;
+
+(define *load-css-list* '())
+
+(define (load-css css-path)
+  (push! *load-css-list* css-path))
+
+(define (load-css-list)
+  (reverse *load-css-list*))
 
 ;;;
 
@@ -177,26 +161,40 @@
 
 ;;;
 
+(load-css "/graviton/graviton.css")
+
+(define document-body-proc
+  (lambda ()
+    (html:body)))
+
+(define-syntax define-document-content
+  (syntax-rules ()
+    ((_ body)
+     (set! document-body-proc
+           (lambda ()
+             body)))))
+
 (define-http-handler "/"
   (lambda (req app)
-    (respond/ok req (tree->string
-                      (html:html
-                       (html:head
-                        (html:meta :charset "UTF-8")
-                        (html:link :rel "icon" :href "data:png;base64,")
-                        (html:title (client-title))
-                       (apply html:body :style (string-join
-                                                 (append
-                                                   '("overflow: hidden")
-                                                   (list (format "background-color: ~a" (client-background-color))))
-                                                 ";")
-                              (append
-                                (map (lambda (js-path)
-                                       (html:script :src js-path))
-                                     (load-js-list))
-                                (map (lambda (js-mod)
-                                       (html:script :type "module" :src js-mod))
-                                     (js-main-module-absolute-paths)))))))))
+    (guard (e (else (report-error e)
+                    (exit 70)))
+      (respond/ok req (tree->string
+                        (html:html
+                         (html:head
+                          (html:meta :charset "UTF-8")
+                          (html:link :rel "icon" :href "data:png;base64,")
+                          (map (lambda (css)
+                                 (html:link :rel "stylesheet" :type "text/css" :href css))
+                               (load-css-list))
+                          (append
+                            (map (lambda (js-path)
+                                   (html:script :src js-path))
+                                 (load-js-list))
+                            (map (lambda (js-mod)
+                                   (html:script :type "module" :src js-mod))
+                                 (js-main-module-absolute-paths)))
+                          (html:title (client-title)))
+                         (document-body-proc)))))))
 
 
 (define *initial-thunk* #f)
@@ -215,8 +213,7 @@
 (define-action "startApplication" ()
   (when *initial-thunk*
     (run-hook *init-hook*)
-    (let1 exit-code (*initial-thunk*)
-      (app-exit (if (integer? exit-code) exit-code 70)))))
+    (*initial-thunk*)))
 
 (define (start-websocket-dispatcher! sock in out)
   (thread-start!
@@ -230,11 +227,15 @@
             (close-output-port out)
             (connection-close sock)
             (connection-shutdown sock 'both)
-            (when (client-close-on-exit?)
+            (when (eq? (client-type) 'player)
               (terminate-server-loop *control-channel* exit-code))))))))
 
 (define-http-handler "/s"
   (lambda (req app)
+    ;; Set TCP_NODELAY to reduce latency if possible.
+    (when (and (global-variable-bound? (current-module) 'IPPROTO_TCP)
+               (global-variable-bound? (current-module) 'TCP_NODELAY))
+      (socket-setsockopt (request-socket req) IPPROTO_TCP TCP_NODELAY 1))
     (let ((in (request-iport req))
           (out (request-oport req)))
       (let-params req ((upgrade "h")
@@ -266,90 +267,16 @@
                     (else
                      (respond/ng req 400)))))))
 
-(define *resource-table-atom* (atom (make-hash-table 'equal?)))
-
-(define (register-resource! content-type data)
-  (atomic *resource-table-atom*
-    (lambda (tbl)
-      (let loop ()
-        (let1 id (number->string (random-integer #xffffffff) 36)
-          (cond
-            ((hash-table-contains? tbl id)
-             (loop))
-            (else
-             (hash-table-put! tbl id (cons content-type data))
-             (format "/r?id=~a" id))))))))
-
-(define (estimate-content-type filename)
-  (let1 ext (string-downcase (path-extension filename))
-    (cond
-      ((member ext '("png"))
-       "image/png")
-      ((member ext '("jpg" "jpeg"))
-       "image/jpeg")
-      ((member ext '("gif"))
-       "image/gif")
-      ((member ext '("bmp"))
-       "image/bmp")
-      ((member ext '("mp3"))
-       "audio/mpeg")
-      ((member ext '("m4a"))
-       "audio/aac")
-      ((member ext '("ogg"))
-       "audio/ogg")
-      ((member ext '("mid" "midi"))
-       "audio/midi")
-      ((member ext '("wav"))
-       "audio/wav")
-      ((member ext '("js" "mjs"))
-       "text/javascript")
-      (else
-       #f))))
-
-(define-method resource-url ((filename <string>) :key (content-type #f))
-  (let1 data (call-with-input-file filename port->uvector)
-    (register-resource! (or content-type
-                            (estimate-content-type filename))
-                        data)))
-
-(define-http-handler "/r"
-  (lambda (req app)
-    (let-params req ((id "q"))
-                (atomic *resource-table-atom*
-                  (lambda (tbl)
-                    (match-let1 (content-type . data) (hash-table-get tbl id (cons #f #f))
-                      (cond
-                        ((and content-type data)
-                         (hash-table-delete! tbl id)
-                         (respond/ok req data :content-type content-type))
-                        (else
-                         (respond/ng req 404)))))))))
-
 ;;;
 
-(define-class <client-window> (<jsobject>)
-  ())
 
-(define-application-context-slot client-window #f)
+(define-method make-jsobject ((jsobject-class <jsobject-meta>) :rest args)
+  (apply make-jsobject (~ jsobject-class'jsclass) args))
 
-(define (client-window)
-  (application-context-slot-atomic-update! 'client-window
-    (lambda (win)
-      (unless win
-        (set! win (make <client-window>))
-        (jslet ((win*::object* win))
-            (set! win*.value window)))
-      win)))
-
-(define (client-window-size)
-  (delay (vector->list
-           (force
-             (jslet/result ()
-               (result (vector window.innerWidth window.innerHeight)))))))
-
-(define (client-close)
-  (jslet ()
-    (Graviton.closeConnection)))
+(define-method make-jsobject ((jsclass <string>) :rest args)
+  (jslet/result ((jsclass::string)
+                 (args (list->vector args)))
+    (result (Graviton.makeJSObject jsclass args))))
 
 ;;;
 
@@ -389,7 +316,6 @@
          (config `((width . ,(list-ref win-size 0))
                    (height . ,(list-ref win-size 1))
                    (url . ,url)
-                   (background-color . ,(client-background-color))
                    (open-dev-tools . ,(player-open-dev-tools?))
                    (show . ,(player-show?))
                    (resizable . ,(player-resizable?))))
@@ -430,9 +356,6 @@
 (define (client-title)
   (slot-ref *client-config* 'title))
 
-(define (client-background-color)
-  (slot-ref *client-config* 'background-color))
-
 (define (client-close-on-exit?)
   (slot-ref *client-config* 'close-on-exit?))
 
@@ -458,7 +381,6 @@
                     window-size
                     open-dev-tools?
                     title
-                    background-color
                     show?
                     resizable?
                     stdout-filename
@@ -467,14 +389,13 @@
                           window-size
                           open-dev-tools?
                           title
-                          background-color
                           show?
                           resizable?
                           stdout-filename
                           stderr-filename)))
 
-(define (grv-browser :key port title background-color)
-  (set! *client-config* (config-with-params <browser-config> port title background-color)))
+(define (grv-browser :key port title)
+  (set! *client-config* (config-with-params <browser-config> port title)))
 
 (define (grv-start thunk)
   (set! *initial-thunk* thunk)
@@ -484,21 +405,17 @@
                        :error-log (error-log-drain)
                        :control-channel *control-channel*
                        :startup-callback (lambda (socks)
-                                           (run-scheduler)
                                            (case (client-type)
                                              ((player)
                                               (invoke-player (car socks)))
                                              ((browser)
                                               (log-info "Graviton server is running at")
-                                              (log-info "~a" (server-url (first socks))))))
-                       :shutdown-callback (lambda ()
-                                            (shutdown-scheduler!)))))
+                                              (log-info "~a" (server-url (first socks)))))))))
 
 (define-syntax grv-begin
   (syntax-rules ()
     ((_ expr ...)
      (grv-start (lambda () expr ...)))))
 
-(define (grv-exit code)
-  (app-exit code)
-  (task-quit))
+(define (grv-exit :optional (code 0))
+  (app-exit code))

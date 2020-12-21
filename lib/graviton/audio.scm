@@ -1,5 +1,5 @@
 ;;;
-;;; audio.scm - Graviton Audio Library
+;;; audio.scm - WebAudio API
 ;;;
 ;;;   Copyright (c) 2020 KOGURO, Naoki (naoki@koguro.net)
 ;;;   All rights reserved.
@@ -31,156 +31,351 @@
 ;;;
 
 (define-module graviton.audio
-  (use file.util)
-  (use gauche.uvector)
-  (use graviton)
-  (use graviton.config)
+  (use graviton.app)
+  (use graviton.browser-objects)
   (use graviton.jsbridge)
-  (use util.match)
 
-  (export load-audio
-          play-audio
-          pause-audio
-          play-wave
-          play-rest
-          load-pcm
-          play-pcm))
+  (export <base-audio-context>
+          <audio-context>
+          <offline-audio-context>
+          <audio-node>
+          <analyser-node>
+          <audio-buffer>
+          <audio-scheduled-source-node>
+          <audio-buffer-source-node>
+          <audio-destination-node>
+          <audio-listener>
+          <audio-param>
+          <biquad-filter-node>
+          <channel-merger-node>
+          <channel-splitter-node>
+          <constant-source-node>
+          <convolver-node>
+          <delay-node>
+          <dynamic-compressor-node>
+          <gain-node>
+          <iir-filter-node>
+          <media-element-audio-source-node>
+          <media-stream-audio-destination-node>
+          <media-stream-audio-source-node>
+          <offline-audio-completion-event>
+          <oscillator-node>
+          <panner-node>
+          <periodic-wave>
+          <stereo-panner-node>
+          <wave-shaper-node>
+          audio-context))
 
 (select-module graviton.audio)
 
-(import-js ("graviton/audio.mjs" :only (audioContext audioChannels)))
+(import-js ("graviton/audio.mjs" :only (audioContext)))
 
-(define-jsenum oscillator-type-enum
-  (sine "sine")
-  (square "square")
-  (sawtooth "sawtooth")
-  (triangle "triangle"))
+(define-class <base-audio-context> (<event-target>)
+  ((current-time :jsproperty "currentTime"
+                 :read-only? #t)
+   (destination :jsproperty "destination"
+                :read-only? #t
+                :cacheable? #t)
+   (listener :jsproperty "listener"
+             :read-only? #t
+             :cacheable? #t)
+   (sample-rate :jsproperty "sampleRate"
+                :read-only? #t
+                :cacheable? #t)
+   (state :jsproperty "state"
+          :read-only? #t))
+  :jsclass "BaseAudioContext")
 
-(define-class <audio-media-element-node> (<jsobject>)
-  ((duration :init-value #f)))
+(define-automatic-jsobject-methods <base-audio-context>
+  ("createAnalyser" :result)
+  ("createBiquadFilter" :result)
+  ("createBuffer" :result)
+  ("createBufferSource" :result)
+  ("createChannelMerger" :result)
+  ("createChannelSplitter" :result)
+  ("createConvolver" :result)
+  ("createDelay" :result)
+  ("createDynamicCompressor" :result)
+  ("createGain" :result)
+  ("createIIRFilter" :result)
+  ("createOscillator" :result)
+  ("createPanner" :result)
+  ("createPeriodicWave" :result)
+  ("createWaveShaper" :result)
+  "decodeAudioData")
 
-(define (load-audio filename :key (content-type #f))
-  (let1 node (make <audio-media-element-node>)
-    (delay (let1 duration
-               (force
-                 (jslet/result ((node*::object* node)
-                                (url::string (resource-url filename :content-type content-type)))
-                   (let ((audio (make Audio url)))
-                     (set! audio.onloadedmetadata (lambda ()
-                                                    (let ((source-node (audioContext.createMediaElementSource audio)))
-                                                      (set! node*.value source-node)
-                                                      (source-node.connect audioContext.destination)
-                                                      (result audio.duration))))
-                     (set! audio.onstalled (lambda ()
-                                             (raise (make Error "Load audio failed.")))))))
-             (slot-set! node 'duration duration)
-             node))))
+(define-class <audio-context> (<base-audio-context>)
+  ((base-latency :jsproperty "baseLatency")
+   (output-latency :jsproperty "outputLatency"))
+  :jsclass "AudioContext")
 
-(define (play-audio audio)
-  (jslet ((audio::object))
-    (audio.mediaElement.play)))
+(define-automatic-jsobject-methods <audio-context>
+  ("close" :result)
+  ("createMediaElementSource" :result)
+  ("createMediaStreamSource" :result)
+  ("createMediaStreamDestination" :result)
+  ("resume" :result)
+  ("suspend" :result))
 
-(define (pause-audio audio)
-  (jslet ((audio::object))
-    (audio.mediaElement.pause)))
+(define-class <offline-audio-context> (<base-audio-context>)
+  ((length :jsproperty "length"
+           :read-only? #t))
+  :jsclass "OfflineAudioContext")
+
+(define-automatic-jsobject-methods <offline-audio-context>
+  ("suspend" :result)
+  "startRendering")
+
+(define-class <audio-node> (<event-target>)
+  ((context :jsproperty "context"
+            :read-only? #t)
+   (number-of-inputs :jsproperty "numberOfInputs"
+                     :read-only? #t)
+   (number-of-outputs :jsproperty "numberOfOutputs"
+                      :read-only? #t)
+   (channel-count :jsproperty "channelCount")
+   (channel-count-mode :jsproperty "channelCountMode")
+   (channel-interpretation :jsproperty "channelInterpretation"))
+  :jsclass "AudioNode")
+
+(define-automatic-jsobject-methods <audio-node>
+  ("connect" :result)
+  "disconnect")
+
+(define-class <analyser-node> (<audio-node>)
+  ((fft-size :jsproperty "fftSize")
+   (frequency-bin-count :jsproperty "frequencyBinCount"
+                        :read-only? #t)
+   (min-decibels :jsproperty "minDecibels")
+   (max-decibels :jsproperty "maxDecibels")
+   (smoothing-time-constant :jsproperty "smoothingTimeConstant"))
+  :jsclass "AnalyserNode")
+
+(define-automatic-jsobject-methods <analyser-node>
+  ("getFloatFrequencyData" :result)
+  ("getByteFrequencyData" :result)
+  ("getFloatTimeDomainData" :result)
+  ("getByteTimeDomainData" :result))
 
 (define-class <audio-buffer> (<jsobject>)
-  ((sample-rate)
-   (length)
-   (duration)
-   (number-of-channels)))
+  ((sample-rate :jsproperty "sampleRate"
+                :read-only? #t)
+   (length :jsproperty "length"
+           :read-only? #t)
+   (duration :jsproperty "duration"
+             :read-only? #t)
+   (number-of-channels :jsproperty "numberOfChannels"
+                       :read-only? #t))
+  :jsclass "AudioBuffer")
 
-(define (load-pcm filename :key (content-type #f))
-  (let1 pcm (make <audio-buffer>)
-    (delay (match-let1 #(sample-rate len duration num-of-channels)
-               (force
-                 (jslet/result ((pcm*::object* pcm)
-                                (url::string (resource-url filename :content-type content-type)))
-                   (let ((req (make XMLHttpRequest)))
-                     (req.open "GET" url #t)
-                     (set! req.responseType "arraybuffer")
-                     (set! req.onload (lambda ()
-                                        (cond
-                                          ((equal? req.status 200)
-                                           (let ((buf req.response))
-                                             ((ref (audioContext.decodeAudioData buf) 'then)
-                                              (lambda (decoded-data)
-                                                (set! pcm*.value decoded-data)
-                                                (result (vector decoded-data.sampleRate
-                                                                decoded-data.length
-                                                                decoded-data.duration
-                                                                decoded-data.numberOfChannels)))
-                                              (lambda (reason)
-                                                (raise (make Error reason))))))
-                                          (else
-                                           (raise (make Error (+ "Load PCM failed. (status:" req.status ")")))))))
-                     (req.send))))
-             (slot-set! pcm 'sample-rate sample-rate)
-             (slot-set! pcm 'length len)
-             (slot-set! pcm 'duration duration)
-             (slot-set! pcm 'number-of-channels num-of-channels)
-             pcm))))
+(define-automatic-jsobject-methods <audio-buffer>
+  ("getChannelData" :result)
+  "copyFromChannel")
 
-(define-method play-wave (channel-num type (freq <real>) len :optional (gain 1.0))
-  (play-wave channel-num type (f64vector freq) len gain))
+(define-class <audio-scheduled-source-node> (<audio-node>)
+  ()
+  :jsclass "AudioScheduledSourceNode")
 
-(define-method play-wave (channel-num type (freqs <f64vector>) len :optional (gain 1.0))
-  (jslet ((channel-num::u8)
-          (type::oscillator-type-enum)
-          (freqs::f64vector)
-          (len::f64)
-          (gain::f64))
-    (let ((channel (ref audioChannels channel-num))
-          (start-time (Math.max channel.lastPlaySec audioContext.currentTime))
-          (end-time (+ start-time len)))
-      (dotimes (i freqs.length)
-        (let ((oscillator-node (make OscillatorNode audioContext))
-              (gain-node (audioContext.createGain)))
-          (set! oscillator-node.type type)
-          (set! oscillator-node.frequency.value (ref freqs i))
-          (set! gain-node.gain.value gain)
-          (oscillator-node.connect gain-node)
-          (gain-node.connect audioContext.destination)
-          (oscillator-node.start start-time)
-          (oscillator-node.stop end-time)))
-      (set! channel.lastPlaySec end-time))))
+(define-automatic-jsobject-methods <audio-scheduled-source-node>
+  "start"
+  "stop")
 
-(define (play-rest channel-num len)
-  (jslet ((channel-num::u8)
-          (len::f64))
-    (let ((channel (ref audioChannels channel-num))
-          (start-time (Math.max channel.lastPlaySec audioContext.currentTime))
-          (end-time (+ start-time len)))
-      (set! channel.lastPlaySec end-time))))
+(define-class <audio-buffer-source-node> (<audio-scheduled-source-node>)
+  ((buffer :jsproperty "buffer")
+   (detune :jsproperty "detune")
+   (loop :jsproperty "loop")
+   (loop-start :jsproperty "loopStart")
+   (loop-end :jsproperty "loopEnd")
+   (playback-rate :jsproperty "playbackRate"))
+  :jsclass "AudioBufferSourceNode")
 
-(define (play-pcm channel-num pcm-data :optional (detune 0) (playback-rate 1.0) (loop-range #f) (len #f) (gain 1.0))
-  (jslet ((channel-num::u8)
-          (pcm-data::object)
-          (detune::f64)
-          (playback-rate::f64)
-          (loop?::boolean (if loop-range #t #f))
-          (loop-start::f64 (if loop-range (list-ref loop-range 0) 0))
-          (loop-end::f64 (if loop-range (list-ref loop-range 1) 0))
-          (len::f64 (or len
-                        (slot-ref pcm-data 'duration)))
-          (gain::f64))
-    (let ((channel (ref audioChannels channel-num))
-          (pcm-node (audioContext.createBufferSource))
-          (gain-node (audioContext.createGain))
-          (start-time (Math.max channel.lastPlaySec audioContext.currentTime))
-          (end-time (+ start-time len)))
-      (set! pcm-node.buffer pcm-data)
-      (unless (equal? detune 0)
-        (set! pcm-node.detune.value detune))
-      (unless (equal? playback-rate 1.0)
-        (set! pcm-node.playbackRate.value playback-rate))
-      (when loop?
-        (set! pcm-node.loop loop?)
-        (set! pcm-node.loopStart loop-start)
-        (set! pcm-node.loopEnd loop-end))
-      (set! gain-node.gain.value gain)
-      (pcm-node.connect gain-node)
-      (gain-node.connect audioContext.destination)
-      (pcm-node.start start-time)
-      (pcm-node.stop end-time)
-      (set! channel.lastPlaySec end-time))))
+(define-class <audio-destination-node> (<audio-node>)
+  ((max-channel-count :jsproperty "maxChannelCount"))
+  :jsclass "AudioDestinationNode")
+
+(define-class <audio-listener> (<jsobject>)
+  ((position-x :jsproperty "positionX")
+   (position-y :jsproperty "positionY")
+   (position-z :jsproperty "positionZ")
+   (forward-x :jsproperty "forwardX")
+   (forward-y :jsproperty "forwardY")
+   (forward-z :jsproperty "forwardZ")
+   (up-x :jsproperty "upX")
+   (up-y :jsproperty "upY")
+   (up-z :jsproperty "upZ"))
+  :jsclass "AudioListener")
+
+(define-automatic-jsobject-methods <audio-listener>
+  "setOrientation"
+  "setPosition")
+
+
+(define-class <audio-param> (<jsobject>)
+  ((default-value :jsproperty "defaultValue"
+     :read-only? #t)
+   (max-value :jsproperty "maxValue"
+              :read-only? #t)
+   (min-value :jsproperty "minValue"
+              :read-only? #t)
+   (value :jsproperty "value"))
+  :jsclass "AudioParam")
+
+(define-automatic-jsobject-methods <audio-param>
+  ("setValueAtTime" :result)
+  ("linearRampToValueAtTime" :result)
+  ("exponentialRampToValueAtTime" :result)
+  ("setTargetAtTime" :result)
+  ("setValueCurveAtTime" :result)
+  ("cancelScheduledValues" :result)
+  ("cancelAndHoldAtTime" :result))
+
+(define-class <biquad-filter-node> (<audio-node>)
+  ((frequency :jsproperty "frequency"
+              :read-only? #t)
+   (detune :jsproperty "detune"
+           :read-only? #t)
+   (q :jsproperty "Q"
+      :read-only? #t)
+   (gain :jsproperty "gain"
+         :read-only? #t)
+   (type :jsproperty "type"))
+  :jsclass "BiquadFilterNode")
+
+(define-jsobject-method <biquad-filter-node> get-frequency-response (frequency-array)
+  (jslet/result ((self::object self)
+                 (frequency-array))
+    (let ((mag-response-output (make Float32Array frequency-array.length))
+          (phase-response-output (make Float32Array frequency-array.length)))
+      (self.getFrequencyResponse mag-response-output phase-response-output)
+      (result mag-response-output phase-response-output))))
+
+(define-class <channel-merger-node> (<audio-node>)
+  ()
+  :jsclass "ChannelMergerNode")
+
+(define-class <channel-splitter-node> (<audio-node>)
+  ()
+  :jsclass "ChannelSplitterNode")
+
+(define-class <constant-source-node> (<audio-scheduled-source-node>)
+  ((offset :jsproperty "offset"))
+  :jsclass "ConstantSourceNode")
+
+(define-class <convolver-node> (<audio-node>)
+  ((buffer :jsproperty "buffer")
+   (normalize :jsproperty "normalize"))
+  :jsclass "ConvolverNode")
+
+(define-class <delay-node> (<audio-node>)
+  ((delay-time :jsproperty "delayTime"
+               :read-only? #t))
+  :jsclass "DelayNode")
+
+(define-class <dynamic-compressor-node> (<audio-node>)
+  ((threshold :jsproperty "threshold"
+              :read-only? #t)
+   (knee :jsproperty "knee"
+         :read-only? #t)
+   (ratio :jsproperty "ratio"
+          :read-only? #t)
+   (reduction :jsproperty "reduction"
+              :read-only? #t)
+   (attack :jsproperty "attack"
+           :read-only? #t)
+   (release :jsproperty "release"
+            :read-only? #t))
+  :jsclass "DynamicCompressorNode")
+
+(define-class <gain-node> (<audio-node>)
+  ((gain :jsproperty "gain"
+         :read-only? #t))
+  :jsclass "GainNode")
+
+(define-class <iir-filter-node> (<audio-node>)
+  ()
+  :jsclass "IIRFilterNode")
+
+(define-jsobject-method <iir-filter-node> get-frequency-response (frequency-array)
+  (jslet/result ((self::object self)
+                 (frequency-array))
+    (let ((mag-response-output (make Float32Array frequency-array.length))
+          (phase-response-output (make Float32Array frequency-array.length)))
+      (self.getFrequencyResponse mag-response-output phase-response-output)
+      (result mag-response-output phase-response-output))))
+
+(define-class <media-element-audio-source-node> (<audio-node>)
+  ((media-element :jsproperty "mediaElement"
+                  :read-only? #t))
+  :jsclass "MediaElementAudioSourceNode")
+
+(define-class <media-stream-audio-destination-node> (<audio-node>)
+  ((stream :jsproperty "stream"))
+  :jsclass "MediaStreamAudioDestinationNode")
+
+(define-class <media-stream-audio-source-node> (<audio-node>)
+  ((media-stream :jsproperty "mediaStream"
+                 :read-only? #t))
+  :jsclass "MediaStreamAudioSourceNode")
+
+(define-class <offline-audio-completion-event> (<jsobject>)
+  ((rendered-buffer :jsproperty "renderedBuffer"
+                    :read-only? #t))
+  :jsclass "OfflineAudioCompletionEvent")
+
+(define-class <oscillator-node> (<audio-node>)
+  ((frequency :jsproperty "frequency")
+   (detune :jsproperty "detune")
+   (type :jsproperty "type"))
+  :jsclass "OscillatorNode")
+
+(define-automatic-jsobject-methods <oscillator-node>
+  "setPeriodicWave"
+  "start"
+  "stop")
+
+(define-class <panner-node> (<audio-node>)
+  ((cone-inner-angle :jsproperty "coneInnerAngle")
+   (cone-outer-angle :jsproperty "coneOuterAngle")
+   (cone-outer-gain :jsproperty "coneOuterGain")
+   (distance-model :jsproperty "distanceModel")
+   (max-distance :jsproperty "maxDistance")
+   (orientation-x :jsproperty "orientationX")
+   (orientation-y :jsproperty "orientationY")
+   (orientation-z :jsproperty "orientationZ")
+   (panning-model :jsproperty "panningModel")
+   (position-x :jsproperty "positionX")
+   (position-y :jsproperty "positionY")
+   (position-z :jsproperty "positionZ")
+   (ref-distance :jsproperty "refDistance")
+   (rolloff-factor :jsproperty "rolloffFactor"))
+  :jsclass "PannerNode")
+
+(define-automatic-jsobject-methods <panner-node>
+  "setPosition"
+  "setOrientation")
+
+(define-class <periodic-wave> (<jsobject>)
+  ()
+  :jsclass "PeriodicWave")
+
+(define-class <stereo-panner-node> (<audio-node>)
+  ((pan :jsproperty "pan"
+        :read-only? #t))
+  :jsclass "StereoPannerNode")
+
+(define-class <wave-shaper-node> (<audio-node>)
+  ((curve :jsproperty "curve")
+   (oversample :jsproperty "oversample"))
+  :jsclass "WaveShaperNode")
+
+
+(define-application-context-slot audio-context #f)
+
+(define audio-context (make <jsobject-provider>
+                        :provider (lambda ()
+                                    (application-context-slot-atomic-update! 'audio-context
+                                      (lambda (ctx)
+                                        (unless ctx
+                                          (set! ctx (jslet/result ()
+                                                      (result audioContext))))
+                                        ctx)))))

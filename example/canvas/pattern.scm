@@ -1,26 +1,23 @@
 (use file.util)
 (use graviton)
-(use graviton.canvas)
-(use util.match)
+(use text.html-lite)
 
 (define *program-dir* (sys-dirname (current-load-path)))
 
 (define (main args)
   (grv-player)
 
+  (define-document-content
+    (html:body
+     (html:canvas :width 300 :height :300 :class "grv-object-fit-contain")))
+
   (grv-begin
-    (capture-jsevent (client-window) "keyup" '("key"))
+    (on-jsevent window "keyup" (key)
+      (when (equal? key "Escape")
+        (grv-exit)))
 
-    (let1 pat (load-image (build-path *program-dir* "Canvas_createpattern.png") :visible? #f)
-      (make-canvas 300 300)
-      (set-fill-style! (pattern (force pat)))
-      (fill-rect 0 0 300 300))
-
-    (port-for-each (match-lambda
-                     (('keyup _ "Escape")
-                      (event-stream-close))
-                     (_
-                      #f))
-                   next-event)
-
-    0))
+    (let* ((canvas (document'query-selector "canvas"))
+           (ctx (canvas'get-context "2d"))
+           (pat (ctx'create-pattern (load-image (build-path *program-dir* "Canvas_createpattern.png")) "repeat")))
+      (set! (~ ctx'fill-style) pat)
+      (ctx'fill-rect 0 0 300 300))))

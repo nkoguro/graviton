@@ -1,49 +1,48 @@
 (use graviton)
 (use graviton.canvas)
 (use math.const)
+(use text.html-lite)
 (use util.match)
 
 (define (main args)
   (grv-player)
 
-  (grv-begin
-    (capture-jsevent (client-window) "keyup" '("key"))
+  (define-document-content
+    (html:body
+     (html:canvas :width 300 :height 150 :class "grv-object-fit-contain")))
 
-    (let1 canvas (make-canvas 300 150)
+  (grv-begin
+    (on-jsevent window "keyup" (key)
+      (when (equal? key "Escape")
+        (grv-exit)))
+
+    (let* ((canvas (document'query-selector "canvas"))
+           (ctx (canvas'get-context "2d")))
       ;; Tangential lines
-      (begin-path)
-      (set-stroke-style! "gray")
-      (move-to 200 20)
-      (line-to 200 130)
-      (line-to 50 20)
-      (stroke)
+      (ctx'begin-path)
+      (set! (~ ctx'stroke-style) "gray")
+      (ctx'move-to 200 20)
+      (ctx'line-to 200 130)
+      (ctx'line-to 50 20)
+      (ctx'stroke)
 
       ;; Arc
-      (begin-path)
-      (set-stroke-style! "black")
-      (set-line-width! 5)
-      (move-to 200 20)
-      (arc-to 200 130 50 20 40)
-      (stroke)
+      (ctx'begin-path)
+      (set! (~ ctx'stroke-style) "black")
+      (set! (~ ctx'line-width) 5)
+      (ctx'move-to 200 20)
+      (ctx'arc-to 200 130 50 20 40)
+      (ctx'stroke)
 
       ;; Start point
-      (begin-path)
-      (set-fill-style! "blue")
-      (arc 200 20 5 0 (* 2 pi))
-      (fill)
+      (ctx'begin-path)
+      (set! (~ ctx'fill-style) "blue")
+      (ctx'arc 200 20 5 0 (* 2 pi))
+      (ctx'fill)
 
       ;; Control points
-      (begin-path)
-      (set-fill-style! "red")
-      (arc 200 130 5 0 (* 2 pi))
-      (arc 50 20 5 0 (* 2 pi))
-      (fill)
-
-      (port-for-each (match-lambda
-                       (('keyup _ "Escape")
-                        (event-stream-close))
-                       (_
-                        #f))
-                     next-event)
-
-      0)))
+      (ctx'begin-path)
+      (set! (~ ctx'fill-style) "red")
+      (ctx'arc 200 130 5 0 (* 2 pi))
+      (ctx'arc 50 20 5 0 (* 2 pi))
+      (ctx'fill))))

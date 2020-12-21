@@ -1,15 +1,4 @@
 export let audioContext = new AudioContext();
-export let audioChannels = [];
-
-function initAudioChannels() {
-    for (let i = 0; i < 16; ++i) {
-        audioChannels[i] = {
-            lastPlaySec: 0
-        };
-    }
-}
-
-window.addEventListener('load', initAudioChannels);
 
 function registerAudioContextResumeHandler() {
     if (audioContext.state !== 'suspended') {
@@ -26,7 +15,7 @@ function registerAudioContextResumeHandler() {
         });
     }
     eventNames.forEach((eventName) => {
-        window.addEventListener(eventName, resumeAudioContext);
+        window.addEventListener(eventName, resumeAudioContext, true);
     });
 }
 

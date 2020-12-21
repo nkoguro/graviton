@@ -1,18 +1,11 @@
-(use data.queue)
-(use gauche.generator)
-(use gauche.logger)
-(use gauche.parameter)
 (use gauche.parseopt)
 (use gauche.record)
-(use gauche.threads)
-(use gauche.time)
 (use graviton)
-(use graviton.canvas)
-(use graviton.event)
+(use graviton.misc)
 (use math.const)
 (use srfi-27)
 (use srfi-42)
-(use util.match)
+(use text.html-lite)
 
 (define *sprite-width* 64)
 (define *sprite-height* 64)
@@ -20,25 +13,7 @@
 (define *canvas-width* 1024)
 (define *canvas-height* 768)
 
-(define-macro (trace name)
-  (let ((args (gensym))
-        (start-time (gensym))
-        (end-time (gensym))
-        (filename (format "~a.perf.csv" name))
-        (out (gensym))
-        (proc (global-variable-ref (current-module) name)))
-    (sys-unlink filename)
-    `(define ,name (lambda ,args
-                     (profiler-start)
-                     (unwind-protect
-                         (let ((,start-time (time->seconds (current-time))))
-                           (apply ,proc ,args)
-                           (let ((,end-time (time->seconds (current-time))))
-                             (call-with-output-file ,filename
-                               (lambda (,out)
-                                 (format ,out "~a,~a~%" ,start-time (- ,end-time ,start-time)))
-                               :if-exists :append)))
-                       (profiler-stop))))))
+(define *num-samples* #f)
 
 (define-record-type ball
   #t #t
@@ -49,18 +24,18 @@
   (vy))
 
 (define (prepare-ball-images canvas ball-width ball-height num-balls)
-  (parameterize ((current-canvas canvas))
+  (let1 ctx (canvas'get-context "2d")
     (dotimes (i num-balls)
-      (begin-path)
-      (set-fill-style! (format "#~3,'0X" (random-integer #xfff)))
-      (ellipse (+ (* i ball-width) (/ ball-width 2))
-               (/ ball-height 2)
-               (/ ball-width 2)
-               (/ ball-height 2)
-               0
-               0
-               (* 2 pi))
-      (fill))))
+      (ctx'begin-path)
+      (set! (~ ctx 'fill-style) (format "#~3,'0X" (random-integer #xfff)))
+      (ctx'ellipse (+ (* i ball-width) (/ ball-width 2))
+                   (/ ball-height 2)
+                   (/ ball-width 2)
+                   (/ ball-height 2)
+                   0
+                   0
+                   (* 2 pi))
+      (ctx'fill))))
 
 (define (update-balls! balls tick)
   (for-each (lambda (ball)
@@ -77,67 +52,67 @@
                    (ball-vy-set! ball (- (ball-vy ball)))))))
             balls))
 
-(define (draw-balls sprite balls)
-  (clear-rect 0 0 *canvas-width* *canvas-height*)
-  (for-each (lambda (ball)
-              (draw-image sprite
-                          (* (ball-pattern-id ball) *sprite-width*)
-                          0
-                          *sprite-width*
-                          *sprite-height*
-                          (round->exact (- (ball-x ball) (/. *sprite-width* 2)))
-                          (round->exact (- (ball-y ball) (/. *sprite-height* 2)))
-                          *sprite-width*
-                          *sprite-height*))
-            balls))
+(define (draw-balls canvas sprite balls)
+  (let1 ctx (canvas'get-context "2d")
+    (ctx'clear-rect 0 0 *canvas-width* *canvas-height*)
+    (stat-memory #f
+                 *num-samples*
+                 (for-each (lambda (ball)
+                             (ctx'draw-image sprite
+                                             (* (ball-pattern-id ball) *sprite-width*)
+                                             0
+                                             *sprite-width*
+                                             *sprite-height*
+                                             (round->exact (- (ball-x ball) (/. *sprite-width* 2)))
+                                             (round->exact (- (ball-y ball) (/. *sprite-height* 2)))
+                                             *sprite-width*
+                                             *sprite-height*))
+                           balls))))
 
-(define (update-frame sprite balls tick)
+(define (update-frame canvas sprite balls tick)
   (update-balls! balls tick)
-  (draw-balls sprite balls))
-
-;; (trace update-frame)
-;; (trace draw-balls)
-;; (trace update-balls!)
+  (draw-balls canvas sprite balls))
 
 (define (main args)
   (let-args (cdr args) ((num-sprites "s|sprites=i" 100)
-                        (use-browser? "b|browser" #f))
+                        (use-browser? "b|browser" #f)
+                        (num-samples "num-samples=i" #f))
+    (set! *num-samples* num-samples)
+
     (if use-browser?
-      (grv-browser :background-color "black")
-      (grv-player :background-color "black"))
+      (grv-browser)
+      (grv-player))
+
+    (define-document-content
+      (html:body :style "background-color:black; margin:0"
+                 (html:canvas :id "screen"
+                              :width *canvas-width*
+                              :height *canvas-height*
+                              :class "grv-object-fit-contain")))
 
     (grv-begin
-      (capture-jsevent (client-window) "keyup" '("key"))
+      (on-jsevent window "keyup" (key)
+        (when (equal? key "Escape")
+          (grv-exit 0)))
 
-      (let ((sprite (make-canvas (* *sprite-width* *num-patterns*) *sprite-height* :visible? #f))
-            (canvas (make-canvas *canvas-width* *canvas-height*))
-            (off-canvas (make-canvas *canvas-width* *canvas-height* :visible? #f))
+      (let ((sprite (document'create-element "canvas"))
+            (canvas (document'query-selector "#screen"))
             (balls (list-ec (: i num-sprites)
                             (make-ball (modulo i *num-patterns*)
                                        (random-integer *canvas-width*)
                                        (random-integer *canvas-height*)
                                        (- (* (random-real) 400) 200)
                                        (- (* (random-real) 400) 200)))))
+        (set! (~ sprite'width) (* *sprite-width* *num-patterns*))
+        (set! (~ sprite'height) *sprite-height*)
         (prepare-ball-images sprite *sprite-width* *sprite-height* *num-patterns*)
 
-        (let1 prev-time #f
-          (frame-loop
-            (lambda (now-time break)
-              (for-each (match-lambda
-                          (('keyup _ "Escape")
-                           (break))
-                          (_
-                           #f))
-                        (all-events))
-
-              (with-jstransaction
-                (lambda ()
-                  (parameterize ((current-canvas off-canvas))
-                    (update-frame sprite balls (if prev-time (/ (- now-time prev-time) 1000) 0)))
-
-                  (set! prev-time now-time)
-
-                  (parameterize ((current-canvas canvas))
-                    (clear-rect 0 0 *canvas-width* *canvas-height*)
-                    (draw-image off-canvas 0 0))))))))
-      0)))
+        (on-repaint (sec-per-frame)
+          (stat (:description "frame per second" :unit "fps" :format-spec "~,2f" :order-by :desc)
+                *num-samples*
+                (/. 1 sec-per-frame))
+          (stat-time "repaint"
+                     *num-samples*
+                     (with-jstransaction
+                       (lambda ()
+                         (update-frame canvas sprite balls sec-per-frame)))))))))

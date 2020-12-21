@@ -41,8 +41,10 @@
   (use graviton.app)
   (use graviton.async)
   (use graviton.misc)
+  (use makiki)
   (use rfc.json)
   (use srfi-1)
+  (use srfi-27)
   (use util.match)
 
   (export send-text-frame
@@ -52,8 +54,9 @@
           websocket-main-loop
 
           define-action
+          register-binary-handler!
 
-          allocate-future-id))
+          resource-url))
 
 (select-module graviton.comm)
 
@@ -214,8 +217,7 @@
          (proc (hash-table-get json-command-table cmd #f)))
     (cond
       (proc
-       (submit-task #f (lambda ()
-                         (apply proc args))))
+       (worker-submit-task (main-worker) (cut apply proc args)))
       (else
        (log-error "Invalid data received: ~s" params)))))
 
@@ -224,58 +226,17 @@
     ((_ action-name args body ...)
      (hash-table-put! json-command-table action-name (lambda args body ...)))))
 
-(define (decode-received-binary-data data)
-  (call-with-input-string (u8vector->string data)
-    (lambda (in)
-      (let* ((future-id (read-u32 in 'little-endian))
-             (json-len (read-u32 in 'little-endian))
-             (json-str (u8vector->string (read-uvector <u8vector> json-len in)))
-             (vals (parse-json-string json-str)))
-        (while (read-u8 in) (.$ not eof-object?)
-               => i
-               (let* ((binary-data-len (read-u32 in 'little-endian))
-                      (binary-data (read-uvector <u8vector> binary-data-len in)))
-                 (vector-set! vals i binary-data)))
-        (values future-id (vector->list vals))))))
-
-(define (receive-binary data)
-  (receive (future-id vals) (decode-received-binary-data data)
-    (notify-values future-id vals)))
 
 ;;;
 
-(define-application-context-slot future-table (make-hash-table 'equal?) (make-id-generator #xffffffff))
+(define *binary-handler* #f)
 
-(define (with-future-table proc)
-  (application-context-slot-atomic-ref 'future-table proc))
+(define (register-binary-handler! proc)
+  (set! *binary-handler* proc))
 
-(define (allocate-future-id queue)
-  (with-future-table
-    (lambda (tbl future-next-id)
-      (define (loop)
-        (let1 id (future-next-id)
-          (cond
-            ;; If the counter goes around the cycle, the ID can be conflict. So we need to skip IDs in the table.
-            ((hash-table-contains? tbl id)
-             (loop))
-            (else
-             (hash-table-put! tbl id queue)
-             id))))
-      (loop))))
-
-(define (notify-values future-id vals)
-  (with-future-table
-    (lambda (tbl future-next-id)
-      (let1 queue (begin0
-                    (hash-table-get tbl future-id #f)
-                    (hash-table-delete! tbl future-id))
-        (cond
-          (queue
-           (enqueue! queue (if (null? vals)
-                               (undefined)
-                               (first vals))))
-          (else
-           (errorf "[BUG] Invalid future ID: ~a" future-id)))))))
+(define (receive-binary data)
+  (and-let1 proc *binary-handler*
+    (proc data)))
 
 ;;;
 
@@ -297,15 +258,12 @@
 
     (application-context-slot-set! 'websocket-output-port out)
 
-    (run-hook app-start-hook)
-
     (receive (ctrl-in ctrl-out) (sys-pipe)
       (application-context-slot-set! 'control-out ctrl-out)
 
       (let ((sel (make <selector>))
             (run-loop? #t))
         (define (exit-loop)
-          (run-hook app-close-hook)
           (set! run-loop? #f))
 
         (selector-add! sel
@@ -328,4 +286,48 @@
 
         (selector-delete! sel #f #f #f)))
 
+    (let1 workers (all-workers)
+      (for-each worker-shutdown! workers)
+      (for-each (cut worker-wait <> :timeout 60) workers))
+
     exit-code))
+
+;;;
+
+(define *resource-table-atom* (atom (make-hash-table 'equal?)))
+
+(define (register-resource! content-type data)
+  (atomic *resource-table-atom*
+    (lambda (tbl)
+      (let loop ()
+        (let1 id (number->string (random-integer #xffffffff) 36)
+          (cond
+            ((hash-table-contains? tbl id)
+             (loop))
+            (else
+             (hash-table-put! tbl id (cons content-type data))
+             (format "/r?id=~a" id))))))))
+
+(define-method resource-url ((filename <string>) :key (content-type #f))
+  (let1 data (call-with-input-file filename port->uvector)
+    (register-resource! (or content-type
+                            (estimate-content-type filename))
+                        data)))
+
+(define (find-resource-data&content-type id)
+  (atomic *resource-table-atom*
+    (lambda (tbl)
+      (match-let1 (content-type . data) (hash-table-get tbl id (cons #f #f))
+        (hash-table-delete! tbl id)
+        (values data content-type)))))
+
+(define-http-handler "/r"
+  (lambda (req app)
+    (let-params req ((id "q"))
+                (receive (data content-type) (find-resource-data&content-type id)
+                  (cond
+                    ((and data content-type)
+                     (respond/ok req data :content-type content-type))
+                    (else
+                     (respond/ng req 404)))))))
+

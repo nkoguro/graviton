@@ -1,10 +1,6 @@
 import {callAction} from '/graviton/graviton.mjs';
 
-let eventHandlerTable = {};
-
-function notifyEvent(proxyId, eventType, event) {
-    callAction("notifyEvent", proxyId, eventType, event);
-}
+let eventHandlerTable = new Map();
 
 function extractEventValues(event, props) {
     let vals = [];
@@ -18,28 +14,20 @@ function extractEventValues(event, props) {
     return vals;
 }
 
-function eventHandlerKey(proxyId, eventName) {
-    return `${proxyId}_${eventName}`;
-}
-
-export function registerEventHandler(eventTargetRef, eventName, props) {
-    let proxyId = eventTargetRef.proxyId;
-    let eventTarget = eventTargetRef.value;
-    unregisterEventHandler(proxyId, eventTarget, eventName);
-    let handler = (e) => {
-        notifyEvent(proxyId, eventName, extractEventValues(e, props));
+export function registerEventHandler(obj, type, props, callback) {
+    let eventHandler = (e) => {
+        let args = extractEventValues(e, props);
+        callback(...args);
     };
-    eventHandlerTable[eventHandlerKey(proxyId, eventName)] = handler;
-    eventTarget.addEventListener(eventName, handler);
+    eventHandlerTable.set(callback, eventHandler);
+    obj.addEventListener(type, eventHandler);
 }
 
-export function unregisterEventHandler(eventTargetRef, eventName) {
-    let proxyId = eventTargetRef.proxyId;
-    let eventTarget = eventTargetRef.value;
-    let key = eventHandlerKey(proxyId, eventName);
-    let handler = eventHandlerTable[key];
-    if (handler) {
-        eventTarget.removeEventListener(eventName, handler);
+export function unregisterEventHandler(obj, type, callback) {
+    let eventHandler = eventHandlerTable.get(callback);
+    if (eventHandler) {
+        obj.removeEventListener(type, eventHandler);
+        eventHandlerTable.delete(callback);
     }
-    eventHandlerTable[key] = null;
 }
+

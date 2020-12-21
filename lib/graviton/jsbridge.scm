@@ -37,6 +37,7 @@
   (use gauche.charconv)
   (use gauche.collection)
   (use gauche.hook)
+  (use gauche.mop.singleton)
   (use gauche.parameter)
   (use gauche.record)
   (use gauche.sequence)
@@ -48,6 +49,9 @@
   (use graviton.misc)
   (use rfc.json)
   (use rfc.sha)
+  (use srfi-1)
+  (use srfi-13)
+  (use srfi-42)
   (use text.tree)
   (use util.digest)
   (use util.list)
@@ -65,15 +69,33 @@
           import-js
           load-js
 
-          <jsobject>
-          jsobject-id
-          invalidate!
-          invalidate?
           define-jsenum
           jslet
           jslet/result
 
-          with-jstransaction))
+          with-jstransaction
+
+          <jsobject>
+          <jsobject-meta>
+          define-jsobject-method
+          define-automatic-jsobject-methods
+          jsobject-id
+          jsobject-property-ref
+          jsobject-property-set!
+          jsobject-free!
+          with-jsobjects
+
+          <jsobject-provider>
+
+          <json-value-meta>
+          <json-value-mixin>
+          obj->json
+          json->obj
+          json-rule
+
+          unlink-callback
+          unlink-procedure
+          ))
 
 (select-module graviton.jsbridge)
 
@@ -311,11 +333,11 @@
          "}")))
 
 (define-jsstmt result env
-  ((val)
+  ((vals ...)
    (cond
      ((resolve-js-local-var env '%future-id)
       (compile-jsise-stmt env `(begin
-                                 (Graviton.notifyValues %future-id (vector ,val))
+                                 (Graviton.notifyValues %future-id ,@vals)
                                  (return))))
      (else
       (error "result is called outside jslet/result.")))))
@@ -370,6 +392,8 @@
      '("false"))
     ('null
      '("null"))
+    ('undefined
+     '("undefined"))
     ((? undefined? undef)
      '("undefined"))
     ((? symbol? var)
@@ -459,6 +483,12 @@
      (list "(" (resolve-js-var env var) "++" ")"))
     (('post-- (? symbol? var))
      (list "(" (resolve-js-var env var) "--" ")"))
+    (('is-a? expr (? symbol? klass))
+     (list "(" (compile-jsise-expr env expr) " instanceof " klass ")"))
+    (('json-value obj rule)
+     (compile-jsise-expr env `(Graviton.convertObject ,obj ,rule)))
+    (('json-value obj)
+     (compile-jsise-expr env `(Graviton.convertObject ,obj)))
     (((? (cut hash-table-contains? *unary-op-table* <>) op) arg)
      (list "(" (hash-table-get *unary-op-table* op) (compile-jsise-expr env arg) ")"))
     (((? (cut hash-table-contains? *infix-op-table* <>) op) args ...)
@@ -527,21 +557,25 @@
     ((current-send-buffer)
      (proc (current-send-buffer)))
     (else
-     (let1 out (open-output-uvector)
-       (proc out)
-       (flush-commands out)))))
+     (with-jstransaction
+       (lambda ()
+         (proc (current-send-buffer)))))))
 
-(define (flush-commands buf-out)
-  (let1 output-data (get-output-uvector buf-out)
-    (unless (= (uvector-length output-data) 0)
-      (application-context-slot-atomic-ref 'websocket-output-port
-        (lambda (out)
-          (send-binary-frame out output-data))))))
+(define (flush-commands :optional (finish-transaction? #f))
+  (when (current-send-buffer)
+    (let1 output-data (get-output-uvector (current-send-buffer) :shared #t)
+      (unless (= (uvector-length output-data) 0)
+        (application-context-slot-atomic-ref 'websocket-output-port
+          (lambda (out)
+            (send-binary-frame out output-data)))
+        (unless finish-transaction?
+          (current-send-buffer (open-output-uvector)))))))
 
 (define (with-jstransaction thunk)
   (parameterize ((current-send-buffer (open-output-uvector)))
-    (thunk)
-    (flush-commands (current-send-buffer))))
+    (begin0
+        (thunk)
+      (flush-commands #t))))
 
 ;;;
 
@@ -576,28 +610,35 @@
 (define-jsargtype u32 getUint32 (lambda (v out)
                                   (write-u32 v out 'little-endian)))
 (define-jsargtype u8vector getUint8Array (lambda (v out)
-                                           (write-u32 (u8vector-length v) out 'little-endian)
+                                           (encode-number (u8vector-length v) out)
                                            (write-uvector v out)))
 (define-jsargtype f64vector getFloat64Array (lambda (v out)
-                                              (write-u32 (f64vector-length v) out 'little-endian)
+                                              (encode-number (f64vector-length v) out)
                                               (write-uvector v out 0 -1 'little-endian)))
 (define-jsargtype boolean getBoolean (lambda (v out)
                                        (write-u8 (if v 1 0) out 'little-endian)))
 (define-jsargtype future getUint32 (lambda (v out)
                                      (write-u32 (allocate-future-id v) out 'little-endian)))
-(define-jsargtype object getObjectRefValue (lambda (v out)
-                                             (write-u32 (jsobject-id v) out 'little-endian)))
-(define-jsargtype object* getObjectRef (lambda (v out)
-                                         (write-u32 (jsobject-id v) out 'little-endian)))
+(define-jsargtype object getObject (lambda (v out)
+                                     (write-u32 (jsobject-id v) out 'little-endian)))
 (define-jsargtype string getString (lambda (v out)
                                      (let1 data (ces-convert-to <u8vector> v 'utf-8)
-                                       (write-u32 (u8vector-length data) out 'little-endian)
+                                       (encode-number (u8vector-length data) out)
                                        (write-uvector data out))))
 (define-jsargtype json getJson (lambda (v out)
-                                 ;; Make a vector to make JSON to satisfy RFC4627.
-                                 (let1 data (ces-convert-to <u8vector> (construct-json-string (vector v)) 'utf-8)
-                                   (write-u32 (u8vector-length data) out 'little-endian)
-                                   (write-uvector data out))))
+                                 (encode-number (length v) out)
+                                 (for-each (lambda (pair)
+                                             (encode-value (car pair) out)
+                                             (encode-value (cdr pair) out))
+                                           v)))
+
+(define-jsargtype any getAny (lambda (v out)
+                               (encode-value v out)))
+
+(define-jsargtype list getArray (lambda (v out)
+                                (encode-number (length v) out)
+                                (dolist (e v)
+                                  (encode-value e out))))
 
 (define (write-command-args types args out)
   (for-each (lambda (type arg)
@@ -608,7 +649,6 @@
                        (write-u8 (enum-value type arg) out 'little-endian))
                   (errorf "Invalid jsarg type: ~a" type)))
             types args))
-
 
 (define (call-command command-id types args)
   (with-send-buffer
@@ -626,9 +666,9 @@
      (let1 parts (map string->symbol (string-split (symbol->string spec) "::"))
        (cond
          ((= (length parts) 1)
-          (parse-arg-spec (append parts '(json))))
+          (parse-arg-spec `((,@parts any))))
          (else
-          (parse-arg-spec (list parts))))))
+          (parse-arg-spec `(,parts))))))
     (((? symbol? spec) init-val)
      (parse-arg-spec (list (map string->symbol (string-split (symbol->string spec) "::")) init-val)))
     (((var type) init-val)
@@ -636,7 +676,7 @@
     (((var type))
      (list var type var))
     (((var) init-val)
-     (list var 'json init-val))))
+     (list var 'any init-val))))
 
 (define binary-command-next-id (make-id-generator #xffffffff))
 
@@ -667,35 +707,37 @@
                           (Graviton.registerBinaryCommand ,command-id ,name)))
     (make <jsprocedure> :command-id command-id :types (map (cut list-ref <> 1) var-type-list))))
 
+(define (compile-jslet/result arg-specs body)
+  (compile-jslet (cons '%future-id::future arg-specs) body))
+
 (define-jsmacro raise
   ((err)
    `(Graviton.notifyException err)))
 
 (define (jscall js-proc :rest args)
-  (let1 queue (make-mtqueue)
-    (call-command (slot-ref js-proc 'command-id)
-                  (slot-ref js-proc 'types)
-                  (cons queue args))
-    (delay (dequeue/wait! queue))))
-
-(define (jsrun js-proc :rest args)
   (call-command (slot-ref js-proc 'command-id)
                 (slot-ref js-proc 'types)
                 args))
 
-(define-macro (jslet var-spec :rest body)
-  (let1 jsrun jsrun
-    `(,jsrun ,(compile-jslet var-spec body)
-             ,@(map (lambda (spec)
-                      (list-ref (parse-arg-spec spec) 2))
-                    var-spec))))
+(define (jscall/result js-proc :rest args)
+  (let1 queue (make-mtqueue)
+    (call-command (slot-ref js-proc 'command-id)
+                  (slot-ref js-proc 'types)
+                  (cons queue args))
+    (flush-commands)
+    (apply values (dequeue/wait! queue))))
 
-(define-macro (jslet/result var-spec :rest body)
-  (let1 jscall jscall
-    `(,jscall ,(compile-jslet (cons '%future-id::future var-spec) body)
-              ,@(map (lambda (spec)
-                       (list-ref (parse-arg-spec spec) 2))
-                     var-spec))))
+(define-macro (jslet arg-specs :rest body)
+  `(,jscall ,(compile-jslet arg-specs body)
+            ,@(map (lambda (spec)
+                     (list-ref (parse-arg-spec spec) 2))
+                   arg-specs)))
+
+(define-macro (jslet/result arg-specs :rest body)
+  `(,jscall/result ,(compile-jslet/result arg-specs body)
+                   ,@(map (lambda (spec)
+                            (list-ref (parse-arg-spec spec) 2))
+                          arg-specs)))
 
 (define-class <jsenum> ()
   ((symbol->value-table :init-form (make-hash-table))
@@ -737,69 +779,813 @@
 
 ;;;
 
-(define-record-type <id-range>
-  make-id-range id-range?
-  (start id-range-start set-id-range-start!)
-  (end id-range-end))
+(define class-next-id (make-id-generator #xffffffff))
 
-(define (make-free-id-list id-size)
-  (cons #t
-        (cons (make-id-range 1 id-size)
-              #f)))
+(define *id->class-table* (make-hash-table 'eqv?))
+(define *id->jsclass-table* (make-hash-table 'eqv?))
 
-(define (allocate-id! free-id-list)
-  (let1 cell (cdr free-id-list)
+(define (register-jsclass! jsclass klass)
+  (let1 class-id (class-next-id)
+    (hash-table-put! *id->class-table* class-id klass)
+    (hash-table-put! *id->jsclass-table* class-id jsclass)
+    (register-jsstmt! (js-vm-current-main-module) `(Graviton.registerClass ,class-id ,jsclass))))
+
+(define-class <jsobject-meta> (<class>)
+  ((method-table :init-form (make-hash-table 'eq?))
+   (method-prefix)
+   (jsclass)))
+
+(define-method initialize ((jsobject-class <jsobject-meta>) initargs)
+  (next-method)
+  (let-keywords initargs ((jsclass #f)
+                          (jsobject-method-prefix (let1 str (symbol->string (class-name jsobject-class))
+                                                    (rxmatch-case str
+                                                      (#/^<(.*)>$/ (#f stem)
+                                                       stem)
+                                                      (else
+                                                       str))))
+                          . #f)
+    (unless (string? jsclass)
+      (errorf "<string> required for :jsclass, but got ~s" jsclass))
+    (set! (~ jsobject-class'method-prefix) jsobject-method-prefix)
+    (register-jsclass! jsclass jsobject-class)
+    (set! (~ jsobject-class'jsclass) jsclass)))
+
+(define-method compute-get-n-set ((jsobject-class <jsobject-meta>) slot-definition)
+  (let* ((name (slot-definition-name slot-definition))
+         (jsproperty (slot-definition-option slot-definition :jsproperty #f))
+         (read-only? (slot-definition-option slot-definition :read-only? #f))
+         (cacheable? (slot-definition-option slot-definition :cacheable? #f)))
     (cond
-      (cell
-       (let* ((id-range (car cell))
-              (s (id-range-start id-range)))
-         (if (= (+ s 1) (id-range-end id-range))
-             (set-cdr! free-id-list (cdr cell))
-             (set-id-range-start! id-range (+ s 1)))
-         s))
+      (jsproperty
+       (unless (string? jsproperty)
+         (errorf "<string> required for :jsproperty, but got ~s" jsproperty))
+       (list
+         ;; slot-ref
+         (let1 jsgetter (compile-jslet/result '(obj::object) `((result (~ obj ,jsproperty))))
+           (if (and read-only? cacheable?)
+             ;; cacheable case
+             (lambda (jsobj)
+               (let1 tbl (slot-ref jsobj '%jsproperty-cache)
+                 (if (hash-table-contains? tbl jsproperty)
+                   (hash-table-get tbl jsproperty)
+                   (rlet1 v (jscall/result jsgetter jsobj)
+                     (hash-table-put! tbl jsproperty v)))))
+             ;; non-cacheable case
+             (lambda (jsobj)
+               (jscall/result jsgetter jsobj))))
+         ;; slot-set!
+         (if read-only?
+           #f
+           (let1 jssetter (compile-jslet '(obj::object val::any) `((set! (~ obj ,jsproperty) val)))
+             (lambda (jsobj val)
+               (jscall jssetter jsobj val))))
+         #f
+         #f))
       (else
-       #f))))
+       (next-method)))))
 
-(define (release-id! free-id-list id)
-  (let1 cell (let loop ((cell free-id-list))
-               (if (or (not (cdr cell))
-                       (< id (id-range-start (cadr cell))))
-                   cell
-                   (loop (cdr cell))))
-    (set-cdr! cell (cons (make-id-range id (+ id 1)) (cdr cell)))))
+(define (register-jsobject-method! jsobject-class name gf)
+  (hash-table-put! (~ jsobject-class'method-table) name gf))
+
+(define (make-jsobject-method-name jsobject-class msg)
+  (string->symbol (format "~a-~a" (~ jsobject-class'method-prefix) msg)))
+
+(define-syntax define-jsobject-method
+  (er-macro-transformer
+    (lambda (form rename id=?)
+      (match form
+        ((_ jsobject-class method args body ...)
+         (let1 name (make-jsobject-method-name (global-variable-ref
+                                                 ((with-module gauche.internal vm-current-module))
+                                                 jsobject-class)
+                                               method)
+           (quasirename rename
+             `(begin
+                (define-method ,name
+                  ,(append `((,'self ,jsobject-class)) args)
+                  ,@body)
+                (register-jsobject-method! ,jsobject-class ',method ,name)))))
+        (_
+         (errof "malformed define-jsmethod: ~s" form))))))
+
+(define (convert-jsname jsname)
+  (if (= (string-length jsname) 0)
+    ""
+    (let1 chars (string->list jsname)
+      (let loop ((chars (cdr chars))
+                 (holder `(,(car chars)))
+                 (results '()))
+        (cond
+          ((null? chars)
+           (string-join
+             (map string-downcase (reverse (remove
+                                             (^s (= (string-length s) 0))
+                                             (cons (apply string (reverse holder))
+                                                   results))))
+             "-"))
+          ((and (char-upper-case? (car holder))
+                (char-upper-case? (car chars))
+                (not (null? (cdr chars)))
+                (char-lower-case? (cadr chars)))
+           (loop (cdr chars) `(,(car chars)) (cons (apply string (reverse holder)) results)))
+          ((and (char-lower-case? (car holder)) (char-upper-case? (car chars)))
+           (loop (cdr chars) `(,(car chars)) (cons (apply string (reverse holder)) results)))
+          (else
+           (loop (cdr chars) (cons (car chars) holder) results)))))))
+
+(define-syntax define-automatic-jsobject-methods
+  (er-macro-transformer
+    (lambda (form rename id=?)
+      (match form
+        ((_ jsobject-class specs ...)
+         (quasirename rename
+           `(begin
+              ,@(map (lambda (spec)
+                       (match spec
+                         ((? string? jsmethod)
+                          `(define-jsobject-method ,jsobject-class ,(string->symbol (convert-jsname jsmethod)) (:rest args)
+                             (jslet ((self::object)
+                                     (args::list))
+                               ((~ (~ self ,jsmethod) 'apply) self args))
+                             (undefined)))
+                         (((? string? jsmethod) ':result . (or (#t) ()))
+                          `(define-jsobject-method ,jsobject-class ,(string->symbol (convert-jsname jsmethod)) (:rest args)
+                             (jslet/result ((self::object)
+                                            (args::list))
+                               (result ((~ (~ self ,jsmethod) 'apply) self args)))))
+                         (((? string? jsmethod) ':result json-value-class)
+                          `(define-jsobject-method ,jsobject-class ,(string->symbol (convert-jsname jsmethod)) (:rest args)
+                             (json->obj ,json-value-class
+                                        (jslet/result ((self::object)
+                                                       (args::list)
+                                                       (rule::json (json-rule ,json-value-class)))
+                                          (result (json-value ((~ (~ self ,jsmethod) 'apply) self args) rule))))))))
+                     specs))))))))
+
+(define *initial-jsobject-table-size* 1024)
+
+(define-class <jsobject-manager> ()
+  ((id-vector :init-form (make-vector *initial-jsobject-table-size* #f))
+   (object-vector :init-form (make-weak-vector *initial-jsobject-table-size*))
+   (id->index-table :init-form (make-hash-table 'eqv?))
+   (next-index :init-value 0)))
+
+(define-application-context-slot jsobject-manager (make <jsobject-manager>))
+
+(define (find-jsobject manager id)
+  (with-slots (object-vector id->index-table) manager
+    (and-let1 index (hash-table-get id->index-table id #f)
+      (weak-vector-ref object-vector index))))
+
+(define (register-jsobject! manager jsobj)
+  (with-slots (id-vector object-vector id->index-table next-index) manager
+    (let1 len (vector-length id-vector)
+      (let loop ((i 0))
+        (let1 index (modulo (+ next-index i) len)
+          (cond
+            ((<= len i)
+             (expand-jsobject-table! manager)
+             (register-jsobject! manager jsobj))
+            ((weak-vector-ref object-vector index)
+             (loop (+ i 1)))
+            (else
+             (and-let1 old-id (vector-ref id-vector index)
+               (jslet ((old-id::u32 old-id))
+                 (Graviton.freeObjectId old-id))
+               (hash-table-delete! id->index-table old-id))
+             (vector-set! id-vector index (jsobject-id jsobj))
+             (weak-vector-set! object-vector index jsobj)
+             (hash-table-put! id->index-table (jsobject-id jsobj) index)
+             (set! next-index (modulo (+ index 1) len)))))))))
+
+(define (expand-jsobject-table! manager)
+  (with-slots (id-vector object-vector next-index) manager
+    (let* ((len (vector-length id-vector))
+           (new-len (* len 2)))
+      (when (< #xffffffff len)
+        (errorf "Too many jsobjects"))
+      (let ((new-id-vector (make-vector new-len #f))
+            (new-object-vector (make-weak-vector new-len)))
+        (vector-copy! new-id-vector 0 id-vector)
+        (dotimes (i len)
+          (weak-vector-set! new-object-vector i (weak-vector-ref object-vector i)))
+        (set! id-vector new-id-vector)
+        (set! object-vector new-object-vector)
+        (set! next-index len)))))
 
 (define-class <jsobject> ()
-  ((%free-id-list :allocation :class
-                  :init-form (atom (make-free-id-list #x100000000)))
-   (id :init-value #f)))
+  ((%id :init-keyword :id)
+   (%jsproperty-cache :init-form (make-hash-table 'string=?)))
+  :metaclass <jsobject-meta>
+  :jsclass "Object")
 
-(define-method initialize ((obj <jsobject>) initargs)
+(define (find-jsobject-method jsobject-class msg)
+  (any (lambda (klass)
+          (cond
+            ((is-a? klass <jsobject-meta>)
+             (hash-table-get (~ klass'method-table) msg #f))
+            (else
+             #f)))
+        (class-precedence-list jsobject-class)))
+
+(define-method object-apply ((jsobj <jsobject>) (msg <symbol>) :rest args)
+  (let1 gf (find-jsobject-method (class-of jsobj) msg)
+    (unless gf
+      (errorf "Method ~a not found in ~s" msg jsobj))
+    (apply gf jsobj args)))
+
+(define-method object-apply ((jsobj <jsobject>) (method <string>) :rest args)
+  (match (reverse args)
+    ((spec ':result rargs ...)
+     (call-jsmethod jsobj method spec (reverse rargs)))
+    ((rargs ...)
+     (call-jsmethod jsobj method #t (reverse rargs)))))
+
+(define-method slot-missing ((klass <class>) (jsobject-class <jsobject-meta>) slot . value)
+  (or (and (null? value)
+           (find-jsobject-method jsobject-class slot))
+      (next-method)))
+
+(define-method slot-missing ((jsobject-class <jsobject-meta>) jsobj slot . value)
+  (or (and-let* (((null? value))
+                 (gf (find-jsobject-method (class-of jsobj) slot)))
+        (cut gf jsobj <...>))
+      (next-method)))
+
+(define-method jsobject-id ((jsobj <jsobject>))
+  (or (slot-ref jsobj '%id)
+      (error "Invalid access to freed object")))
+
+(define (jsobject-free! obj)
+  (let1 id (~ obj'%id)
+    (application-context-slot-atomic-ref 'jsobject-manager
+      (lambda (manager)
+        (with-slots (id-vector object-vector id->index-table next-index) manager
+          (jslet ((id::u32))
+            (Graviton.freeObjectId id))
+          (and-let1 index (hash-table-get id->index-table id #f)
+            (vector-set! id-vector index #f)
+            (weak-vector-set! object-vector index #f)
+            (hash-table-delete! id->index-table id)
+            (set! next-index index))
+          (set! (~ obj'%id) #f))))))
+
+(define-syntax with-jsobjects
+  (syntax-rules ()
+    ((_ (jsobjects ...) body ...)
+     (unwind-protect
+         (begin
+           body ...)
+       (for-each (lambda (obj)
+                   (jsobject-free! obj))
+                 (sort (list jsobjects ...) (^(o1 o2) (> (~ o1'%id) (~ o2'%id)))))))))
+
+(define-method write-object ((obj <jsobject>) port)
+  (format port "#<~a id:#x~8,'0x>" (class-name (class-of obj)) (jsobject-id obj)))
+
+(define-method jsobject-property-ref ((jsobj <jsobject>) property)
+  (jslet/result ((obj::object jsobj)
+                 (property::string property))
+    (result (~ obj property))))
+
+(define-method jsobject-property-set! ((jsobj <jsobject>) property val)
+  (jslet ((obj::object jsobj)
+          (property::string property)
+          (val::any val))
+    (set! (~ obj property) val)))
+
+(define-method ref ((obj <jsobject>) (property <string>))
+  (jsobject-property-ref obj property))
+
+(define-method (setter ref) ((obj <jsobject>) (property <string>) value)
+  (jsobject-property-set! obj property value))
+
+(define (call-jsmethod jsobj method result-spec args)
+  (define (call-jsmethod/void args)
+    (jslet ((obj::object jsobj)
+            (method::string)
+            (args::list))
+      ((~ (~ obj method) 'apply) obj args))
+    (undefined))
+  (define (call-jsmethod/result args)
+    (jslet/result ((obj::object jsobj)
+                   (method::string)
+                   (args::list))
+      (result ((~ (~ obj method) 'apply) obj args))))
+  (define (call-jsmethod/json-value-result json-value-class args)
+    (json->obj json-value-class
+               (jslet/result ((obj::object jsobj)
+                              (method::string)
+                              (args::list)
+                              (rule::json (json-rule json-value-class)))
+                 (result (json-value ((~ (~ obj method) 'apply) obj args) rule)))))
+  (cond
+    ((eq? result-spec #f)
+     (call-jsmethod/void args))
+    ((eq? result-spec #t)
+     (call-jsmethod/result args))
+    ((is-a? result-spec <json-value-meta>)
+     (call-jsmethod/json-value-result result-spec args))
+    (else
+     (errorf "Invalid result-spec: ~s" result-spec))))
+
+
+(define-class <jsobject-provider> ()
+  ((%provider :init-keyword :provider)))
+
+(define (provide-jsobject jsobj-provider)
+  ((slot-ref jsobj-provider '%provider)))
+
+(define-method object-apply ((jsobj-provider <jsobject-provider>) (msg <symbol>) :rest args)
+  (let1 jsobj (provide-jsobject jsobj-provider)
+    (apply jsobj msg args)))
+
+(define-method object-apply ((jsobj-provider <jsobject-provider>))
+  (provide-jsobject jsobj-provider))
+
+(define-method jsobject-id ((jsobj-provider <jsobject-provider>))
+  (jsobject-id (provide-jsobject jsobj-provider)))
+
+(define-method jsobject-property-ref ((jsobj-provider <jsobject-provider>) property)
+  (jsobject-property-ref (provide-jsobject jsobj-provider) property))
+
+(define-method jsobject-property-set! ((jsobj-provider <jsobject-provider>) property val)
+  (jsobject-property-set! (provide-jsobject jsobj-provider) val))
+
+(define-method ref ((jsobj-provider <jsobject-provider>) (property <string>))
+  (jsobject-property-ref jsobj-provider property))
+
+(define-method (setter ref) ((jsobj-provider <jsobject-provider>) (property <string>) value)
+  (jsobject-property-set! jsobj-provider property value))
+
+(define-method ref ((jsobj-provider <jsobject-provider>) (slot <symbol>))
+  (slot-ref (provide-jsobject jsobj-provider) slot))
+
+(define-method (setter ref) ((jsobj-provider <jsobject-provider>) (slot <symbol>) value)
+  (slot-set! (provide-jsobject jsobj-provider) slot value))
+
+(define-method slot-missing ((klass <class>) (jsobj-provider <jsobject-provider>) slot . value)
+  (let1 jsobj (provide-jsobject jsobj-provider)
+    (if (null? value)
+      (slot-ref jsobj slot)
+      (apply slot-set! jsobj slot value))))
+
+
+(define-class <json-value-meta> (<class>)
+  ((rule :init-value #f)
+   (obj->json :init-value #f)
+   (json->obj :init-value #f)))
+
+(define (make-rule slot-defs)
+  (fold (lambda (rule slot-def)
+          (let-keywords (car slot-defs)
+              ((jsproperty #f)
+               (json-value-class #f)
+               . #f)
+            (cond
+              (jsproperty
+               #f)
+              (else
+               rule))))
+        '()
+        (class-slots json-value-class)))
+
+(define (obj->json json-value)
+  (let1 proc (~ json-value'obj->json)
+    (proc json-value)))
+
+(define (json->obj json-value-class json)
+  (let1 proc (~ json-value-class'json->obj)
+    (proc json)))
+
+(define (json-rule json-value-class)
+  (~ json-value-class'rule))
+
+(define (make-obj->json slot-defs)
+  (lambda (json-value)
+    (fold (lambda (json slot-def)
+            (let ((slot-name (slot-definition-name slot-def))
+                  (jsproperty (slot-definition-option slot-def :jsproperty #f))
+                  (json-value-class (slot-definition-option slot-def :json-value-class #f)))
+              (cond
+                ((and jsproperty json-value-class)
+                 (let1 proc (~ json-value-class'obj->json)
+                   (assoc-set! json jsproperty (proc (~ json-value slot-name)))))
+                (jsproperty
+                 (assoc-set! json jsproperty (~ json-value slot-name)))
+                (else
+                 json))))
+          '()
+          slot-defs)))
+
+(define (make-json->obj json-value-class slot-defs)
+  (lambda (json)
+    (let1 obj (make json-value-class)
+      (for-each (lambda (slot-def)
+                  (let ((slot-name (slot-definition-name slot-def))
+                        (jsproperty (slot-definition-option slot-def :jsproperty #f))
+                        (json-value-class (slot-definition-option slot-def :json-value-class #f)))
+                    (cond
+                      ((and jsproperty json-value-class)
+                       (let1 proc (~ json-value-class'json->obj)
+                         (set! (~ obj slot-name) (proc (assoc-ref json jsproperty)))))
+                      (jsproperty
+                       (set! (~ obj slot-name) (assoc-ref json jsproperty)))
+                      (else
+                       #t))))
+                slot-defs)
+      obj)))
+
+(define (make-rule slot-defs)
+  (fold (lambda (slot-def rule)
+          (let-keywords (slot-definition-options slot-def)
+              ((jsproperty #f)
+               (json-value-class #f)
+               . #f)
+            (cond
+              ((and jsproperty json-value-class)
+               (assoc-set! rule jsproperty (~ json-value-class'rule)))
+              (jsproperty
+               (assoc-set! rule jsproperty #t))
+              (else
+               rule))))
+        '()
+        slot-defs))
+
+(define-method initialize ((json-value-class <json-value-meta>) initargs)
   (next-method)
-  (or (and-let1 id (atomic (slot-ref obj '%free-id-list)
-                     (lambda (free-id-list)
-                       (allocate-id! free-id-list)))
-        (slot-set! obj 'id id)
-        #t)
-      (error "The jsobject ID space is exhausted.")))
+  (let1 slot-defs (class-slots json-value-class)
+    (set! (~ json-value-class'rule) (make-rule slot-defs))
+    (set! (~ json-value-class'json->obj) (make-json->obj json-value-class slot-defs))
+    (set! (~ json-value-class'obj->json) (make-obj->json slot-defs))))
 
-(define-method jsobject-id ((obj <jsobject>))
-  (or (slot-ref obj 'id)
-      (errorf "~s was invalidated" obj)))
+(define-class <json-value-mixin> ()
+  ()
+  :metaclass <json-value-meta>)
 
-(define-method release-jsobject-id! ((obj <jsobject>))
-  (and-let1 id (slot-ref obj 'id)
-    (slot-set! obj 'id #f)
-    (atomic (slot-ref obj '%free-id-list)
-      (lambda (free-id-list)
-        (release-id! free-id-list id)))))
+;;;
 
-(define-method invalidate! ((obj <jsobject>))
-  (jslet ((obj*::object* obj))
-      (obj*.invalidate))
-  (release-jsobject-id! obj))
+(define-constant VAL-TYPE-UNDEFINED 1)
+(define-constant VAL-TYPE-NULL 2)
+(define-constant VAL-TYPE-TRUE 3)
+(define-constant VAL-TYPE-FALSE 4)
+(define-constant VAL-TYPE-PROCEDURE 5)
+(define-constant VAL-TYPE-POSITIVE-INFINITY 6)
+(define-constant VAL-TYPE-NEGATIVE-INFINITY 7)
+(define-constant VAL-TYPE-NAN 8)
+(define-constant VAL-TYPE-STRING 9)
+(define-constant VAL-TYPE-SYMBOL 10)
+(define-constant VAL-TYPE-OBJECT 11)
+(define-constant VAL-TYPE-DATE 12)
+(define-constant VAL-TYPE-ARRAY 13)
+(define-constant VAL-TYPE-INT8ARRAY 14)
+(define-constant VAL-TYPE-UINT8ARRAY 15)
+(define-constant VAL-TYPE-INT16ARRAY 16)
+(define-constant VAL-TYPE-UINT16ARRAY 17)
+(define-constant VAL-TYPE-INT32ARRAY 18)
+(define-constant VAL-TYPE-UINT32ARRAY 19)
+(define-constant VAL-TYPE-FLOAT32ARRAY 20)
+(define-constant VAL-TYPE-FLOAT64ARRAY 21)
+(define-constant VAL-TYPE-JSON 22)
+(define-constant VAL-TYPE-INT8 23)
+(define-constant VAL-TYPE-UINT8 24)
+(define-constant VAL-TYPE-INT16 25)
+(define-constant VAL-TYPE-UINT16 26)
+(define-constant VAL-TYPE-INT32 27)
+(define-constant VAL-TYPE-UINT32 28)
+(define-constant VAL-TYPE-FLOAT64 29)
 
-(define-method invalidate? ((obj <jsobject>))
-  (not (not (slot-ref obj 'id))))
+(define (encode-string str out)
+  (let1 data (ces-convert-to <u8vector> str (gauche-character-encoding) 'utf-8)
+    (encode-number (u8vector-length data) out)
+    (write-uvector data out)))
+
+(define (encode-number v out)
+  (define (encode-float64 v out)
+    (write-s8 VAL-TYPE-FLOAT64 out)
+    (write-f64 v out 'little-endian))
+
+  (if (integer? v)
+    (if (<= 0 v)
+      ;; zero or positive
+      (cond
+        ((<= v #x80)
+         (write-s8 (- v) out))
+        ((<= v #xff)
+         (write-s8 VAL-TYPE-UINT8 out)
+         (write-u8 v out))
+        ((<= v #xffff)
+         (write-s8 VAL-TYPE-UINT16 out)
+         (write-u16 v out 'little-endian))
+        ((<= v #xffffffff)
+         (write-s8 VAL-TYPE-UINT32 out)
+         (write-u32 v out 'little-endian))
+        (else
+         (encode-float64 v out)))
+      ;; negative
+      (cond
+        ((<= #x-80 v)
+         (write-s8 VAL-TYPE-INT8 out)
+         (write-s8 v out))
+        ((<= #x-8000 v)
+         (write-s8 VAL-TYPE-INT16 out)
+         (write-s16 v out 'little-endian))
+        ((<= #x-80000000 v)
+         (write-s8 VAL-TYPE-INT32 out)
+         (write-s32 v out 'little-endian))
+        (else
+         (encode-float64 v out))))
+    ;; value is float
+    (encode-float64 v out)))
+
+
+(define (encode-value obj out)
+  (cond
+    ;; undefined
+    ((undefined? obj)
+     (write-s8 VAL-TYPE-UNDEFINED out))
+    ;; null
+    ((eq? obj 'null)
+     (write-s8 VAL-TYPE-NULL out))
+    ;; true
+    ((or (eq? obj #t) (eq? obj 'true))
+     (write-s8 VAL-TYPE-TRUE out))
+    ;; false
+    ((or (eq? obj #f) (eq? obj 'false))
+     (write-s8 VAL-TYPE-FALSE out))
+    ;; number
+    ((real? obj)
+     (encode-number obj out))
+    ;; positive infinity
+    ((equal? obj +inf.0)
+     (write-s8 VAL-TYPE-POSITIVE-INFINITY out))
+    ;; negative infinity
+    ((equal? obj -inf.0)
+     (write-s8 VAL-TYPE-NEGATIVE-INFINITY out))
+    ;; NaN
+    ((and (number? obj) (nan? obj))
+     (write-s8 VAL-TYPE-NAN out))
+    ;; string
+    ((string? obj)
+     (write-s8 VAL-TYPE-STRING out)
+     (encode-string obj out))
+    ;; symbol
+    ((symbol? obj)
+     (write-s8 VAL-TYPE-SYMBOL out)
+     (encode-string (symbol->string obj) out))
+    ;; object
+    ((is-a? obj <jsobject>)
+     (let1 jsobj-id (jsobject-id obj)
+       (write-s8 VAL-TYPE-OBJECT out)
+       ;; class-id isn't necessary because the object already exists in Javascript world.
+       (write-u32 jsobj-id out 'little-endian)))
+    ((is-a? obj <jsobject-provider>)
+     (let1 jsobj-id (jsobject-id obj)
+       (write-s8 VAL-TYPE-OBJECT out)
+       ;; class-id isn't necessary because the object already exists in Javascript world.
+       (write-u32 jsobj-id out 'little-endian)))
+    ;; date
+    ((is-a? obj <time>)
+     (write-s8 VAL-TYPE-DATE out)
+     (encode-number (* (time->seconds obj) 1000) out))
+    ;; array
+    ((vector? obj)
+     (write-s8 VAL-TYPE-ARRAY out)
+     (encode-number (vector-length obj) out)
+     (dotimes (i (vector-length obj))
+       (encode-value (vector-ref obj i) out)))
+    ;; int8array
+    ((s8vector? obj)
+     (write-s8 VAL-TYPE-INT8ARRAY out)
+     (encode-number (s8vector-length obj) out)
+     (write-uvector obj out))
+    ;; uint8array
+    ((u8vector? obj)
+     (write-s8 VAL-TYPE-UINT8ARRAY out)
+     (encode-number (u8vector-length obj) out)
+     (write-uvector obj out))
+    ;; int16array
+    ((s16vector? obj)
+     (write-s8 VAL-TYPE-INT16ARRAY out)
+     (encode-number (s16vector-length obj) out)
+     (write-uvector obj out 0 -1 'little-endian))
+    ;; uint16array
+    ((u16vector? obj)
+     (write-s8 VAL-TYPE-UINT16ARRAY out)
+     (encode-number (u16vector-length obj) out)
+     (write-uvector obj out 0 -1 'little-endian))
+    ;; int32array
+    ((s32vector? obj)
+     (write-s8 VAL-TYPE-INT32ARRAY out)
+     (encode-number (s32vector-length obj) out)
+     (write-uvector obj out 0 -1 'little-endian))
+    ;; uint32array
+    ((u32vector? obj)
+     (write-s8 VAL-TYPE-UINT32ARRAY out)
+     (encode-number (u32vector-length obj) out)
+     (write-uvector obj out 0 -1 'little-endian))
+    ;; float32array
+    ((f32vector? obj)
+     (write-s8 VAL-TYPE-FLOAT32ARRAY out)
+     (encode-number (f32vector-length obj) out)
+     (write-uvector obj out 0 -1 'little-endian))
+    ;; float64array
+    ((f64vector? obj)
+     (write-s8 VAL-TYPE-FLOAT64ARRAY out)
+     (encode-number (f64vector-length obj) out)
+     (write-uvector obj out 0 -1 'little-endian))
+    ;; JSON
+    ((list? obj)
+     (write-s8 VAL-TYPE-JSON out)
+     (encode-number (length obj) out)
+     (for-each (lambda (pair)
+                 (encode-value (car pair) out)
+                 (encode-value (cdr pair) out))
+               obj))
+    ((worker-callback? obj)
+     (write-s8 VAL-TYPE-PROCEDURE out)
+     (let1 id (link-callback obj)
+       (write-u32 id out 'little-endian)))
+    ((procedure? obj)
+     (write-s8 VAL-TYPE-PROCEDURE out)
+     (let1 id (link-callback (worker-callback obj))
+       (write-u32 id out 'little-endian)))
+    (else
+     (errorf "Unsupported object: ~s" obj))))
+
+(define (decode-string in)
+  (let1 len (decode-value in)
+    (ces-convert (read-uvector <u8vector> len in) 'utf-8)))
+
+(define decoder-table
+  (alist->hash-table
+    `(
+      ;; undefined
+      (,VAL-TYPE-UNDEFINED . ,(^(in) undefined))
+      ;; null
+      (,VAL-TYPE-NULL . ,(^(in) 'null))
+      ;; true
+      (,VAL-TYPE-TRUE . ,(^(in) #t))
+      ;; false
+      (,VAL-TYPE-FALSE . ,(^(in) #f))
+      ;; positive infinity
+      (,VAL-TYPE-POSITIVE-INFINITY . ,(^(in) +inf.0))
+      ;; negative infinity
+      (,VAL-TYPE-NEGATIVE-INFINITY . ,(^(in) -inf.0))
+      ;; NaN
+      (,VAL-TYPE-NAN . ,(^(in) +nan.0))
+      ;; string
+      (,VAL-TYPE-STRING . ,(^(in) (decode-string in)))
+      ;; symbol
+      (,VAL-TYPE-SYMBOL . ,(^(in) (string->symbol (decode-string in))))
+      ;; object
+      (,VAL-TYPE-OBJECT . ,(^(in)
+                             (let* ((class-id (read-u32 in 'little-endian))
+                                    (jsobj-id (read-u32 in 'little-endian)))
+                               (application-context-slot-atomic-ref 'jsobject-manager
+                                 (lambda (manager)
+                                   (or (find-jsobject manager jsobj-id)
+                                       (let1 jsobj (make (hash-table-get *id->class-table* class-id)
+                                                     :id jsobj-id)
+                                         (register-jsobject! manager jsobj)
+                                         jsobj)))))))
+      ;; date
+      (,VAL-TYPE-DATE . ,(^(in) (seconds->time (/. (decode-value in) 1000))))
+      ;; array
+      (,VAL-TYPE-ARRAY . ,(^(in)
+                            (let1 len (decode-value in)
+                              (vector-ec (: _ len) (decode-value in)))))
+      ;; int8array
+      (,VAL-TYPE-INT8ARRAY . ,(^(in) (read-uvector <s8vector> (decode-value in) in 'little-endian)))
+      ;; uint8array
+      (,VAL-TYPE-UINT8ARRAY . ,(^(in) (read-uvector <u8vector> (decode-value in) in 'little-endian)))
+      ;; int16array
+      (,VAL-TYPE-INT16ARRAY . ,(^(in) (read-uvector <s16vector> (decode-value in) in 'little-endian)))
+      ;; uint16array
+      (,VAL-TYPE-UINT16ARRAY . ,(^(in) (read-uvector <u16vector> (decode-value in) in 'little-endian)))
+      ;; int32array
+      (,VAL-TYPE-INT32ARRAY . ,(^(in) (read-uvector <s32vector> (decode-value in) in 'little-endian)))
+      ;; uint32array
+      (,VAL-TYPE-UINT32ARRAY . ,(^(in) (read-uvector <u32vector> (decode-value in) in 'little-endian)))
+      ;; float32array
+      (,VAL-TYPE-FLOAT32ARRAY . ,(^(in) (read-uvector <f32vector> (decode-value in) in 'little-endian)))
+      ;; float64array
+      (,VAL-TYPE-FLOAT64ARRAY . ,(^(in) (read-uvector <f64vector> (decode-value in) in 'little-endian)))
+      ;; JSON
+      (,VAL-TYPE-JSON . ,(^(in)
+                           (let1 len (decode-value in)
+                             (list-ec (: _ (decode-value in))
+                                      (let* ((key (decode-value in))
+                                             (val (decode-value in)))
+                                        (cons key val))))))
+      ;; int8
+      (,VAL-TYPE-INT8 . ,read-s8)
+      ;; uint8
+      (,VAL-TYPE-UINT8 . ,read-u8)
+      ;; int16
+      (,VAL-TYPE-INT16 . ,(cut read-s16 <> 'little-endian))
+      ;; uint16
+      (,VAL-TYPE-UINT16 . ,(cut read-u16 <> 'little-endian))
+      ;; int32
+      (,VAL-TYPE-INT32 . ,(cut read-s32 <> 'little-endian))
+      ;; uint32
+      (,VAL-TYPE-UINT32 . ,(cut read-u32 <> 'little-endian))
+      ;; float64
+      (,VAL-TYPE-FLOAT64 . ,(cut read-f64 <> 'little-endian)))))
+
+(define (decode-value in)
+  (let1 val-type (read-s8 in)
+    (cond
+      ((eof-object? val-type)
+       val-type)
+      ((<= val-type 0)
+       (- val-type))
+      (else
+       (let1 decoder (or (hash-table-get decoder-table val-type #f)
+                         (errorf "Unsupported value type: ~a" val-type))
+         (decoder in))))))
+
+(define (decode-value-list in)
+  (port-map values (cut decode-value in)))
+
+(define (decode-received-binary-data data)
+  (call-with-input-string (u8vector->string data)
+    (lambda (in)
+      (let* ((future-id (read-u32 in 'little-endian))
+             (vals (decode-value-list in)))
+        (apply notify-values future-id vals)))))
+
+(register-binary-handler! decode-received-binary-data)
+
+;;;
+
+(define-application-context-slot future-table (make-hash-table 'equal?) (make-id-generator #xffffffff))
+
+(define (with-future-table proc)
+  (application-context-slot-atomic-ref 'future-table proc))
+
+(define (allocate-future-id receiver)
+  (with-future-table
+    (lambda (tbl future-next-id)
+      (define (loop)
+        (let1 id (future-next-id)
+          (cond
+            ((hash-table-contains? tbl id)
+             (loop))
+            (else
+             (hash-table-put! tbl id receiver)
+             id))))
+      (loop))))
+
+(define (free-future-id id)
+  (with-future-table
+    (lambda (tbl future-next-id)
+      (hash-table-delete! tbl id))))
+
+(define (notify-values future-id :rest vals)
+  (with-future-table
+    (lambda (tbl future-next-id)
+      (let1 receiver (hash-table-get tbl future-id #f)
+        (match receiver
+          ((? mtqueue? queue)
+           (hash-table-delete! tbl future-id)
+           (enqueue! queue (if (null? vals)
+                             (list (undefined))
+                             vals)))
+          ((? worker-callback? callback)
+           (apply callback vals))
+          (else
+           (errorf "[BUG] Invalid future ID: ~a" future-id)))))))
+
+(define-application-context-slot callback->id-table (make-hash-table 'equal?))
+
+(define (link-callback callback)
+  (application-context-slot-atomic-ref 'callback->id-table
+    (lambda (tbl)
+      (or (hash-table-get tbl callback #f)
+          (let1 id (allocate-future-id callback)
+            (hash-table-put! tbl callback id)
+            id)))))
+
+(define (unlink-callback callback)
+  (application-context-slot-atomic-ref 'callback->id-table
+    (lambda (tbl)
+      (and-let1 id (hash-table-get tbl callback #f)
+        (jslet ((id::u32))
+          (Graviton.freeProcedure id))
+        (free-future-id id)))))
+
+(define (unlink-procedure proc)
+  (for-each unlink-callback
+            (application-context-slot-atomic-ref 'callback->id-table
+              (lambda (tbl)
+                (rlet1 result '()
+                  (hash-table-for-each tbl (lambda (callback id)
+                                             (when (and (is-a? callback <procedure-callback>)
+                                                        (equal? (~ callback'worker) (current-worker))
+                                                        (equal? (~ callback'procedure) proc))
+                                               (push! result callback)))))))))
 
 ;;;
 

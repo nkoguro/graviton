@@ -1,24 +1,23 @@
 (use gauche.logger)
 (use graviton)
-(use graviton.canvas)
-(use util.match)
+(use text.html-lite)
 
 (define (main args)
   (grv-player)
 
+  (define-document-content
+    (html:body :style "background-color: gray"
+     (html:canvas :width 300 :height 150 :class "grv-object-fit-contain" :style "background-color: white")))
+
   (grv-begin
-    (capture-jsevent (client-window) "keyup" '("key"))
+    (on-jsevent window "keyup" (key)
+      (when (equal? key "Escape")
+        (grv-exit)))
 
-    (make-canvas 300 150)
-    (rect 10 10 100 100)
-    (fill)
-    (log-format "In path: ~a" (force (is-point-in-path? 30 70)))
+    (let* ((canvas (document'query-selector "canvas"))
+           (ctx (canvas'get-context "2d")))
+      (ctx'rect 10 10 100 100)
+      (ctx'fill)
 
-    (port-for-each (match-lambda
-                     (('keyup _ "Escape")
-                      (event-stream-close))
-                     (_
-                      #f))
-                   next-event)
-
-    0))
+      (on-jsevent canvas "click" (offset-x offset-y)
+        (log-format "(~a, ~a) in path?: ~a" offset-x offset-y (ctx'is-point-in-path offset-x offset-y))))))

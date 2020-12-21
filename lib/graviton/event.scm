@@ -35,58 +35,62 @@
   (use file.util)
   (use gauche.collection)
   (use gauche.parameter)
+  (use gauche.partcont)
   (use gauche.regexp)
   (use gauche.threads)
+  (use gauche.time)
   (use graviton.app)
   (use graviton.async)
   (use graviton.comm)
   (use graviton.config)
   (use graviton.jsbridge)
+  (use graviton.misc)
+  (use srfi-13)
   (use util.match)
 
-  (export <jsevent>
-          add-jsevent-listener!
-          remove-jsevent-listener!
-
-          fire-event
-          next-event
-          all-events
-          event-stream-closed?
-          event-stream-close
-          capture-jsevent))
+  (export <event>
+          jsevent-callback-set!
+          jsevent-callback-delete!
+          on-jsevent
+          request-animation-frame-callback!
+          cancel-animation-frame-callback!
+          on-repaint
+          ))
 
 (select-module graviton.event)
 
 (import-js ("graviton/event.mjs" :as Event))
 
-(define-class <jsevent> ()
-  ())
+(define-class <event> (<jsobject>)
+  ((bubbles :jsproperty "bubbles"
+            :read-only? #t)
+   (cancel-bubble :jsproperty "cancelBubble")
+   (cancelable :jsproperty "cancelable"
+               :read-only? #t)
+   (composed :jsproperty "composed"
+             :read-only? #t)
+   (current-target :jsproperty "currentTarget"
+                   :read-only? #t)
+   (default-prevented :jsproperty "defaultPrevented" :read-only? #t)
+   (event-phase :jsproperty "eventPhase"
+                :read-only? #t)
+   (return-value :jsproperty "returnValue")
+   (target :jsproperty "target"
+           :read-only? #t)
+   (timestamp :jsproperty "timestamp"
+              :read-only? #t)
+   (type :jsproperty "type"
+         :read-only? #t)
+   (is-trusted :jsproperty "isTrusted"
+               :read-only? #t))
+  :jsclass "Event")
 
-(define (js-property-slot-names+props event-class)
-  (sort (fold (lambda (slot-def js-prop-slots)
-                (match-let1 (slot-name . slot-opts) slot-def
-                  (or (and-let1 prop (get-keyword :js-property slot-opts #f)
-                        (acons slot-name prop js-prop-slots))
-                      js-prop-slots)))
-              '()
-              (compute-slots event-class))
-        (lambda (s1 s2)
-          (string<? (cdr s1) (cdr s2)))))
+(define-automatic-jsobject-methods <event>
+  "composedPath")
 
-(define (js-property-slot-names event-class)
-  (map car (js-property-slot-names+props event-class)))
+(define-application-context-slot jsevent-callback-table (make-hash-table 'equal?))
 
-(define (js-property-slot-props event-class)
-  (map cdr (js-property-slot-names+props event-class)))
-
-(define-method initialize ((event <jsevent>) args)
-  (next-method)
-  (for-each (lambda (name val)
-              (slot-set! event name val))
-            (js-property-slot-names (class-of event))
-            args))
-
-(define (parse-prop str)
+(define (parse-prop-spec str)
   (list->vector (reverse (fold (lambda (str result)
                                  (rxmatch-if (#/(.*)\[(\d+)\]/ str)
                                      (_ name index)
@@ -95,188 +99,124 @@
                                '()
                                (string-split str ".")))))
 
-(define-application-context-slot listener-table (make-hash-table 'equal?))
+(define-method jsevent-callback-set! ((jsobj <jsobject>) event-type prop-specs (callback <worker-callback>))
+  (jsevent-callback-delete! jsobj event-type)
+  (application-context-slot-atomic-ref 'jsevent-callback-table
+    (lambda (tbl)
+      (hash-table-put! tbl (list jsobj event-type) callback)))
+  (jslet ((obj::object jsobj)
+          (event-type::string)
+          (prop-specs)
+          (callback))
+    (Event.registerEventHandler obj event-type prop-specs callback))
+  (undefined))
 
-(define (add-jsevent-listener! event-target event-type event-class-or-props proc)
-  (let1 id (jsobject-id event-target)
-    (application-context-slot-atomic-ref 'listener-table
-      (lambda (tbl)
-        (hash-table-push! tbl
-                          (cons id event-type)
-                          (list (if (is-a? event-class-or-props <class>)
-                                    event-class-or-props
-                                    #f)
-                                proc))))
-    (jslet ((event-target*::object* event-target)
-            (event-type::json)
-            (prop-vec::json (map-to <vector> parse-prop (cond
-                                                          ((and (is-a? event-class-or-props <class>)
-                                                                (member <jsevent> (class-precedence-list event-class-or-props)))
-                                                           (js-property-slot-props event-class-or-props))
-                                                          ((is-a? event-class-or-props <collection>)
-                                                           event-class-or-props)
-                                                          (else
-                                                           (errorf "a class which inherits <jsevent> or a collection of property spec is required, but got ~s" event-class-or-props))))))
-      (Event.registerEventHandler event-target* event-type prop-vec))))
+(define-method jsevent-callback-set! ((jsobj <jsobject>) event-type prop-specs (proc <procedure>))
+  (jsevent-callback-set! jsobj event-type prop-specs (worker-callback proc)))
 
-(define (remove-jsevent-listener! event-target event-type proc)
-  (let1 id (jsobject-id event-target)
-    (application-context-slot-atomic-ref 'listener-table
-      (lambda (tbl)
-        (let1 key (cons jsobject-id event-type)
-          (hash-table-update! tbl key (lambda (vals)
-                                        (remove (match-lambda
-                                                  ((_ handler)
-                                                   (eq? proc handler)))
-                                                vals))))))
-    (jslet ((event-target*::object* event-target)
-            (event-type::json))
-      (Event.unregisterEventHandler event-target* event-type))))
+(define-method jsevent-callback-set! ((jsobj-provider <jsobject-provider>) event-type prop-specs proc-or-callback)
+  (jsevent-callback-set! (jsobj-provider) event-type prop-specs proc-or-callback))
 
+(define-method jsevent-callback-delete! ((jsobj <jsobject>) event-type)
+  (and-let1 callback (application-context-slot-atomic-ref 'jsevent-callback-table
+                      (lambda (tbl)
+                        (let1 key (list jsobj event-type)
+                          (begin0
+                              (hash-table-get tbl key #f)
+                            (hash-table-delete! tbl key)))))
+    (jslet ((obj::object jsobj)
+            (event-type::string)
+            (callback))
+      (Event.unregisterEventHandler obj event-type callback))
+    (unlink-callback callback)
+    (undefined)))
 
-(define-action "notifyEvent" (id event-type event-values)
-  (let1 args (vector->list event-values)
-    (for-each (match-lambda
-                ((event-class proc)
-                 (let1 args (if event-class
-                                (list (apply make event-class args))
-                                args)
-                   (apply proc args))))
-              (application-context-slot-atomic-ref 'listener-table
-                (lambda (tbl)
-                  (hash-table-get tbl (cons id event-type) '()))))))
+(define-method jsevent-callback-delete! ((jsobj-provider <jsobject-provider>) event-type)
+  (jsevent-callback-delete! (jsobj-provider) event-type))
 
-;;;
+(define (estimate-prop-spec sym)
+  (define (scm->camel-case str)
+    (let1 parts (string-split str "-")
+      (cond
+        ((null? parts)
+         "")
+        (else
+         (apply string-append (car parts) (map string-titlecase (cdr parts)))))))
+  (let1 parts (string-split (symbol->string sym) ":")
+    (list->vector (map (^s (regexp-replace #/\?$/ (scm->camel-case s) "")) parts))))
 
-(define-syntax symbol-macrolet
+(define (parse-arg-specs arg-specs)
+  (let loop ((specs arg-specs)
+        (args '())
+        (props '()))
+    (match specs
+      (()
+       (values (reverse args) (list->vector (reverse props))))
+      (((? symbol? arg) rest ...)
+       (loop rest (cons arg args) (cons (estimate-prop-spec arg) props)))
+      ((((? symbol? arg) (? string? prop-spec)) rest ...)
+       (loop rest (cons arg args) (cons (parse-prop-spec prop-spec) props)))
+      (_
+       (errorf "malformed arg-specs: ~s" arg-specs)))))
+
+(define-syntax on-jsevent
   (er-macro-transformer
     (lambda (form rename id=?)
       (match form
-        ((_ (and (((? symbol? sym) val) ...)
-                 form-alist)
-            body ...)
-         (define (traverse expr)
-           (match expr
-             (('quote x)
-              (list 'quote x))
-             (('quasiquote x)
-              (list 'quasiquote (traverse-quasiquote x)))
-             ((e ...)
-              (map traverse e))
-             ((? symbol? sym)
-              (let1 pair (assq sym form-alist)
-                (if pair
-                    (cadr pair)
-                    sym)))
-             (_
-              expr)))
-         (define (traverse-quasiquote expr)
-           (match expr
-             (('unquote x)
-              (list 'unquote (traverse x)))
-             ((e ...)
-              (map traverse-quasiquote e))
-             (_
-              expr)))
-         (quasirename rename `(begin ,@(traverse body))))
+        ((_ jsobj type (? list? arg-specs) body ...)
+         (receive (args props) (parse-arg-specs arg-specs)
+           (quasirename rename `(jsevent-callback-set! ,jsobj ,type ,props (lambda ,args ,@body)))))
+        ((_ jsobj type #f)
+         (quasirename rename `(jsevent-callback-delete! ,jsobj ,type)))
         (_
-         (errorf "malformed symbol-macrolet: ~s" form))))))
+         (errorf "malformed on-jsevent: ~s" form))))))
 
-(define-syntax with-slots
-  (syntax-rules ()
-    ((_ (slot ...) obj body ...)
-     (symbol-macrolet ((slot (slot-ref obj 'slot)) ...) body ...))))
+(define-application-context-slot animation-frame-callback #f)
 
-(define-class <event-stream> ()
-  ((lock :init-form (make-mutex))
-   (condition-variable :init-form (make-condition-variable))
-   (priority-queue-table :init-form (make-hash-table 'eqv?))
-   (state :init-value 'active)))
-
-(define (make-event-stream)
-  (make <event-stream>))
-
-(define (sort-events events)
-  (sort events (lambda (e1 e2)
-                 (< (car e1) (car e2)))))
-
-(define (event-stream-store! event-stream event-type args :optional (priority 0))
-  (with-locking-mutex (slot-ref event-stream 'lock)
-    (lambda ()
-      (let* ((tbl (slot-ref event-stream 'priority-queue-table))
-             (queue (hash-table-get tbl priority #f)))
-        (unless queue
-          (set! queue (make-queue))
-          (hash-table-put! tbl priority queue))
-        (enqueue! queue (list* event-type args))
-        (condition-variable-broadcast! (slot-ref event-stream 'condition-variable))))))
-
-(define (event-stream-fetch! event-stream)
-  (with-slots (lock condition-variable priority-queue-table state) event-stream
-    (mutex-lock! lock)
+(define-method request-animation-frame-callback! ((callback <worker-callback>))
+  (let1 cur-callback (application-context-slot-ref 'animation-frame-callback)
     (cond
-      ((eq? state 'closed)
-       (eof-object))
+      ((and cur-callback (not (equal? cur-callback callback)))
+       ;; Need to unlink the current callback.
+       ;; Wait Graviton.requestAnimationFrameServerCallback intentionally to ensure removal of the current callback.
+       (jslet/result ((callback))
+         (result (Graviton.requestAnimationFrameServerCallback callback)))
+       (unlink-callback cur-callback)
+       (application-context-slot-set! 'animation-frame-callback callback))
       (else
-       (let loop ((priorities (sort (hash-table-keys priority-queue-table))))
-         (cond
-           ((and (not (null? priorities))
-                 (dequeue! (hash-table-get priority-queue-table (car priorities)) #f))
-            => (lambda (event)
-                 (mutex-unlock! lock)
-                 event))
-           ((null? priorities)
-            (mutex-unlock! lock condition-variable)
-            (mutex-lock! lock)
-            (loop (sort (hash-table-keys priority-queue-table))))
-           (else
-            (loop (cdr priorities)))))))))
+       (jslet ((callback))
+         (Graviton.requestAnimationFrameServerCallback callback))
+       (unless cur-callback
+         (application-context-slot-set! 'animation-frame-callback callback)))))
+  (undefined))
 
-(define (event-stream-fetch-all! event-stream :optional fallback)
-  (with-slots (lock priority-queue-table state) event-stream
-    (with-locking-mutex lock
-      (lambda ()
-        (cond
-          ((eq? state 'closed)
-           (if (undefined? fallback)
-             (eof-object)
-             fallback))
-          (else
-           (let loop ((priorities (sort (hash-table-keys priority-queue-table)))
-                      (events '()))
-             (cond
-               ((null? priorities)
-                events)
-               (else
-                (loop (cdr priorities)
-                      (append events (dequeue-all! (hash-table-get priority-queue-table (car priorities))))))))))))))
+(define-method request-animation-frame-callback! ((proc <procedure>))
+  (animation-frame-callback-set! (worker-callback proc)))
 
-(define (fire-event event-type args :optional (priority 0))
-  (event-stream-store! (event-stream) event-type args priority))
+(define (cancel-animation-frame-callback!)
+  (let1 cur-callback (application-context-slot-ref 'animation-frame-callback)
+    ;; Wait Graviton.requestAnimationFrameServerCallback intentionally to ensure removal of the current callback.
+    (jslet/result ()
+      (result (Graviton.requestAnimationFrameServerCallback undefined)))
+    (when cur-callback
+      (unlink-callback cur-callback))
+    (application-context-slot-set! 'animation-frame-callback #f))
+  (undefined))
 
-(define (next-event)
-  (event-stream-fetch! (event-stream)))
-
-(define (all-events)
-  (event-stream-fetch-all! (event-stream)))
-
-(define (event-stream-closed?)
-  (with-locking-mutex (slot-ref (event-stream) 'lock)
-    (lambda ()
-      (eq? (slot-ref (event-stream) 'state) 'closed))))
-
-(define (event-stream-close)
-  (with-locking-mutex (slot-ref (event-stream) 'lock)
-    (lambda ()
-      (slot-set! (event-stream) 'state 'closed))))
-
-(define-application-context-slot event-stream (make-event-stream))
-
-(define (event-stream)
-  (application-context-slot-ref 'event-stream))
-
-(define (capture-jsevent event-target event-type event-class-or-props :optional (priority 0))
-  (let1 event-type-sym (string->symbol event-type)
-    (add-jsevent-listener! event-target event-type event-class-or-props
-      (lambda args
-        (fire-event event-type-sym (cons event-target args) priority)))))
+(define-syntax on-repaint
+  (syntax-rules (:priority)
+    ((_ #f)
+     (cancel-animation-frame-callback!))
+    ((_ :priority priority (sec-per-frame) body ...)
+     (let1 prev-time #f
+       (letrec ((callback (worker-callback (lambda (cur-time)
+                                             (let1 sec-per-frame (if prev-time
+                                                                   (/. (- cur-time prev-time) 1000)
+                                                                   0)
+                                               body ...)
+                                             (request-animation-frame-callback! callback)
+                                             (set! prev-time cur-time))
+                                           :priority priority)))
+         (request-animation-frame-callback! callback))))
+    ((_ (sec-per-frame) body ...)
+     (on-repaint :priority #f (sec-per-frame) body ...))))

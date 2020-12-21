@@ -2,38 +2,32 @@
 (use gauche.logger)
 (use graviton)
 (use graviton.canvas)
+(use graviton.event)
 (use math.const)
+(use text.html-lite)
 (use util.list)
 (use util.match)
-
-(define-class <mouse-event> (<jsevent>)
-  ((width :js-property "target.width")
-   (height :js-property "target.height")
-   (client-width :js-property "target.clientWidth")
-   (client-height :js-property "target.clientHeight")
-   (offset-x :js-property "offsetX")
-   (offset-y :js-property "offsetY")
-   (x :allocation :virtual
-      :slot-ref (lambda (obj)
-                  (floor->exact (/. (* (slot-ref obj 'width) (slot-ref obj 'offset-x))
-                                    (slot-ref obj 'client-width)))))
-   (y :allocation :virtual
-      :slot-ref (lambda (obj)
-                  (floor->exact (/. (* (slot-ref obj 'height) (slot-ref obj 'offset-y))
-                                    (slot-ref obj 'client-height)))))))
-
 
 (define (main args)
   (grv-player)
 
+  (define-document-content
+    (html:body
+     (html:canvas :width 150 :height 200 :class "grv-object-fit-contain")))
+
   (grv-begin
-    (match-let1 (w h) (force (client-window-size))
+    (receive (w h) (window-size)
       (log-format "window width=~a, height=~a" w h))
 
-    (capture-jsevent (client-window) "keyup" '("key"))
+    (on-jsevent window "keyup" (key)
+      (when (equal? key "Escape")
+        (grv-exit)))
 
-    (let1 canvas (make-canvas 150 200)
-      (capture-jsevent canvas "click" <mouse-event>)
+    (let* ((canvas (document'query-selector "canvas"))
+           (ctx (canvas'get-context "2d")))
+
+      (on-jsevent canvas "click" (offset-x offset-y)
+        (log-format "mouse: x=~a, y=~a" offset-x offset-y))
 
       (dotimes (i 4)
         (dotimes (j 3)
@@ -43,19 +37,8 @@
                 (start-angle 0)
                 (end-angle (+ pi (/ (* pi j) 2)))
                 (anti-clockwise (odd? (modulo i 2))))
-            (begin-path)
-            (arc x y radius start-angle end-angle anti-clockwise)
+            (ctx'begin-path)
+            (ctx'arc x y radius start-angle end-angle anti-clockwise)
             (if (< 1 i)
-              (fill)
-              (stroke)))))
-
-      (port-for-each (match-lambda
-                       (('keyup _ "Escape")
-                        (event-stream-close))
-                       (('click _ mouse-event)
-                        (log-format "mouse: x=~a, y=~a" (slot-ref mouse-event 'x) (slot-ref mouse-event 'y)))
-                       (_
-                        #f))
-                     next-event)
-
-      0)))
+              (ctx'fill)
+              (ctx'stroke))))))))

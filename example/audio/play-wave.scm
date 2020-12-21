@@ -1,12 +1,33 @@
-(use gauche.threads)
 (use graviton)
-(use graviton.audio)
+
+(define (make-node freq)
+  (let1 oscillator (audio-context'create-oscillator)
+    (set! (~ oscillator'type) "square")
+    (set! (~ oscillator'frequency'value) freq)
+    (oscillator'connect (~ audio-context'destination))
+    oscillator))
+
+;; args := ((freq len) ...)
+(define (play-wave args)
+  (with-jstransaction
+    (lambda ()
+      (let1 nodes (map (lambda (arg)
+                         (cons (make-node (car arg)) (cdr arg)))
+                       args)
+        (fold (lambda (node+len t)
+                (let ((node (car node+len))
+                      (len (cadr node+len)))
+                  (node'start t)
+                  (node'stop (+ t len))
+                  (+ t len)))
+              (~ audio-context'current-time)
+              nodes)))))
 
 (define (main args)
   (grv-player :show? #f)
 
   (grv-begin
-    (play-wave 0 'square 2000 0.1)
-    (play-wave 0 'square 1000 0.1)
-    (thread-sleep! 1.0)
-    0))
+    (play-wave '((2000 0.1) (1000 0.1)))
+
+    (worker-sleep! 1.0)
+    (grv-exit)))

@@ -1,33 +1,24 @@
 (use graviton)
-(use graviton.canvas)
-(use util.match)
-
-(define-syntax close-stroke-begin
-  (syntax-rules ()
-    ((_ expr ...)
-     (begin
-     (begin-path)
-     expr ...
-     (close-path)
-     (stroke)))))
+(use text.html-lite)
 
 (define (main args)
   (grv-player)
 
+  (define-document-content
+    (html:body
+     (html:canvas :width 400 :height 200 :class "grv-object-fit-contain")))
+
   (grv-begin
-    (capture-jsevent (client-window) "keyup" '("key"))
+    (on-jsevent window "keyup" (key)
+      (when (equal? key "Escape")
+        (grv-exit)))
 
-    (make-canvas 400 200)
-    (close-stroke-begin
-      (move-to 20 20)
-      (line-to 200 20)
-      (line-to 120 120))
-    (clear-rect 10 10 100 100)
-
-    (port-for-each (match-lambda
-                     (('keyup _ "Escape")
-                      (event-stream-close))
-                     (_
-                      #f))
-                   next-event)
-    0))
+    (let* ((canvas (document'query-selector "canvas"))
+           (ctx (canvas'get-context "2d")))
+      (ctx'begin-path)
+      (ctx'move-to 20 20)
+      (ctx'line-to 200 20)
+      (ctx'line-to 120 120)
+      (ctx'close-path)
+      (ctx'stroke)
+      (ctx'clear-rect 10 10 100 100))))

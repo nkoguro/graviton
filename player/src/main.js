@@ -2,9 +2,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const {app, BrowserWindow, Menu, ipcMain} = require('electron');
+const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 
-var config = null;
+let config = null;
 
 for (var i = 0; i < process.argv.length; ++i) {
     if (process.argv[i] === '--config') {
@@ -19,14 +19,13 @@ if (!config) {
     app.exit(1);
 }
 
-var win = null;
+let win = null;
 
 function createWindow() {
     win = new BrowserWindow({
         width: config['width'],
         height: config['height'],
         useContentSize: true,
-        backgroundColor: config['background-color'],
         // BrowserWindow's actual height will be incorrect if resizable = false,
         // even though useContentSize = true. So set true here and set the
         // actual value later.
@@ -48,7 +47,10 @@ function createWindow() {
         win.openDevTools();
     }
     Menu.setApplicationMenu(null);
-    win.loadURL(config['url']);
+    win.loadURL(config['url'])
+        .catch((err) => {
+            app.exit(70);
+        });
 }
 
 ipcMain.on('closePlayer', (event, arg) => {

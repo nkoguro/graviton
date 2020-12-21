@@ -1,22 +1,17 @@
-(use gauche.logger)
 (use graviton)
-(use graviton.canvas)
-(use util.match)
+(use text.html-lite)
 
 (define (main args)
-  (grv-player)
+  (grv-player :show? #f)
+
+  (define-document-content
+    (html:body
+     (html:canvas :width 300 :height 150 :class "grv-object-fit-contain")))
 
   (grv-begin
-    (capture-jsevent (client-window) "keyup" '("key"))
+    (let* ((canvas (document'query-selector "canvas"))
+           (ctx (canvas'get-context "2d"))
+           (text "Hello world"))
+      (format #t "The text width of '~a' is ~a px" text (~ (ctx'measure-text "Hello world") 'width)))
 
-    (make-canvas 300 150)
-    (log-format "text width: ~a" (slot-ref (force (measure-text "Hello world")) 'width))
-
-    (port-for-each (match-lambda
-                     (('keyup _ "Escape")
-                      (event-stream-close))
-                     (_
-                      #f))
-                   next-event)
-
-    0))
+    (grv-exit)))

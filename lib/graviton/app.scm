@@ -47,9 +47,6 @@
           application-context-slot-set!
           define-application-context-slot
 
-          app-start-hook
-          app-close-hook
-
           app-exit))
 
 (select-module graviton.app)
@@ -65,12 +62,8 @@
 
 (define-class <application-context> ()
   ((id :init-form (application-context-next-id))
-   (slot-table-atom :init-form (atom (let1 tbl (make-hash-table 'eq?)
-                                       (for-each (match-lambda
-                                                   ((name . thunk)
-                                                    (hash-table-put! tbl name (apply atom (thunk)))))
-                                                 *application-context-slot-initial-forms*)
-                                       tbl)))))
+   (mutex :init-form (make-mutex))
+   (slot-table :init-form (make-hash-table 'eq?))))
 
 (define application-context (make-parameter #f))
 
@@ -80,13 +73,24 @@
 (define (application-context-id)
   (slot-ref (application-context) 'id))
 
+(define (get-application-context-slot-atom name)
+  (with-slots (mutex slot-table) (application-context)
+    (define (get-atom)
+      (or (hash-table-get slot-table name #f)
+          (and-let1 thunk (assq-ref *application-context-slot-initial-forms* name #f)
+            (rlet1 val-atom (apply atom (thunk))
+              (hash-table-put! slot-table name val-atom)))
+          (errorf "application-context doesn't have such slot: ~a" name)))
+    (cond
+      ((eq? (mutex-state mutex) (current-thread))
+       (get-atom))
+      (else
+       (with-locking-mutex mutex get-atom)))))
+
 (define (application-context-slot-atomic-ref name proc)
   (unless (application-context)
     (errorf "application-context-slot-atomic-ref called without application-context, name=~a, proc=~s, thread=~s" name proc (current-thread)))
-  (let1 val-atom (atomic (slot-ref (application-context) 'slot-table-atom)
-                   (lambda (tbl)
-                     (or (hash-table-get tbl name #f)
-                         (errorf "application-context doesn't have such slot: ~a" name))))
+  (let1 val-atom (get-application-context-slot-atom name)
     (atomic val-atom proc)))
 
 (define (application-context-slot-ref name)
@@ -95,19 +99,11 @@
 (define (application-context-slot-atomic-update! name proc)
   (unless (application-context)
     (errorf "application-context-slot-atomic-update! called without application-context, name=~a, proc=~s, thread=~s" name proc (current-thread)))
-  (let1 val-atom (atomic (slot-ref (application-context) 'slot-table-atom)
-                   (lambda (tbl)
-                     (or (hash-table-get tbl name #f)
-                         (errorf "application-context doesn't have such slot: ~a" name))))
+  (let1 val-atom (get-application-context-slot-atom name)
     (atomic-update! val-atom proc)))
 
 (define (application-context-slot-set! name :rest vals)
   (application-context-slot-atomic-update! name (lambda _ (apply values vals))))
-
-;;;
-
-(define app-start-hook (make-hook))
-(define app-close-hook (make-hook))
 
 ;;;
 

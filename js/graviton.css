@@ -1,0 +1,28 @@
+.grv-object-fit-contain {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform-origin: center
+}
+
+.grv-object-fit-cover {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform-origin: center
+}
+
+.grv-object-fit-fill {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform-origin: center
+}
+
+.grv-object-fit-none {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    transform-origin: center
+}

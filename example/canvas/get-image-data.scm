@@ -1,28 +1,25 @@
 (use gauche.logger)
 (use gauche.uvector)
 (use graviton)
-(use graviton.canvas)
-(use util.match)
+(use text.html-lite)
 
 (define (main args)
   (grv-player)
 
+  (define-document-content
+    (html:body
+     (html:canvas :width 300 :height 150 :class "grv-object-fit-contain")))
+
   (grv-begin
-    (capture-jsevent (client-window) "keyup" '("key"))
+    (on-jsevent window "keyup" (key)
+      (when (equal? key "Escape")
+        (grv-exit)))
 
-    (let1 canvas (make-canvas 300 150)
-      (rect 10 10 100 100)
-      (fill)
+    (let* ((canvas (document'query-selector "canvas"))
+           (ctx (canvas'get-context "2d")))
+      (ctx'rect 10 10 100 100)
+      (ctx'fill)
 
-      (let1 image (get-image-data 60 60 200 100)
-        (log-format "image-data content length: ~a" (u8vector-length (force (download-image-data image))))
-        (put-image-data image 150 10)))
-
-    (port-for-each (match-lambda
-                     (('keyup _ "Escape")
-                      (event-stream-close))
-                     (_
-                      #f))
-                   next-event)
-
-    0))
+      (let1 image (ctx'get-image-data 60 60 200 100)
+        (log-format "image-data content length: ~a" (u8vector-length (~ image'data)))
+        (ctx'put-image-data image 150 10)))))

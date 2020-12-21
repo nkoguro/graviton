@@ -1,22 +1,23 @@
 (use graviton)
-(use graviton.canvas)
-(use util.match)
+(use text.html-lite)
 
 (define (main args)
   (grv-player)
 
+  (define-document-content
+    (html:body
+     (html:canvas :width 300 :height 150 :class "grv-object-fit-contain")))
+
   (grv-begin
-    (capture-jsevent (client-window) "keyup" '("key"))
+    (on-jsevent window "keyup" (key)
+      (when (equal? key "Escape")
+        (grv-exit)))
 
-    (let1 canvas (make-canvas 300 150)
-      (set-fill-style! (linear-gradient 20 0 220 0 '((0 "green") (0.5 "cyan") (1 "green"))))
-      (fill-rect 20 20 200 100))
-
-    (port-for-each (match-lambda
-                     (('keyup _ "Escape")
-                      (event-stream-close))
-                     (_
-                      #f))
-                   next-event)
-
-    0))
+    (let* ((canvas (document'query-selector "canvas"))
+           (ctx (canvas'get-context "2d"))
+           (gradient (ctx'create-linear-gradient 0 0 200 0)))
+      (gradient'add-color-stop 0 "green")
+      (gradient'add-color-stop 0.7 "white")
+      (gradient'add-color-stop 1 "pink")
+      (set! (~ ctx'fill-style) gradient)
+      (ctx'fill-rect 10 10 200 100))))

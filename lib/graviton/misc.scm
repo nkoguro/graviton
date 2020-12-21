@@ -34,6 +34,8 @@
   (use file.util)
   (use gauche.logger)
   (use gauche.threads)
+  (use srfi-13)
+  (use util.match)
 
   (export make-id-generator
 
@@ -47,7 +49,18 @@
           log-level
           log-debug
           log-info
-          log-error))
+          log-error
+          log-timestamp
+
+          with-slots
+
+          estimate-content-type
+
+          now-seconds
+
+          stat
+          stat-time
+          stat-memory))
 
 (select-module graviton.misc)
 
@@ -69,8 +82,7 @@
    (title :init-value (if (and (list? (command-line))
                                (<= (length (command-line)) 1))
                           (path-sans-extension (sys-basename (list-ref (command-line) 0)))
-                          "Graviton"))
-   (background-color :init-value "#FFF")))
+                          "Graviton"))))
 
 (define-syntax set-config-param!
   (syntax-rules ()
@@ -123,3 +135,188 @@
 (define (log-error fmt :rest args)
   (when (<= (log-level) 2)
     (apply log-format fmt args)))
+
+(define (log-timestamp :optional (msg #f))
+  (log-info "~a: ~:d ms" (or msg "timestamp") (round->exact (* 1000 (- (now-seconds) *start-timestamp*)))))
+
+;;;
+
+(define-syntax symbol-macrolet
+  (er-macro-transformer
+    (lambda (form rename id=?)
+      (match form
+        ((_ (and (((? symbol? sym) val) ...)
+                 form-alist)
+            body ...)
+         (define (traverse expr)
+           (match expr
+             (('quote x)
+              (list 'quote x))
+             (('quasiquote x)
+              (list 'quasiquote (traverse-quasiquote x)))
+             ((e ...)
+              (map traverse e))
+             ((? symbol? sym)
+              (let1 pair (assq sym form-alist)
+                (if pair
+                    (cadr pair)
+                    sym)))
+             (_
+              expr)))
+         (define (traverse-quasiquote expr)
+           (match expr
+             (('unquote x)
+              (list 'unquote (traverse x)))
+             ((e ...)
+              (map traverse-quasiquote e))
+             (_
+              expr)))
+         (quasirename rename `(begin ,@(traverse body))))
+        (_
+         (errorf "malformed symbol-macrolet: ~s" form))))))
+
+(define-syntax with-slots
+  (syntax-rules ()
+    ((_ (slot ...) obj body ...)
+     (symbol-macrolet ((slot (slot-ref obj 'slot)) ...) body ...))))
+
+;;;
+
+(define (estimate-content-type filename)
+  (let1 ext (string-downcase (path-extension filename))
+    (cond
+      ((member ext '("png"))
+       "image/png")
+      ((member ext '("jpg" "jpeg"))
+       "image/jpeg")
+      ((member ext '("gif"))
+       "image/gif")
+      ((member ext '("bmp"))
+       "image/bmp")
+      ((member ext '("mp3"))
+       "audio/mpeg")
+      ((member ext '("m4a"))
+       "audio/aac")
+      ((member ext '("ogg"))
+       "audio/ogg")
+      ((member ext '("mid" "midi"))
+       "audio/midi")
+      ((member ext '("wav"))
+       "audio/wav")
+      ((member ext '("js" "mjs"))
+       "text/javascript")
+      (else
+       #f))))
+
+;;;
+
+(define (now-seconds)
+  (time->seconds (current-time)))
+
+(define *start-timestamp* (now-seconds))
+
+;;;
+
+(define-class <value-metric> ()
+  ((description :init-keyword :description
+                :init-value "stat")
+   (unit :init-keyword :unit
+         :init-value "")
+   (format-spec :init-keyword :format-spec
+                :init-value "~f")
+   (round-function :init-keyword :round-function
+                   :init-value values)
+   (mode :init-keyword :mode
+         :init-value :absolute)
+   (order-by :init-keyword :order-by
+             :init-value :asc)
+   (base-value :init-value 0)
+   (value-list :init-value '())
+   (additional-report :init-keyword :additional-report
+                      :init-value (lambda (v) ""))
+   (percentiles :init-keyword :percentiles
+                :init-value '(0.5 0.75 0.9))))
+
+(define (value-metric-set-base-value! metric v)
+  (with-slots (base-value mode) metric
+    (if (eq? mode :diff)
+      (set! base-value v)
+      (set! base-value 0))))
+
+(define (value-metric-record! metric v num-samples)
+  (with-slots (value-list base-value) metric
+    (push! value-list (- v base-value))
+    (when (<= num-samples (length value-list))
+      (value-metric-report metric num-samples)
+      (value-metric-clear! metric))))
+
+(define (value-metric-report metric num-samples)
+  (with-slots (description unit format-spec round-function value-list order-by additional-report percentiles) metric
+    (define (report item v)
+      (log-info #"~~a: ~format-spec ~~a ~~a" item (round-function v) unit (additional-report v)))
+    (let* ((sorted-value-list (sort value-list (if (eq? order-by :desc) > <)))
+           (len (length value-list)))
+      (define (percentile p)
+        (list-ref sorted-value-list (round->exact (* len p))))
+      (log-info "*** ~a ***" description)
+      (report "min" (apply min value-list))
+      (report "avg" (/. (apply + value-list) len))
+      (report "max" (apply max value-list))
+      (dolist (p percentiles)
+        (report (format "~d%ile" (round->exact (* p 100))) (percentile p))))))
+
+(define (value-metric-clear! metric)
+  (with-slots (base-value value-list) metric
+    (set! base-value 0)
+    (set! value-list '())))
+
+(define-syntax stat
+  (er-macro-transformer
+    (lambda (form rename id=?)
+      (match form
+        ((_ (specs ...) num-samples record-value body ...)
+         (let1 metric (apply make <value-metric> specs)
+           (quasirename rename
+             `(begin0
+                  (begin (when ,num-samples
+                           (value-metric-set-base-value! ,metric ,record-value))
+                         ,@body)
+                (when ,num-samples
+                  (value-metric-record! ,metric ,record-value ,num-samples))))))))))
+
+(define *max-description-length* 50)
+
+(define (make-description-string item sexpr)
+  (let1 str (format "~a: ~s" item sexpr)
+    (if (< (string-length str) *max-description-length*)
+      str
+      (string-append (substring str 0 *max-description-length*) "..."))))
+
+(define-syntax stat-memory
+  (er-macro-transformer
+    (lambda (form rename id=?)
+      (match form
+        ((_ title num-samples body ...)
+         (quasirename rename
+           `(stat (,:description ,(or title (make-description-string "memory" (car body)))
+                                ,:format-spec "~:d"
+                                ,:round-function ,round->exact
+                                ,:unit "bytes"
+                                ,:mode ,:diff)
+                  ,num-samples
+                  (car (assoc-ref (gc-stat) :total-bytes))
+                  ,@body)))))))
+
+(define-syntax stat-time
+  (er-macro-transformer
+    (lambda (form rename id=?)
+      (match form
+        ((_ title num-samples body ...)
+         (quasirename rename
+           `(stat (,:description ,(or title (make-description-string "time" (car body)))
+                                ,:format-spec "~,2,3f"
+                                ,:unit "ms"
+                                ,:mode ,:diff)
+                  ,num-samples
+                  (,now-seconds)
+                  ,@body)))))))

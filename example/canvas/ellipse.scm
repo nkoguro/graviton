@@ -1,45 +1,42 @@
 (use graviton)
-(use graviton.canvas)
 (use math.const)
-(use util.match)
+(use text.html-lite)
 
 (define (main args)
   (grv-player)
 
+  (define-document-content
+    (html:body
+     (html:canvas :width 300 :height 450 :class "grv-object-fit-contain")))
+
   (grv-begin
-    (capture-jsevent (client-window) "keyup" '("key"))
+    (on-jsevent window "keyup" (key)
+      (when (equal? key "Escape")
+        (grv-exit)))
 
-    (make-canvas 300 450)
-    (begin-path)
-    (ellipse 150 150 75 112 pi/4 0 (* 2 pi))
-    (stroke)
+    (let* ((canvas (document'query-selector "canvas"))
+           (ctx (canvas'get-context "2d")))
+      (ctx'begin-path)
+      (ctx'ellipse 150 150 75 112 pi/4 0 (* 2 pi))
+      (ctx'stroke)
 
-    (begin-path)
-    (set-line-dash! #(5 5))
-    (move-to 0 300)
-    (line-to 300 0)
-    (stroke)
+      (ctx'begin-path)
+      (ctx'set-line-dash #(5 5))
+      (ctx'move-to 0 300)
+      (ctx'line-to 300 0)
+      (ctx'stroke)
 
-    (set-fill-style! "red")
-    (begin-path)
-    (ellipse 60 375 50 30 (* pi 0.25) 0 (* pi 1.5))
-    (fill)
+      (set! (~ ctx'fill-style) "red")
+      (ctx'begin-path)
+      (ctx'ellipse 60 375 50 30 (* pi 0.25) 0 (* pi 1.5))
+      (ctx'fill)
 
-    (set-fill-style! "blue")
-    (begin-path)
-    (ellipse 150 375 50 30 (* pi 0.25) 0 pi)
-    (fill)
+      (set! (~ ctx'fill-style) "blue")
+      (ctx'begin-path)
+      (ctx'ellipse 150 375 50 30 (* pi 0.25) 0 pi)
+      (ctx'fill)
 
-    (set-fill-style! "green")
-    (begin-path)
-    (ellipse 240 375 50 30 (* pi 0.25) 0 pi #t)
-    (fill)
-
-    (port-for-each (match-lambda
-                     (('keyup _ "Escape")
-                      (event-stream-close))
-                     (_
-                      #f))
-                   next-event)
-
-    0))
+      (set! (~ ctx'fill-style) "green")
+      (ctx'begin-path)
+      (ctx'ellipse 240 375 50 30 (* pi 0.25) 0 pi #t)
+      (ctx'fill))))
