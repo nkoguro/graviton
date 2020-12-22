@@ -62,7 +62,7 @@
                   #f
                   pixels)))))
 
-    (let* ((worker (run-worker compute-worker-main :name "mandelbrot compute worker" :size 4))
+    (let* ((worker (run-worker-thread compute-worker-main :name "mandelbrot compute worker" :size 4))
            (delta-x (/. 3 *width*))
            (delta-y (/. 3 *height*))
            (mesh-x 16)

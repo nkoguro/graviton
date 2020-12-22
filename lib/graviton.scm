@@ -197,7 +197,6 @@
                          (document-body-proc)))))))
 
 
-(define *initial-thunk* #f)
 (define *init-hook* (make-hook))
 
 (define-action "notifyException" (err stacktrace)
@@ -209,11 +208,6 @@
       (display stacktrace)
       (newline)))
   (app-exit 70))
-
-(define-action "startApplication" ()
-  (when *initial-thunk*
-    (run-hook *init-hook*)
-    (*initial-thunk*)))
 
 (define (start-websocket-dispatcher! sock in out)
   (thread-start!
@@ -398,7 +392,7 @@
   (set! *client-config* (config-with-params <browser-config> port title)))
 
 (define (grv-start thunk)
-  (set! *initial-thunk* thunk)
+  (main-worker-thunk-set! thunk)
   (let ((port (client-port)))
     (start-http-server :port port
                        :access-log (access-log-drain)

@@ -281,14 +281,18 @@
                        (lambda (in flag)
                          (handle-payload ctx in out exit-loop))
                        '(r))
+
+        ;; Invoke main worker thread
+        (main-worker)
+
         (while run-loop?
           (selector-select sel))
 
         (selector-delete! sel #f #f #f)))
 
-    (let1 workers (all-workers)
-      (for-each worker-shutdown! workers)
-      (for-each (cut worker-wait <> :timeout 60) workers))
+    (let1 worker-threads (all-worker-threads)
+      (for-each worker-shutdown worker-threads)
+      (for-each (cut worker-thread-wait <> :timeout 60) worker-threads))
 
     exit-code))
 

@@ -7,7 +7,6 @@ function connectServer() {
     webSocket.binaryType = 'arraybuffer';
     webSocket.onopen = () => {
         console.log('opened');
-        callAction("startApplication");
     };
     webSocket.onclose = () => {
         console.log('closed');

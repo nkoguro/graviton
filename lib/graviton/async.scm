@@ -32,7 +32,6 @@
 
 (define-module graviton.async
   (use data.queue)
-  (use gauche.hook)
   (use gauche.parameter)
   (use gauche.partcont)
   (use gauche.threads)
@@ -43,16 +42,24 @@
   (use util.match)
 
   (export current-worker
-          worker-idle-timeout
+          worker-thread-idle-timeout
           <worker>
-          run-worker
-          worker-shutdown!
-          worker-wait
-          all-workers
+          <worker-thread>
+          make-worker
+          make-worker-thread
+          worker-begin
+          run-worker-thread
+          worker-thread-begin
+          worker-run
+          worker-close
+          worker-shutdown
+          worker-thread-wait
+          all-worker-threads
           worker-submit-task
           worker-yield!
           worker-fire-event
           on-event
+          on-idle
           <worker-callback>
           <procedure-callback>
           <event-callback>
@@ -61,6 +68,7 @@
           scheduler-add!
           scheduler-delete!
           worker-sleep!
+          main-worker-thunk-set!
           main-worker
           ))
 
@@ -70,103 +78,161 @@
 
 (define current-worker (make-parameter #f))
 (define current-priority (make-parameter #f))
-(define worker-idle-timeout (make-parameter #f))
-(define-application-context-slot workers '())
+(define worker-thread-idle-timeout (make-parameter #f))
+(define-application-context-slot worker-threads '())
 
 (define-class <worker> ()
-  ((name :init-keyword :name)
-   (task-queue :init-form (make-task-queue))
-   (event-table-atom :init-form (atom (make-hash-table 'eq?)))
-   (threads-atom :init-form (atom '()))))
+  ((task-queue :init-form (make-task-queue))
+   (event-table :init-form (make-hash-table 'eq?))
+   (idle-handler :init-value #f)))
 
-(define-method write-object ((obj <worker>) port)
-  (format port "#<worker ~s>" (~ obj'name)))
+(define-class <worker-thread> (<worker>)
+  ((name :init-keyword :name
+         :init-value #f)
+   (threads :init-value '())))
 
-(define (run-event-loop worker thunk)
+(define-method write-object ((obj <worker-thread>) port)
+  (format port "#<worker-thread ~s>" (~ obj'name)))
+
+(define *dequeue-timeout-val* (gensym))
+
+(define (worker-process-event worker :optional (timeout #f))
+  (parameterize ((current-worker worker))
+    (match (dequeue-task+priority! worker timeout *dequeue-timeout-val*)
+      ((? eof-object? eof)
+       #f)
+      ((? (cut eq? <> *dequeue-timeout-val*) _)
+       (and-let1 thunk (~ worker'idle-handler)
+         (parameterize ((current-priority 'low))
+           (reset
+             (thunk))))
+       #t)
+      (((? procedure? task) . (? symbol? priority))
+       (parameterize ((current-priority priority))
+         (reset
+           (task)))
+       #t)
+      ((((? symbol? event-name) args ...) . (? symbol? priority))
+       (let* ((proc+priority (or (hash-table-get (~ worker'event-table) event-name #f)
+                                 (errorf "Event: ~a not found: ~s" event-name args)))
+              (proc (car proc+priority))
+              (event-priority (cdr proc+priority)))
+         (cond
+           ((eq? priority event-priority)
+            (parameterize ((current-priority priority))
+              (reset
+                (apply proc args))))
+           (else
+            (worker-submit-task worker (^() (apply proc args)) :priority event-priority))))
+       #t)
+      (else
+       (errorf "Invalid task: ~s" task+priority)))))
+
+(define (make-worker thunk)
+  (rlet1 worker (make <worker>)
+    (enqueue-task! worker thunk)))
+
+(define-method worker-run ((worker <worker>))
+  (worker-process-event worker 0))
+
+(define-method object-apply ((worker <worker>))
+  (worker-run worker))
+
+(define-syntax worker-begin
+  (er-macro-transformer
+    (lambda (form rename id=?)
+      (match form
+        ((_ body ...)
+         (let1 worker-box (box #f)
+           (quasirename rename
+             `(if-let1 worker (unbox ,worker-box)
+                (worker-run worker)
+                (let1 worker (lambda () body ...)
+                   (set-box! ,worker-box worker)
+                   (worker-run worker))))))))))
+
+(define (worker-thread-run-event-loop worker-thread thunk)
   (guard (e (else (report-error e)
                   (app-exit 70)))
-    (worker-register-thread! worker (current-thread))
-    (current-worker worker)
-    (let1 timeout-val (gensym)
-      (define (next-task+priority)
-        (dequeue-task+priority! worker (worker-idle-timeout) timeout-val))
-      (unwind-protect
-          (let loop ((task+priority (cons thunk 'default)))
-            (match task+priority
-              (((? eof-object? eof) . _)
-               #t)
-              ((? (cut eq? <> timeout-val) _)
-               (worker-fire-event worker 'idle)
-               (loop (next-task+priority)))
-              (((? procedure? task) . (? symbol? priority))
-               (current-priority priority)
-               (reset
-                 (task))
-               (loop (next-task+priority)))
-              ((((? symbol? event-name) args ...) . (? symbol? priority))
-               (let* ((proc+priority (or (atomic (~ worker'event-table-atom) (cut hash-table-get <> event-name #f))
-                                         (errorf "Event: ~a not found: ~s" event-name args)))
-                      (proc (car proc+priority))
-                      (event-priority (cdr proc+priority)))
-                 (cond
-                   ((eq? priority event-priority)
-                    (current-priority priority)
-                    (reset
-                      (apply proc args)))
-                   (else
-                    (worker-submit-task worker (^() (apply proc args)) :priority event-priority))))
-               (loop (next-task+priority)))
-              (else
-               (errorf "Invalid task: ~s" task+priority))))
-        (worker-unregister-thread! worker (current-thread))))))
+    (parameterize ((current-worker worker-thread)
+                   (current-priority 'default))
+      (reset
+        (thunk)))
+    (while (worker-process-event worker-thread (worker-thread-idle-timeout))
+      #t)))
 
-(define (run-worker thunk :key (name #f) (size 1))
-  (unless (application-context)
-    (error "worker-start! is called without application-context"))
-  (rlet1 worker (make <worker> :name name)
-    (application-context-slot-atomic-update! 'workers
+(define (make-worker-thread thunk :key (name #f) (size 1))
+  (rlet1 worker-thread (make <worker-thread> :name name)
+    (application-context-slot-atomic-update! 'worker-threads
       (lambda (lst)
-        (cons worker lst)))
+        (cons worker-thread lst)))
     (dotimes (size)
-      (let1 thread (make-thread (cut run-event-loop worker thunk) (format "~s" worker))
-        (thread-start! thread)))))
+      (let1 thread (make-thread (cut worker-thread-run-event-loop worker-thread thunk) (format "~s" worker-thread))
+        (push! (~ worker-thread'threads) thread)))))
 
-(define (worker-register-thread! worker thread)
-  (atomic-update! (~ worker'threads-atom)
-    (lambda (threads)
-      (cons thread threads))))
+(define-method worker-run ((worker-thread <worker-thread>))
+  (dolist (thread (~ worker-thread'threads))
+    (when (eq? (thread-state thread) 'new)
+      (thread-start! thread))))
 
-(define (worker-unregister-thread! worker thread)
-  (atomic-update! (~ worker'threads-atom)
-    (lambda (threads)
-      (rlet1 lst (delete thread threads)
-        (when (= (length lst) 0)
-          (application-context-slot-atomic-update! 'workers (cut delete worker <>)))))))
+(define (run-worker-thread thunk :key (name #f) (size 1))
+  (rlet1 worker-thread (make-worker-thread thunk :name name :size size)
+    (worker-run worker-thread)))
 
-(define (worker-shutdown! worker :key (priority 'high))
-  (dotimes ((atomic (~ worker'threads-atom) length))
-    (enqueue-task! worker (eof-object) :priority priority))
+(define-syntax worker-thread-begin
+  (er-macro-transformer
+    (lambda (form rename id=?)
+      (match form
+        ((_ name (specs ...) body ...)
+         (quasirename rename `(rlet1 worker-thread (apply make-worker-thread (lambda () body ...) :name name specs)
+                                (worker-run worker-thread))))
+        (_
+         (errorf "malformed worker-thread: ~s" form))))))
+
+(define (worker-close worker)
+  (task-queue-close (~ worker'task-queue)))
+
+(define (worker-shutdown worker)
+  (worker-close worker)
+  (remove-all-tasks! worker)
   (undefined))
 
-(define (worker-wait worker :key (timeout #f))
+(define (worker-thread-wait worker-thread :key (timeout #f))
   (let1 timeout-val (gensym)
     (for-each (lambda (thread)
                 (when (eq? (thread-join! thread timeout timeout-val) timeout-val)
                   (thread-terminate! thread)
                   (log-error "~s is killed due to timeout" thread)))
-              (atom-ref (~ worker'threads-atom))))
+              (~ worker-thread'threads))
+    (set! (~ worker-thread'threads) '()))
   (undefined))
 
-(define (all-workers)
-  (application-context-slot-ref 'workers))
+(define (all-worker-threads)
+  (application-context-slot-ref 'worker-threads))
 
 (define-class <task-queue> ()
   ((mutex :init-form (make-mutex 'task-queue))
    (condition-variable :init-form (make-condition-variable))
-   (queue-table :init-form (make-hash-table 'eqv?))))
+   (queue-table :init-form (make-hash-table 'eqv?))
+   (state-atom :init-form (atom 'active))))
 
 (define (make-task-queue)
   (make <task-queue>))
+
+(define (task-queue-close tq)
+  (atomic-update! (~ tq'state-atom)
+    (lambda (_)
+      'closed))
+  (with-slots (mutex condition-variable) tq
+    (with-locking-mutex mutex
+      (lambda ()
+        (condition-variable-broadcast! condition-variable)))))
+
+(define (task-queue-active? tq)
+  (eq? (atom-ref (~ tq'state-atom)) 'active))
+
+(define (task-queue-closed? tq)
+  (not (task-queue-active? tq)))
 
 (define (task-priority->value priority)
   (case priority
@@ -177,30 +243,49 @@
      (errorf "Invalid task priority: ~s" priority))))
 
 (define (enqueue-task! worker task :key (priority 'default))
-  (with-slots (mutex condition-variable queue-table) (~ worker'task-queue)
-    (with-locking-mutex mutex
-      (lambda ()
-        (let* ((pvalue (task-priority->value priority))
-               (queue (or (hash-table-get queue-table pvalue #f)
-                          (rlet1 queue (make-queue)
-                            (hash-table-put! queue-table pvalue queue)))))
-          (enqueue! queue (cons task priority))
-          (condition-variable-broadcast! condition-variable))))))
+  (with-slots (task-queue) worker
+    (when (task-queue-active? task-queue)
+      (with-slots (mutex condition-variable queue-table) task-queue
+        (with-locking-mutex mutex
+          (lambda ()
+            (let* ((pvalue (task-priority->value priority))
+                   (queue (or (hash-table-get queue-table pvalue #f)
+                              (rlet1 queue (make-queue)
+                                (hash-table-put! queue-table pvalue queue)))))
+              (enqueue! queue (cons task priority))
+              (condition-variable-broadcast! condition-variable))))))))
 
 (define (dequeue-task+priority! worker :optional (timeout #f) (timeout-val #f))
-  (with-slots (mutex condition-variable queue-table) (~ worker'task-queue)
-    (mutex-lock! mutex)
-    (let1 task+priority (any (lambda (pvalue)
-                               (dequeue! (hash-table-get queue-table pvalue) #f))
-                             (sort (hash-table-keys queue-table)))
-      (cond
-        (task+priority
-         (mutex-unlock! mutex)
-         task+priority)
-        (else
-         (if (mutex-unlock! mutex condition-variable timeout)
-           (dequeue-task+priority! worker)
-           timeout-val))))))
+  (with-slots (task-queue) worker
+    (cond
+      ((task-queue-active? task-queue)
+       (with-slots (mutex condition-variable queue-table) task-queue
+         (mutex-lock! mutex)
+         (let1 task+priority (any (lambda (pvalue)
+                                    (dequeue! (hash-table-get queue-table pvalue) #f))
+                                  (sort (hash-table-keys queue-table)))
+           (cond
+             (task+priority
+              (mutex-unlock! mutex)
+              task+priority)
+             (else
+              (cond
+                ((equal? timeout 0)
+                 (mutex-unlock! mutex)
+                 timeout-val)
+                (else
+                 (if (mutex-unlock! mutex condition-variable timeout)
+                   (dequeue-task+priority! worker)
+                   timeout-val))))))))
+      (else
+       (eof-object)))))
+
+(define (remove-all-tasks! worker)
+  (with-slots (task-queue) worker
+    (with-slots (mutex queue-table) task-queue
+      (with-locking-mutex mutex
+        (lambda ()
+          (hash-table-clear! queue-table))))))
 
 (define (worker-submit-task worker thunk :key (priority 'default))
   (enqueue-task! worker thunk :priority priority))
@@ -209,15 +294,11 @@
   (shift cont
     (worker-submit-task (current-worker) cont :priority (current-priority))))
 
-(define (worker-register-event! worker event proc :key (priority 'default))
-  (atomic (~ worker'event-table-atom)
-    (lambda (tbl)
-      (hash-table-put! tbl event (cons proc priority)))))
+(define (register-event-handler! event proc :key (priority 'default))
+  (hash-table-put! (~ (current-worker)'event-table) event (cons proc priority)))
 
-(define (worker-unregister-event! worker event)
-  (atomic (~ worker'event-table-atom)
-    (lambda (tbl)
-      (hash-table-delete! tbl event))))
+(define (unregister-event-handler! event)
+  (hash-table-delete! (~ (current-worker)'event-table) event))
 
 (define (worker-fire-event worker event :rest args)
   ;; The event will be re-priorized in the event loop.
@@ -226,13 +307,23 @@
 (define-syntax on-event
   (syntax-rules (:priority)
     ((_ (event :priority priority) (arg ...) body ...)
-     (worker-register-event! (current-worker) event (lambda (arg ...) body ...) :priority priority))
+     (register-event-handler! event (lambda (arg ...) body ...) :priority priority))
     ((_ (event :priority priority) proc)
-     (worker-register-event! (current-worker) event proc :priority priority))
+     (register-event-handler! event proc :priority priority))
     ((_ event (arg ...) body ...)
-     (worker-register-event! (current-worker) event (lambda (arg ...) body ...)))
+     (register-event-handler! event (lambda (arg ...) body ...)))
     ((_ event proc)
-     (worker-register-event! (current-worker) event proc))))
+     (register-event-handler! event proc))))
+
+(define (register-idle-handler! proc)
+  (set! (~ (current-worker)'idle-handler) proc))
+
+(define-syntax on-idle
+  (syntax-rules ()
+    ((_ (arg ...) body ...)
+     (register-idle-handler! (lambda (arg ...) body ...)))
+    ((_ proc)
+     (register-idle-handler! proc))))
 
 (define-class <worker-callback> ()
   ((worker :init-keyword :worker)))
@@ -274,9 +365,9 @@
   ;; schedule := (time-in-sec callback interval-in-sec)
   (let1 schedule-list '()
     (define (update-idle-timeout!)
-      (worker-idle-timeout (if (null? schedule-list)
-                             #f
-                             (max 0 (- (first (car schedule-list)) (now-seconds))))))
+      (worker-thread-idle-timeout (if (null? schedule-list)
+                                    #f
+                                    (max 0 (- (first (car schedule-list)) (now-seconds))))))
 
     (define (add-schedule! time-in-sec callback interval-in-sec)
       (set! schedule-list (sort (cons (list time-in-sec callback interval-in-sec)
@@ -307,12 +398,12 @@
                 (loop))))))
       (update-idle-timeout!))
 
-    (on-event 'idle process-schedule!)
+    (on-idle process-schedule!)
     (on-event 'add add-schedule!)
     (on-event 'del del-schedule!)))
 
 (define (run-scheduler)
-  (run-worker scheduler :name "scheduler"))
+  (run-worker-thread scheduler :name "scheduler"))
 
 (define-application-context-slot scheduler (run-scheduler))
 
@@ -350,7 +441,15 @@
 
 ;;;
 
-(define-application-context-slot main-worker (run-worker (lambda () #t) :name "main"))
+(define *main-worker-thunk* #f)
+
+(define (main-worker-thunk-set! thunk)
+  (set! *main-worker-thunk* thunk))
+
+(define-application-context-slot main-worker (rlet1 wt (make-worker-thread (or *main-worker-thunk*
+                                                                               (lambda () (grv-exit 70)))
+                                                                           :name "main")
+                                               (worker-run wt)))
 
 (define (main-worker)
   (application-context-slot-ref 'main-worker))
