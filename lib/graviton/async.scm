@@ -94,43 +94,42 @@
 (define-method write-object ((obj <worker-thread>) port)
   (format port "#<worker-thread ~s>" (~ obj'name)))
 
-(define *dequeue-timeout-val* (gensym))
-
 (define (worker-process-event worker :optional (timeout #f))
   (parameterize ((current-worker worker))
-    (match (dequeue-task+priority! worker timeout *dequeue-timeout-val*)
+    (match (dequeue-task! worker timeout)
       ((? eof-object? eof)
        #f)
-      ((? (cut eq? <> *dequeue-timeout-val*) _)
+      (#f
        (and-let1 thunk (~ worker'idle-handler)
          (parameterize ((current-priority 'low))
            (reset
              (thunk))))
        #t)
-      (((? procedure? task) . (? symbol? priority))
-       (parameterize ((current-priority priority))
-         (reset
-           (task)))
-       #t)
-      ((((? symbol? event-name) args ...) . (? symbol? priority))
+      (((? real? timestamp) (? symbol? event-name) args ...)
        (let* ((proc+priority (or (hash-table-get (~ worker'event-table) event-name #f)
                                  (errorf "Event: ~a not found: ~s" event-name args)))
               (proc (car proc+priority))
-              (event-priority (cdr proc+priority)))
-         (cond
-           ((eq? priority event-priority)
-            (parameterize ((current-priority priority))
-              (reset
-                (apply proc args))))
-           (else
-            (worker-submit-task worker (^() (apply proc args)) :priority event-priority))))
+              (priority (cdr proc+priority)))
+         (if (eq? priority 'high)
+           (parameterize ((current-priority priority))
+             (reset
+               (apply proc args)))
+           (enqueue-task! worker
+                          (task-priority->value priority)
+                          (cons priority (^() (apply proc args)))
+                          :timestamp timestamp)))
        #t)
-      (else
-       (errorf "Invalid task: ~s" task+priority)))))
+      (((? symbol? priority) . (? procedure? thunk))
+       (parameterize ((current-priority priority))
+         (reset
+           (thunk)))
+       #t)
+      (v
+       (errorf "Invalid value in task-queue: ~s" v)))))
 
 (define (make-worker thunk)
   (rlet1 worker (make <worker>)
-    (enqueue-task! worker thunk)))
+    (worker-submit-task worker thunk)))
 
 (define-method worker-run ((worker <worker>))
   (worker-process-event worker 0))
@@ -216,6 +215,27 @@
    (queue-table :init-form (make-hash-table 'eqv?))
    (state-atom :init-form (atom 'active))))
 
+(define-class <chronological-queue> ()
+  ((queue :init-form (make-queue))
+   (need-to-sort? :init-value #f)))
+
+(define (make-chronological-queue)
+  (make <chronological-queue>))
+
+(define (chronological-queue-enqueue! cqueue t obj)
+  (with-slots (queue need-to-sort?) cqueue
+    (let1 last-time (car (queue-rear queue '(#f . #f)))
+      (enqueue! queue (cons t obj))
+      (unless (and last-time (<= last-time t))
+        (set! need-to-sort? #t)))))
+
+(define (chronological-queue-dequeue! cqueue)
+  (with-slots (queue need-to-sort?) cqueue
+    (when need-to-sort?
+      (set! queue (list->queue (sort (dequeue-all! queue) (^(e1 e2) (< (car e1) (car e2))))))
+      (set! need-to-sort? #f))
+    (cdr (dequeue! queue '(#f . #f)))))
+
 (define (make-task-queue)
   (make <task-queue>))
 
@@ -242,41 +262,44 @@
     (else
      (errorf "Invalid task priority: ~s" priority))))
 
-(define (enqueue-task! worker task :key (priority 'default))
+(define-constant EVENT-QUEUE-PRIORITY-VALUE 0)  ;; this value shoud be equal to high priority.
+
+;; task := (priority . thunk) | (timestamp event args ...)
+(define (enqueue-task! worker pvalue task :key (timestamp #f))
   (with-slots (task-queue) worker
     (when (task-queue-active? task-queue)
       (with-slots (mutex condition-variable queue-table) task-queue
         (with-locking-mutex mutex
           (lambda ()
-            (let* ((pvalue (task-priority->value priority))
-                   (queue (or (hash-table-get queue-table pvalue #f)
-                              (rlet1 queue (make-queue)
-                                (hash-table-put! queue-table pvalue queue)))))
-              (enqueue! queue (cons task priority))
+            (let1 queue (or (hash-table-get queue-table pvalue #f)
+                            (rlet1 queue (make-chronological-queue)
+                              (hash-table-put! queue-table pvalue queue)))
+              (chronological-queue-enqueue! queue (or timestamp (now-seconds)) task)
               (condition-variable-broadcast! condition-variable))))))))
 
-(define (dequeue-task+priority! worker :optional (timeout #f) (timeout-val #f))
+(define (dequeue-task! worker :optional (timeout #f))
   (with-slots (task-queue) worker
     (cond
       ((task-queue-active? task-queue)
        (with-slots (mutex condition-variable queue-table) task-queue
          (mutex-lock! mutex)
-         (let1 task+priority (any (lambda (pvalue)
-                                    (dequeue! (hash-table-get queue-table pvalue) #f))
-                                  (sort (hash-table-keys queue-table)))
-           (cond
-             (task+priority
-              (mutex-unlock! mutex)
-              task+priority)
-             (else
-              (cond
-                ((equal? timeout 0)
-                 (mutex-unlock! mutex)
-                 timeout-val)
-                (else
-                 (if (mutex-unlock! mutex condition-variable timeout)
-                   (dequeue-task+priority! worker)
-                   timeout-val))))))))
+         (or (and-let1 task (any (lambda (pvalue)
+                                   (chronological-queue-dequeue! (hash-table-get queue-table pvalue)))
+                                 (sort (hash-table-keys queue-table)))
+               (mutex-unlock! mutex)
+               task)
+             (cond
+               ((not timeout)
+                (mutex-unlock! mutex condition-variable #f)
+                (dequeue-task! worker #f))
+               ((<= timeout 0)
+                (mutex-unlock! mutex)
+                #f)
+               (else
+                (let1 start-sec (now-seconds)
+                  (if (mutex-unlock! mutex condition-variable timeout)
+                    (dequeue-task! worker (- timeout (- (now-seconds) start-sec)))
+                    #f)))))))
       (else
        (eof-object)))))
 
@@ -288,7 +311,7 @@
           (hash-table-clear! queue-table))))))
 
 (define (worker-submit-task worker thunk :key (priority 'default))
-  (enqueue-task! worker thunk :priority priority))
+  (enqueue-task! worker (task-priority->value priority) (cons priority thunk)))
 
 (define (worker-yield!)
   (shift cont
@@ -301,8 +324,7 @@
   (hash-table-delete! (~ (current-worker)'event-table) event))
 
 (define (worker-fire-event worker event :rest args)
-  ;; The event will be re-priorized in the event loop.
-  (enqueue-task! worker (cons event args) :priority 'high))
+  (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event args)))
 
 (define-syntax on-event
   (syntax-rules (:priority)
