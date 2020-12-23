@@ -83,9 +83,7 @@
 
           with-jstransaction
 
-          define-url-path
-
-          resource-url
+          bind-url-path
 
           define-document-content
 
@@ -110,58 +108,64 @@
 
 ;;;
 
-(define *url-path-map-alist* '())
+(define *global-url-handler-alist* '())
 
-(define (register-url-path! url-path file-path)
-  (set! *url-path-map-alist* (append *url-path-map-alist*
-                                    (list
-                                      (cons (simplify-path (string-append "/" url-path "/"))
-                                            file-path)))))
+(define-application-context-slot url-handler-alist '())
 
-(define-syntax define-url-path
-  (syntax-rules ()
-    ((_ url-path file-path)
-     (register-url-path! url-path file-path))))
+(define-method bind-url-path ((url-path <string>) (file-path <string>))
+  (let1 canonical-url-path (simplify-path (if (file-is-directory? file-path)
+                                            (string-append "/" url-path "/")
+                                            (string-append "/" url-path)))
+    (cond
+      ((application-context)
+       (application-context-slot-atomic-update! 'url-handler-alist
+         (lambda (alist)
+           (assoc-set! alist canonical-url-path file-path))))
+      (else
+       (set! *global-url-handler-alist* (assoc-set! *global-url-handler-alist* canonical-url-path file-path))))))
 
-(define-url-path "graviton" (graviton-js-directory))
+(define-method bind-url-path ((url-path <string>) (proc <procedure>))
+  (cond
+    ((application-context)
+     (application-context-slot-atomic-update! 'url-handler-alist
+       (lambda (alist)
+         (assoc-set! alist (simplify-path url-path) proc))))
+    (else
+     (set! *global-url-handler-alist* (assoc-set! alist (simplify-path url-path) proc)))))
 
-(define (url->file-path path)
-  (let1 path (simplify-path path)
-    (let loop ((path-map-alist *url-path-map-alist*))
-      (match path-map-alist
+(bind-url-path "_g" (graviton-js-directory))
+
+(define (url-path->body&content-type ctx url-path)
+  (let1 url-path (simplify-path url-path)
+    (let loop ((url-handler-alist (append (if ctx
+                                            (parameterize ((application-context ctx))
+                                              (application-context-slot-ref 'url-handler-alist))
+                                            '())
+                                          *global-url-handler-alist*)))
+      (match url-handler-alist
         (()
-         #f)
-        (((url-path . file-path) rest ...)
-         (or (and-let1 path (and (string-prefix? url-path path)
-                                 (build-path file-path (string-drop path (string-length url-path))))
-               (and (file-is-readable? path)
-                    path))
-             (loop rest)))))))
+         (values #f #f))
+        (((target-url-path . (? string? file-path)) rest ...)
+         (let1 path (and (string-prefix? target-url-path url-path)
+                         (build-path file-path (string-drop url-path (string-length target-url-path))))
+           (if (and path (file-is-readable? path))
+             (values `(file ,path) (estimate-content-type path))
+             (loop rest))))
+        (((target-url-path . (? procedure? proc)) rest ...)
+         (if (equal? target-url-path url-path)
+           (proc)
+           (loop rest)))))))
 
-(define-http-handler #/(\/.*\/.*)/
+(define-http-handler #/\/_m\/.*\.m?js/
   (lambda (req app)
     (let1 url-path (slot-ref req 'path)
-      (cond
-        ((url->file-path url-path)
-         => (lambda (file-path)
-              (respond/ok req `(file ,file-path) :content-type (estimate-content-type url-path))))
-        (else
-         (respond/ng req 404))))))
-
-(define-http-handler #/\/[^\/]+.m?js/
-  (lambda (req app)
-    (let1 url-path (slot-ref req 'path)
-      (cond
-        ((and (equal? (sys-dirname url-path) "/")
-              (get-js-code (sys-basename url-path)))
-         => (lambda (js-code)
-              (respond/ok req js-code :content-type (estimate-content-type url-path))))
-        (else
-         (respond/ng req 404))))))
+      (or (and-let1 js-code (get-js-code url-path)
+            (respond/ok req js-code :content-type "text/javascript"))
+          (respond/ng req 404)))))
 
 ;;;
 
-(load-css "/graviton/graviton.css")
+(load-css "/_g/graviton.css")
 
 (define document-body-proc
   (lambda ()
@@ -174,10 +178,14 @@
            (lambda ()
              body)))))
 
+(define-constant HEADER-APPLICATION-CONTEXT-ID "id")
+
 (define-http-handler "/"
   (lambda (req app)
     (guard (e (else (report-error e)
                     (exit 70)))
+      (let1 ctx (make-application-context)
+        (response-cookie-add! req HEADER-APPLICATION-CONTEXT-ID (~ ctx'id)))
       (respond/ok req (tree->string
                         (html:html
                          (html:head
@@ -196,7 +204,6 @@
                           (html:title (client-title)))
                          (document-body-proc)))))))
 
-
 (define *init-hook* (make-hook))
 
 (define-action "notifyException" (err stacktrace)
@@ -209,13 +216,13 @@
       (newline)))
   (app-exit 70))
 
-(define (start-websocket-dispatcher! sock in out)
+(define (start-websocket-dispatcher! ctx sock in out)
   (thread-start!
     (make-thread
       (lambda ()
         (guard (e (else (report-error e)
                         (exit 70)))
-          (let1 exit-code (websocket-main-loop in out)
+          (let1 exit-code (websocket-main-loop ctx in out)
             (log-debug "WebSocket dispatcher finished: ~a" exit-code)
             (close-input-port in)
             (close-output-port out)
@@ -224,7 +231,7 @@
             (when (eq? (client-type) 'player)
               (terminate-server-loop *control-channel* exit-code))))))))
 
-(define-http-handler "/s"
+(define-http-handler "/_s"
   (lambda (req app)
     ;; Set TCP_NODELAY to reduce latency if possible.
     (when (and (global-variable-bound? (current-module) 'IPPROTO_TCP)
@@ -235,12 +242,14 @@
       (let-params req ((upgrade "h")
                        (connection "h")
                        (sec-websocket-key "h")
-                       (sec-websocket-version "h"))
+                       (sec-websocket-version "h")
+                       (ctx "c:id" :convert lookup-application-context))
                   (cond
                     ((and (string-contains-ci upgrade "websocket")
                           (string-contains-ci connection "upgrade")
                           sec-websocket-key
-                          (equal? sec-websocket-version "13"))
+                          (equal? sec-websocket-version "13")
+                          ctx)
                      (format out
                              "HTTP/~a 101 Switching Protocols\r\n"
                              (ref req 'http-version))
@@ -256,10 +265,19 @@
                      (format out "\r\n")
                      (flush out)
                      (log-debug "WebSocket connected")
-                     (start-websocket-dispatcher! (request-socket req) in out)
+                     (start-websocket-dispatcher! ctx (request-socket req) in out)
                      req)
                     (else
                      (respond/ng req 400)))))))
+
+(define-http-handler #/.+/
+  (lambda (req app)
+    (let* ((url-path (slot-ref req 'path))
+           (ctx (lookup-application-context (request-cookie-ref req HEADER-APPLICATION-CONTEXT-ID))))
+      (receive (body content-type) (url-path->body&content-type ctx url-path)
+        (if body
+          (respond/ok req body :content-type content-type)
+          (respond/ng req 404))))))
 
 ;;;
 
@@ -395,8 +413,8 @@
   (main-worker-thunk-set! thunk)
   (let ((port (client-port)))
     (start-http-server :port port
-                       :access-log (access-log-drain)
-                       :error-log (error-log-drain)
+                       :access-log (grv-access-log-drain)
+                       :error-log (grv-error-log-drain)
                        :control-channel *control-channel*
                        :startup-callback (lambda (socks)
                                            (case (client-type)

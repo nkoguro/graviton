@@ -36,10 +36,13 @@
   (use gauche.selector)
   (use gauche.threads)
   (use graviton.misc)
+  (use srfi-27)
   (use util.match)
 
   (export application-context
           make-application-context
+          application-context-invalidate!
+          lookup-application-context
           application-context-id
           application-context-slot-atomic-ref
           application-context-slot-atomic-update!
@@ -55,20 +58,41 @@
 
 (define application-context-next-id (make-id-generator))
 
+(define *application-context-table-atom* (atom (make-hash-table 'equal?)))
+
 (define-syntax define-application-context-slot
   (syntax-rules ()
     ((_ name vals ...)
      (push! *application-context-slot-initial-forms* (cons 'name (lambda () (list vals ...)))))))
 
 (define-class <application-context> ()
-  ((id :init-form (application-context-next-id))
+  ((id :init-keyword :id)
    (mutex :init-form (make-mutex))
    (slot-table :init-form (make-hash-table 'eq?))))
 
 (define application-context (make-parameter #f))
 
 (define (make-application-context)
-  (make <application-context>))
+  (atomic *application-context-table-atom*
+    (lambda (tbl)
+      (define (make-id)
+        (let loop ()
+          (let1 id (number->string (random-integer #x10000000000000000) 36)
+            (if (hash-table-contains? tbl id)
+              (loop)
+              id))))
+      (rlet1 ctx (make <application-context> :id (make-id))
+        (hash-table-put! tbl (~ ctx'id) ctx)))))
+
+(define (application-context-invalidate! ctx)
+  (atomic *application-context-table-atom*
+    (lambda (tbl)
+      (hash-table-delete! tbl (~ ctx'id)))))
+
+(define (lookup-application-context id)
+  (atomic *application-context-table-atom*
+    (lambda (tbl)
+      (hash-table-get tbl id #f))))
 
 (define (application-context-id)
   (slot-ref (application-context) 'id))

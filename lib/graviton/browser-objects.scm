@@ -514,8 +514,8 @@
       :read-only? #t))
   :jsclass "HTMLImageElement")
 
-(define (load-image filename :key (content-type #f) (on-error :error))
-  (or (jslet/result ((url::string (resource-url filename :content-type content-type)))
+(define (load-image url :key (content-type #f) (on-error :error))
+  (or (jslet/result ((url::string))
         (let ((img (make Image)))
           (set! img.src url)
           (set! img.onload (lambda ()
@@ -528,7 +528,7 @@
                               (result #f)))))
       (case on-error
         ((#f) #f)
-        ((:error) (errorf "Failed to load image: ~a" filename))
+        ((:error) (errorf "Failed to load image: ~a" url))
         (else
          (errorf "bad value for :on-error argument; must be #f or :error, but got ~s" on-error)))))
 
@@ -710,8 +710,8 @@
   ()
   :jsclass "HTMLAudioElement")
 
-(define (load-audio filename :key (content-type #f) (on-error :error))
-  (receive (audio err) (jslet/result ((url::string (resource-url filename :content-type content-type)))
+(define (load-audio url :key (content-type #f) (on-error :error))
+  (receive (audio err) (jslet/result ((url::string))
                          (let1 audio (make Audio url)
                            (set! audio.onloadeddata (lambda ()
                                                       (set! audio.onloadeddata undefined)
@@ -724,7 +724,7 @@
     (or audio
         (case on-error
           ((#f) #f)
-          ((:error) (errorf "Failed to load audio: ~a (~a)" filename err))
+          ((:error) (errorf "Failed to load audio: ~a (~a)" url err))
           (else
            (errorf "bad value for :on-error argument; must be #f or :error, but got ~s" on-error))))))
 

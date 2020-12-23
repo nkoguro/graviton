@@ -499,7 +499,7 @@
      (errorf "Invalid expression: ~s" expr))))
 
 (define (scheme->js-main-module-name scheme-module-name)
-  (string-append (digest-hexify (sha1-digest-string (x->string scheme-module-name))) ".mjs"))
+  (string-append "/_m/" (digest-hexify (sha1-digest-string (x->string scheme-module-name))) ".mjs"))
 
 (define (js-vm-current-main-module)
   (scheme->js-main-module-name (module-name ((with-module gauche.internal vm-current-module)))))
@@ -533,7 +533,7 @@
     (hash-table-push! *js-code-table* name (compile-jsise-stmt env stmt))))
 
 (define (write-js-code name out)
-  (display "import * as Graviton from '/graviton/graviton.mjs';" out)
+  (display "import * as Graviton from '/_g/graviton.mjs';" out)
   (write-tree (reverse (hash-table-get *js-code-table* name)) out))
 
 (define (get-js-code name)
@@ -546,7 +546,7 @@
      #f)))
 
 (define (js-main-module-absolute-paths)
-  (map absolute-js-path (hash-table-keys *js-code-table*)))
+  (hash-table-keys *js-code-table*))
 
 ;;;
 

@@ -54,9 +54,7 @@
           websocket-main-loop
 
           define-action
-          register-binary-handler!
-
-          resource-url))
+          register-binary-handler!))
 
 (select-module graviton.comm)
 
@@ -248,9 +246,8 @@
 
 (define-application-context-slot websocket-output-port #f)
 
-(define (websocket-main-loop in out)
-  (let ((ctx (make <websocket-server-context>))
-        (app-context (make-application-context))
+(define (websocket-main-loop ctx in out)
+  (let ((app-context (make-application-context))
         (exit-code 0))
 
     (json-special-handler handle-json-special)
@@ -294,44 +291,6 @@
       (for-each worker-shutdown worker-threads)
       (for-each (cut worker-thread-wait <> :timeout 60) worker-threads))
 
+    (application-context-invalidate! ctx)
+
     exit-code))
-
-;;;
-
-(define *resource-table-atom* (atom (make-hash-table 'equal?)))
-
-(define (register-resource! content-type data)
-  (atomic *resource-table-atom*
-    (lambda (tbl)
-      (let loop ()
-        (let1 id (number->string (random-integer #xffffffff) 36)
-          (cond
-            ((hash-table-contains? tbl id)
-             (loop))
-            (else
-             (hash-table-put! tbl id (cons content-type data))
-             (format "/r?id=~a" id))))))))
-
-(define-method resource-url ((filename <string>) :key (content-type #f))
-  (let1 data (call-with-input-file filename port->uvector)
-    (register-resource! (or content-type
-                            (estimate-content-type filename))
-                        data)))
-
-(define (find-resource-data&content-type id)
-  (atomic *resource-table-atom*
-    (lambda (tbl)
-      (match-let1 (content-type . data) (hash-table-get tbl id (cons #f #f))
-        (hash-table-delete! tbl id)
-        (values data content-type)))))
-
-(define-http-handler "/r"
-  (lambda (req app)
-    (let-params req ((id "q"))
-                (receive (data content-type) (find-resource-data&content-type id)
-                  (cond
-                    ((and data content-type)
-                     (respond/ok req data :content-type content-type))
-                    (else
-                     (respond/ng req 404)))))))
-

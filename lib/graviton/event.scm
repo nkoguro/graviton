@@ -59,7 +59,7 @@
 
 (select-module graviton.event)
 
-(import-js ("graviton/event.mjs" :as Event))
+(import-js ("/_g/event.mjs" :as Event))
 
 (define-class <event> (<jsobject>)
   ((bubbles :jsproperty "bubbles"

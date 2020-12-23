@@ -1,5 +1,3 @@
-import {callAction} from '/graviton/graviton.mjs';
-
 let eventHandlerTable = new Map();
 
 function extractEventValues(event, props) {
@@ -30,4 +28,3 @@ export function unregisterEventHandler(obj, type, callback) {
         eventHandlerTable.delete(callback);
     }
 }
-

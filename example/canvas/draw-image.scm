@@ -3,7 +3,7 @@
 (use graviton)
 (use text.html-lite)
 
-(define *program-dir* (sys-dirname (current-load-path)))
+(bind-url-path "/font_16x16.png" (build-path (sys-dirname (current-load-path)) "../font_16x16.png"))
 
 (define (main args)
   (grv-player)
@@ -20,5 +20,5 @@
 
     (let* ((canvas (document'query-selector "canvas"))
            (ctx (canvas'get-context "2d"))
-           (image (load-image (build-path *program-dir* "../font_16x16.png"))))
+           (image (load-image "/font_16x16.png")))
       (ctx'draw-image image 0 0))))

@@ -68,7 +68,7 @@
 
 (select-module graviton.audio)
 
-(import-js ("graviton/audio.mjs" :only (audioContext)))
+(import-js ("/_g/audio.mjs" :only (audioContext)))
 
 (define-class <base-audio-context> (<event-target>)
   ((current-time :jsproperty "currentTime"

@@ -3,7 +3,7 @@
 let webSocket;
 
 function connectServer() {
-    webSocket = new WebSocket('ws://' + location.host + '/s');
+    webSocket = new WebSocket('ws://' + location.host + '/_s');
     webSocket.binaryType = 'arraybuffer';
     webSocket.onopen = () => {
         console.log('opened');

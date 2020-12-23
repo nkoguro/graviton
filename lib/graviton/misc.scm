@@ -44,8 +44,8 @@
           config-with-params
 
           grv-log-config
-          access-log-drain
-          error-log-drain
+          grv-access-log-drain
+          grv-error-log-drain
           log-level
           log-debug
           log-info
@@ -115,10 +115,10 @@
                         log-level)
   (set! *log-config* (config-with-params <log-config> access-log-drain error-log-drain log-level)))
 
-(define (access-log-drain)
+(define (grv-access-log-drain)
   (slot-ref *log-config* 'access-log-drain))
 
-(define (error-log-drain)
+(define (grv-error-log-drain)
   (slot-ref *log-config* 'error-log-drain))
 
 (define (log-level)
