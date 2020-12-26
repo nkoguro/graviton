@@ -672,6 +672,10 @@ export function notifyException(exception) {
 }
 
 window.addEventListener('error', (e) => {
+    if (!e.error) {
+        return;
+    }
+
     console.log('Unhandled exception: ' + e.error.toString());
     console.log('stacktrace:\n' + e.error.stack);
     try {

@@ -39,6 +39,7 @@
   (use gauche.hook)
   (use gauche.mop.singleton)
   (use gauche.parameter)
+  (use gauche.partcont)
   (use gauche.record)
   (use gauche.sequence)
   (use gauche.threads)
@@ -720,12 +721,16 @@
                 args))
 
 (define (jscall/result js-proc :rest args)
-  (let1 queue (make-mtqueue)
-    (call-command (slot-ref js-proc 'command-id)
-                  (slot-ref js-proc 'types)
-                  (cons queue args))
-    (flush-commands)
-    (apply values (dequeue/wait! queue))))
+  (let1 callback #f
+    (unwind-protect
+        (shift cont
+          (set! callback (worker-callback cont))
+          (call-command (slot-ref js-proc 'command-id)
+                        (slot-ref js-proc 'types)
+                        (cons callback args))
+          (flush-commands))
+      (when callback
+        (unlink-callback callback)))))
 
 (define-macro (jslet arg-specs :rest body)
   `(,jscall ,(compile-jslet arg-specs body)
@@ -1416,7 +1421,9 @@
 
 (define (decode-string in)
   (let1 len (decode-value in)
-    (ces-convert (read-uvector <u8vector> len in) 'utf-8)))
+    (if (= len 0)
+      ""
+      (ces-convert (read-uvector <u8vector> len in) 'utf-8))))
 
 (define decoder-table
   (alist->hash-table
@@ -1457,21 +1464,45 @@
                             (let1 len (decode-value in)
                               (vector-ec (: _ len) (decode-value in)))))
       ;; int8array
-      (,VAL-TYPE-INT8ARRAY . ,(^(in) (read-uvector <s8vector> (decode-value in) in 'little-endian)))
+      (,VAL-TYPE-INT8ARRAY . ,(^(in) (let1 len (decode-value in)
+                                       (if (= len 0)
+                                         #s8()
+                                         (read-uvector <s8vector> len in 'little-endian)))))
       ;; uint8array
-      (,VAL-TYPE-UINT8ARRAY . ,(^(in) (read-uvector <u8vector> (decode-value in) in 'little-endian)))
+      (,VAL-TYPE-UINT8ARRAY . ,(^(in) (let1 len (decode-value in)
+                                        (if (= len 0)
+                                          #u8()
+                                          (read-uvector <u8vector> len in 'little-endian)))))
       ;; int16array
-      (,VAL-TYPE-INT16ARRAY . ,(^(in) (read-uvector <s16vector> (decode-value in) in 'little-endian)))
+      (,VAL-TYPE-INT16ARRAY . ,(^(in) (let1 len (decode-value in)
+                                        (if (= len 0)
+                                          #s16()
+                                          (read-uvector <s16vector> len in 'little-endian)))))
       ;; uint16array
-      (,VAL-TYPE-UINT16ARRAY . ,(^(in) (read-uvector <u16vector> (decode-value in) in 'little-endian)))
+      (,VAL-TYPE-UINT16ARRAY . ,(^(in) (let1 len (decode-value in)
+                                         (if (= len 0)
+                                           #u16()
+                                           (read-uvector <u16vector> len in 'little-endian)))))
       ;; int32array
-      (,VAL-TYPE-INT32ARRAY . ,(^(in) (read-uvector <s32vector> (decode-value in) in 'little-endian)))
+      (,VAL-TYPE-INT32ARRAY . ,(^(in) (let1 len (decode-value in)
+                                        (if (= len 0)
+                                          #s32()
+                                          (read-uvector <s32vector> len in 'little-endian)))))
       ;; uint32array
-      (,VAL-TYPE-UINT32ARRAY . ,(^(in) (read-uvector <u32vector> (decode-value in) in 'little-endian)))
+      (,VAL-TYPE-UINT32ARRAY . ,(^(in) (let1 len (decode-value in)
+                                         (if (= len 0)
+                                           #u32()
+                                           (read-uvector <u32vector> len in 'little-endian)))))
       ;; float32array
-      (,VAL-TYPE-FLOAT32ARRAY . ,(^(in) (read-uvector <f32vector> (decode-value in) in 'little-endian)))
+      (,VAL-TYPE-FLOAT32ARRAY . ,(^(in) (let1 len (decode-value in)
+                                          (if (= len 0)
+                                            #f32()
+                                            (read-uvector <f32vector> len in 'little-endian)))))
       ;; float64array
-      (,VAL-TYPE-FLOAT64ARRAY . ,(^(in) (read-uvector <f64vector> (decode-value in) in 'little-endian)))
+      (,VAL-TYPE-FLOAT64ARRAY . ,(^(in) (let1 len (decode-value in)
+                                          (if (= len 0)
+                                            #f64()
+                                            (read-uvector <f64vector> len in 'little-endian)))))
       ;; JSON
       (,VAL-TYPE-JSON . ,(^(in)
                            (let1 len (decode-value in)

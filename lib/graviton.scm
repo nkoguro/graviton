@@ -70,7 +70,7 @@
   (use text.tree)
   (use util.match)
 
-  (extend graviton.async graviton.browser-objects graviton.event graviton.canvas graviton.audio)
+  (extend graviton.async graviton.browser-objects graviton.event graviton.canvas graviton.audio graviton.text)
 
   (export grv-start
           grv-started?
