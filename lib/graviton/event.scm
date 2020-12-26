@@ -43,7 +43,7 @@
   (use graviton.async)
   (use graviton.comm)
   (use graviton.config)
-  (use graviton.jsbridge)
+  (use graviton.jsffi)
   (use graviton.misc)
   (use srfi-13)
   (use util.match)

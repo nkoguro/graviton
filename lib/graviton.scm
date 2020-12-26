@@ -54,7 +54,7 @@
   (use graviton.comm)
   (use graviton.config)
   (use graviton.event)
-  (use graviton.jsbridge)
+  (use graviton.jsffi)
   (use graviton.misc)
   (use makiki)
   (use rfc.base64)

@@ -33,7 +33,7 @@
 (define-module graviton.browser-objects
   (use graviton.app)
   (use graviton.comm)
-  (use graviton.jsbridge)
+  (use graviton.jsffi)
   (use srfi-13)
   (use text.html-lite)
   (use text.tree)

@@ -1,5 +1,5 @@
 ;;;
-;;; jsbridge.scm - Javascript in S-Expression
+;;; jsffi.scm - JavaScript Foreign Function Interface
 ;;;
 ;;;   Copyright (c) 2019 KOGURO, Naoki (naoki@koguro.net)
 ;;;   All rights reserved.
@@ -30,7 +30,7 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
-(define-module graviton.jsbridge
+(define-module graviton.jsffi
   (use binary.io)
   (use data.queue)
   (use file.util)
@@ -98,7 +98,7 @@
           unlink-procedure
           ))
 
-(select-module graviton.jsbridge)
+(select-module graviton.jsffi)
 
 (define env-counter-atom (atom -1))
 

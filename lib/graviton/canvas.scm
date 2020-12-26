@@ -31,7 +31,7 @@
 
 (define-module graviton.canvas
   (use graviton.browser-objects)
-  (use graviton.jsbridge)
+  (use graviton.jsffi)
 
   (export <html-canvas-element>
           <canvas-rendering-context-2d>

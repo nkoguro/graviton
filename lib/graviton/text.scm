@@ -35,7 +35,7 @@
   (use gauche.vport)
   (use graviton.app)
   (use graviton.browser-objects)
-  (use graviton.jsbridge)
+  (use graviton.jsffi)
   (use text.html-lite)
 
   (export html:grv-text

@@ -33,7 +33,7 @@
 (define-module graviton.audio
   (use graviton.app)
   (use graviton.browser-objects)
-  (use graviton.jsbridge)
+  (use graviton.jsffi)
 
   (export <base-audio-context>
           <audio-context>
