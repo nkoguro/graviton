@@ -47,6 +47,7 @@
           grv-access-log-drain
           grv-error-log-drain
           log-level
+          log-framework-debug
           log-debug
           log-info
           log-error
@@ -105,7 +106,7 @@
 (define-class <log-config> ()
   ((access-log-drain :init-value #f)
    (error-log-drain :init-value #t)
-   (log-level :init-value 1)))
+   (log-level :init-value 0)))
 
 (define *log-config* (make <log-config>))
 
@@ -124,20 +125,43 @@
 (define (log-level)
   (slot-ref *log-config* 'log-level))
 
-(define (log-debug fmt :rest args)
-  (when (<= (log-level) 0)
-    (apply log-format fmt args)))
+(define-constant DEBUG-LEVEL-FRAMEWORK 3)
+(define-constant DEBUG-LEVEL 1)
+(define-constant INFO-LEVEL 0)
+(define-constant ERROR-LEVEL -1)
 
-(define (log-info fmt :rest args)
-  (when (<= (log-level) 1)
-    (apply log-format fmt args)))
+(define-syntax log-output
+  (syntax-rules ()
+    ((_ level fmt args ...)
+     (when (<= level (log-level))
+       (apply log-format fmt (list args ...))))))
 
-(define (log-error fmt :rest args)
-  (when (<= (log-level) 2)
-    (apply log-format fmt args)))
+(define-syntax log-framework-debug
+  (syntax-rules ()
+    ((_ fmt args ...)
+     (log-output DEBUG-LEVEL-FRAMEWORK fmt args ...))))
 
-(define (log-timestamp :optional (msg #f))
-  (log-info "~a: ~:d ms" (or msg "timestamp") (round->exact (* 1000 (- (now-seconds) *start-timestamp*)))))
+(define-syntax log-debug
+  (syntax-rules ()
+    ((_ fmt args ...)
+     (log-output DEBUG-LEVEL fmt args ...))))
+
+(define-syntax log-info
+  (syntax-rules ()
+    ((_ fmt args ...)
+     (log-output INFO-LEVEL fmt args ...))))
+
+(define-syntax log-error
+  (syntax-rules ()
+    ((_ fmt args ...)
+     (log-output INFO-LEVEL fmt args ...))))
+
+(define-syntax log-timestamp
+  (syntax-rules ()
+    ((_ msg)
+     (log-info "~a: ~:d ms" msg (round->exact (* 1000 (- (now-seconds) *start-timestamp*)))))
+    ((_)
+     (log-timestamp "timstamp"))))
 
 ;;;
 

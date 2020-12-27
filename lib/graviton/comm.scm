@@ -164,7 +164,7 @@
     (receive (fin? opcode mask? payload-length) (read-websocket-header in)
       (let* ((masking-key (read-websocket-masking-key mask? in))
              (payload-data (read-websocket-payload-data payload-length masking-key in)))
-        (log-debug "receive frame: fin?=~a, opcode=~a, payload-length=~a" fin? opcode payload-length)
+        (log-framework-debug "receive frame: fin?=~a, opcode=~a, payload-length=~a" fin? opcode payload-length)
         (case opcode
           ((0)
            (cond
@@ -196,13 +196,13 @@
           ((8)
            (let ((status (get-u16 payload-data 0 'big-endian))
                  (rest (uvector-alias <u8vector> payload-data 2 (u8vector-length payload-data))))
-             (log-debug "WebSocket closed: code=~a, data=(~a)" status rest)
+             (log-framework-debug "WebSocket closed: code=~a, data=(~a)" status rest)
              (close-handler)))
           ((9)
-           (log-debug "Received ping frame: ~s" payload-data)
+           (log-framework-debug "Received ping frame: ~s" payload-data)
            (send-pong-frame out payload-data))
           ((10)
-           (log-debug "Received pong frame: ~s" payload-data)))))))
+           (log-framework-debug "Received pong frame: ~s" payload-data)))))))
 
 ;;;
 

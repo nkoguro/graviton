@@ -32,7 +32,6 @@
 
 (define-module graviton.jsffi
   (use binary.io)
-  (use data.queue)
   (use file.util)
   (use gauche.charconv)
   (use gauche.collection)
@@ -619,7 +618,7 @@
 (define-jsargtype boolean getBoolean (lambda (v out)
                                        (write-u8 (if v 1 0) out 'little-endian)))
 (define-jsargtype future getUint32 (lambda (v out)
-                                     (write-u32 (allocate-future-id v) out 'little-endian)))
+                                     (write-u32 (link-callback v) out 'little-endian)))
 (define-jsargtype object getObject (lambda (v out)
                                      (write-u32 (jsobject-id v) out 'little-endian)))
 (define-jsargtype string getString (lambda (v out)
@@ -722,15 +721,15 @@
 
 (define (jscall/result js-proc :rest args)
   (let1 callback #f
-    (unwind-protect
-        (shift cont
-          (set! callback (worker-callback cont))
-          (call-command (slot-ref js-proc 'command-id)
-                        (slot-ref js-proc 'types)
-                        (cons callback args))
-          (flush-commands))
+    (receive vals (shift cont
+                    (set! callback (worker-callback cont))
+                    (call-command (slot-ref js-proc 'command-id)
+                                  (slot-ref js-proc 'types)
+                                  (cons callback args))
+                    (flush-commands))
       (when callback
-        (unlink-callback callback)))))
+        (unlink-callback callback))
+      (apply values vals))))
 
 (define-macro (jslet arg-specs :rest body)
   `(,jscall ,(compile-jslet arg-specs body)
@@ -928,7 +927,7 @@
                                           (result (json-value ((~ (~ self ,jsmethod) 'apply) self args) rule))))))))
                      specs))))))))
 
-(define *initial-jsobject-table-size* 1024)
+(define *initial-jsobject-table-size* 128)
 
 (define-class <jsobject-manager> ()
   ((id-vector :init-form (make-vector *initial-jsobject-table-size* #f))
@@ -958,11 +957,13 @@
              (and-let1 old-id (vector-ref id-vector index)
                (jslet ((old-id::u32 old-id))
                  (Graviton.freeObjectId old-id))
-               (hash-table-delete! id->index-table old-id))
+               (hash-table-delete! id->index-table old-id)
+               (log-framework-debug "Freed jsobject: #x~8,'0x" old-id))
              (vector-set! id-vector index (jsobject-id jsobj))
              (weak-vector-set! object-vector index jsobj)
              (hash-table-put! id->index-table (jsobject-id jsobj) index)
-             (set! next-index (modulo (+ index 1) len)))))))))
+             (set! next-index (modulo (+ index 1) len))
+             (log-framework-debug "Allocated jsobject: #x~8,'0x" (jsobject-id jsobj)))))))))
 
 (define (expand-jsobject-table! manager)
   (with-slots (id-vector object-vector next-index) manager
@@ -977,7 +978,8 @@
           (weak-vector-set! new-object-vector i (weak-vector-ref object-vector i)))
         (set! id-vector new-id-vector)
         (set! object-vector new-object-vector)
-        (set! next-index len)))))
+        (set! next-index len))
+      (log-framework-debug "Expanded jsobject table size: ~a -> ~a" len new-len))))
 
 (define-class <jsobject> ()
   ((%id :init-keyword :id)
@@ -1579,15 +1581,11 @@
     (lambda (tbl future-next-id)
       (let1 receiver (hash-table-get tbl future-id #f)
         (match receiver
-          ((? mtqueue? queue)
-           (hash-table-delete! tbl future-id)
-           (enqueue! queue (if (null? vals)
-                             (list (undefined))
-                             vals)))
           ((? worker-callback? callback)
-           (apply callback vals))
+           (apply callback vals)
+           (log-framework-debug "future ID: #x~8,'0x received (args: ~s). Invoke callback: ~s" future-id vals callback))
           (else
-           (errorf "[BUG] Invalid future ID: ~a" future-id)))))))
+           (errorf "[BUG] Invalid receiver for future ID: ~a" future-id)))))))
 
 (define-application-context-slot callback->id-table (make-hash-table 'equal?))
 
@@ -1595,9 +1593,9 @@
   (application-context-slot-atomic-ref 'callback->id-table
     (lambda (tbl)
       (or (hash-table-get tbl callback #f)
-          (let1 id (allocate-future-id callback)
+          (rlet1 id (allocate-future-id callback)
             (hash-table-put! tbl callback id)
-            id)))))
+            (log-framework-debug "Allocated future ID: #x~8,'0x" id))))))
 
 (define (unlink-callback callback)
   (application-context-slot-atomic-ref 'callback->id-table
@@ -1605,7 +1603,9 @@
       (and-let1 id (hash-table-get tbl callback #f)
         (jslet ((id::u32))
           (Graviton.freeProcedure id))
-        (free-future-id id)))))
+        (free-future-id id)
+        (hash-table-delete! tbl callback)
+        (log-framework-debug "Freed future ID: #x~8,'0x" id)))))
 
 (define (unlink-procedure proc)
   (for-each unlink-callback

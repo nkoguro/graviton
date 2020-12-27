@@ -223,7 +223,7 @@
         (guard (e (else (report-error e)
                         (exit 70)))
           (let1 exit-code (websocket-main-loop ctx in out)
-            (log-debug "WebSocket dispatcher finished: ~a" exit-code)
+            (log-framework-debug "WebSocket dispatcher finished: ~a" exit-code)
             (close-input-port in)
             (close-output-port out)
             (connection-close sock)
@@ -264,7 +264,7 @@
                                                 "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))))
                      (format out "\r\n")
                      (flush out)
-                     (log-debug "WebSocket connected")
+                     (log-framework-debug "WebSocket connected")
                      (start-websocket-dispatcher! ctx (request-socket req) in out)
                      req)
                     (else

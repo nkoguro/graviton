@@ -80,6 +80,9 @@ export function freeObjectId(objectId) {
     let obj = objectTable.get(objectId);
     objectIdTable.delete(obj);
     objectTable.delete(objectId);
+    if (objectId < objectNextId) {
+        objectNextId = objectId;
+    }
 }
 
 let enumTable = new Map();
