@@ -620,7 +620,7 @@
 (define-jsargtype future getUint32 (lambda (v out)
                                      (write-u32 (link-callback v) out 'little-endian)))
 (define-jsargtype object getObject (lambda (v out)
-                                     (write-u32 (jsobject-id v) out 'little-endian)))
+                                     (encode-number (jsobject-id v) out)))
 (define-jsargtype string getString (lambda (v out)
                                      (let1 data (ces-convert-to <u8vector> v 'utf-8)
                                        (encode-number (u8vector-length data) out)
@@ -1346,12 +1346,12 @@
      (let1 jsobj-id (jsobject-id obj)
        (write-s8 VAL-TYPE-OBJECT out)
        ;; class-id isn't necessary because the object already exists in Javascript world.
-       (write-u32 jsobj-id out 'little-endian)))
+       (encode-number jsobj-id out)))
     ((is-a? obj <jsobject-provider>)
      (let1 jsobj-id (jsobject-id obj)
        (write-s8 VAL-TYPE-OBJECT out)
        ;; class-id isn't necessary because the object already exists in Javascript world.
-       (write-u32 jsobj-id out 'little-endian)))
+       (encode-number jsobj-id out)))
     ;; date
     ((is-a? obj <time>)
      (write-s8 VAL-TYPE-DATE out)
@@ -1450,8 +1450,8 @@
       (,VAL-TYPE-SYMBOL . ,(^(in) (string->symbol (decode-string in))))
       ;; object
       (,VAL-TYPE-OBJECT . ,(^(in)
-                             (let* ((class-id (read-u32 in 'little-endian))
-                                    (jsobj-id (read-u32 in 'little-endian)))
+                             (let* ((class-id (decode-value in))
+                                    (jsobj-id (decode-value in)))
                                (application-context-slot-atomic-ref 'jsobject-manager
                                  (lambda (manager)
                                    (or (find-jsobject manager jsobj-id)

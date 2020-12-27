@@ -333,7 +333,7 @@ class DataReadStream {
     }
 
     getObject() {
-        let objectId = this.getUint32();
+        let objectId = this.getAny();
         return lookupObject(objectId);
     }
 
@@ -637,11 +637,14 @@ function encodeValue(val) {
     } else {
         let classId = findClassId(val);
         let objectId = findObjectId(val);
-        let data = new Uint8Array(1 + 4 + 4);
-        let dataView = new DataView(data.buffer);
-        dataView.setInt8(0, VAL_TYPE_OBJECT);
-        dataView.setUint32(1, classId, true);
-        dataView.setUint32(5, objectId, true);
+        let classIdData = encodeNumber(classId);
+        let objectIdData = encodeNumber(objectId);
+        let data = new Uint8Array(1 + classIdData.byteLength + objectIdData.byteLength);
+        data[0] = VAL_TYPE_OBJECT;
+        let offset = 1;
+        data.set(classIdData, offset);
+        offset += classIdData.byteLength;
+        data.set(objectIdData, offset);
         return data;
     }
 }
