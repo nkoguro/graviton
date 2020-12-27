@@ -1,12 +1,7 @@
-(use data.queue)
 (use gauche.logger)
 (use graviton)
-(use graviton.canvas)
-(use graviton.event)
 (use math.const)
 (use text.html-lite)
-(use util.list)
-(use util.match)
 
 (define (main args)
   (grv-player)
