@@ -935,14 +935,15 @@
                                     (encode-value e out))))
 
 (define (write-command-args types args out)
-  (for-each (lambda (type arg)
-              (or (and-let1 serialize (hash-table-get *jsargtype-serializer-table* type #f)
-                    (serialize arg out)
-                    #t)
-                  (and (hash-table-contains? *enum-table* type)
-                       (write-u8 (enum-value type arg) out 'little-endian))
-                  (errorf "Invalid jsarg type: ~a" type)))
-            types args))
+  ;; Use non-generic-function for-each here for performance.
+  ((with-module gauche for-each) (lambda (type arg)
+                                   (or (and-let1 serialize (hash-table-get *jsargtype-serializer-table* type #f)
+                                         (serialize arg out)
+                                         #t)
+                                       (and (hash-table-contains? *enum-table* type)
+                                            (write-u8 (enum-value type arg) out 'little-endian))
+                                       (errorf "Invalid jsarg type: ~a" type)))
+   types args))
 
 (define (call-command command-id types args)
   (with-send-buffer
