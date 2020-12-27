@@ -579,6 +579,325 @@
 
 ;;;
 
+(define-constant VAL-TYPE-UNDEFINED 1)
+(define-constant VAL-TYPE-NULL 2)
+(define-constant VAL-TYPE-TRUE 3)
+(define-constant VAL-TYPE-FALSE 4)
+(define-constant VAL-TYPE-PROCEDURE 5)
+(define-constant VAL-TYPE-POSITIVE-INFINITY 6)
+(define-constant VAL-TYPE-NEGATIVE-INFINITY 7)
+(define-constant VAL-TYPE-NAN 8)
+(define-constant VAL-TYPE-STRING 9)
+(define-constant VAL-TYPE-SYMBOL 10)
+(define-constant VAL-TYPE-OBJECT 11)
+(define-constant VAL-TYPE-DATE 12)
+(define-constant VAL-TYPE-ARRAY 13)
+(define-constant VAL-TYPE-INT8ARRAY 14)
+(define-constant VAL-TYPE-UINT8ARRAY 15)
+(define-constant VAL-TYPE-INT16ARRAY 16)
+(define-constant VAL-TYPE-UINT16ARRAY 17)
+(define-constant VAL-TYPE-INT32ARRAY 18)
+(define-constant VAL-TYPE-UINT32ARRAY 19)
+(define-constant VAL-TYPE-FLOAT32ARRAY 20)
+(define-constant VAL-TYPE-FLOAT64ARRAY 21)
+(define-constant VAL-TYPE-JSON 22)
+(define-constant VAL-TYPE-INT8 23)
+(define-constant VAL-TYPE-UINT8 24)
+(define-constant VAL-TYPE-INT16 25)
+(define-constant VAL-TYPE-UINT16 26)
+(define-constant VAL-TYPE-INT32 27)
+(define-constant VAL-TYPE-UINT32 28)
+(define-constant VAL-TYPE-FLOAT64 29)
+
+(define (encode-string str out)
+  (let1 data (ces-convert-to <u8vector> str (gauche-character-encoding) 'utf-8)
+    (encode-integer (u8vector-length data) out)
+    (write-uvector data out)))
+
+(define (encode-float64 v out)
+  (write-s8 VAL-TYPE-FLOAT64 out)
+  (write-f64 v out 'little-endian))
+
+(define (encode-integer v out)
+  (if (<= 0 v)
+    ;; zero or positive
+    (cond
+      ((<= v #x80)
+       (write-s8 (- v) out))
+      ((<= v #xff)
+       (write-s8 VAL-TYPE-UINT8 out)
+       (write-u8 v out))
+      ((<= v #xffff)
+       (write-s8 VAL-TYPE-UINT16 out)
+       (write-u16 v out 'little-endian))
+      ((<= v #xffffffff)
+       (write-s8 VAL-TYPE-UINT32 out)
+       (write-u32 v out 'little-endian))
+      (else
+       (encode-float64 v out)))
+    ;; negative
+    (cond
+      ((<= #x-80 v)
+       (write-s8 VAL-TYPE-INT8 out)
+       (write-s8 v out))
+      ((<= #x-8000 v)
+       (write-s8 VAL-TYPE-INT16 out)
+       (write-s16 v out 'little-endian))
+      ((<= #x-80000000 v)
+       (write-s8 VAL-TYPE-INT32 out)
+       (write-s32 v out 'little-endian))
+      (else
+       (encode-float64 v out)))))
+
+(define (encode-real v out)
+  (if (integer? v)
+    (encode-integer v out)
+    (encode-float64 v out)))
+
+(define (encode-symbol sym out)
+  (encode-string (symbol->string sym) out))
+
+(define (encode-object obj out)
+  ;; class-id isn't necessary because the object already exists in Javascript world.
+  (encode-integer (jsobject-id obj) out))
+
+(define (encode-time t out)
+  (encode-real (* (time->seconds t) 1000) out))
+
+(define (encode-array vec out)
+  (let1 len (vector-length vec)
+    (encode-integer len out)
+    (dotimes (i len)
+      (encode-value (vector-ref vec i) out))))
+
+(define (encode-uvector uvec out)
+  (encode-integer (uvector-length uvec) out)
+  (write-uvector uvec out 0 -1 'little-endian))
+
+(define (encode-json json-alist out)
+  (encode-integer (length json-alist) out)
+  (for-each (lambda (pair)
+              (encode-value (car pair) out)
+              (encode-value (cdr pair) out))
+            json-alist))
+
+(define (encode-callback callback out)
+  (write-u32 (link-callback callback) out 'little-endian))
+
+(define (encode-procedure proc out)
+  (encode-callback (worker-callback proc) out))
+
+(define (encode-value obj out)
+  (cond
+    ;; undefined
+    ((undefined? obj)
+     (write-s8 VAL-TYPE-UNDEFINED out))
+    ;; null
+    ((eq? obj 'null)
+     (write-s8 VAL-TYPE-NULL out))
+    ;; true
+    ((or (eq? obj #t) (eq? obj 'true))
+     (write-s8 VAL-TYPE-TRUE out))
+    ;; false
+    ((or (eq? obj #f) (eq? obj 'false))
+     (write-s8 VAL-TYPE-FALSE out))
+    ;; real number
+    ((real? obj)
+     (encode-real obj out))
+    ;; positive infinity
+    ((equal? obj +inf.0)
+     (write-s8 VAL-TYPE-POSITIVE-INFINITY out))
+    ;; negative infinity
+    ((equal? obj -inf.0)
+     (write-s8 VAL-TYPE-NEGATIVE-INFINITY out))
+    ;; NaN
+    ((and (number? obj) (nan? obj))
+     (write-s8 VAL-TYPE-NAN out))
+    ;; string
+    ((string? obj)
+     (write-s8 VAL-TYPE-STRING out)
+     (encode-string obj out))
+    ;; symbol
+    ((symbol? obj)
+     (write-s8 VAL-TYPE-SYMBOL out)
+     (encode-symbol obj out))
+    ;; object
+    ((or (is-a? obj <jsobject>) (is-a? obj <jsobject-provider>))
+     (write-s8 VAL-TYPE-OBJECT out)
+     (encode-object obj out))
+    ;; date
+    ((is-a? obj <time>)
+     (write-s8 VAL-TYPE-DATE out)
+     (encode-time obj out))
+    ;; array
+    ((vector? obj)
+     (write-s8 VAL-TYPE-ARRAY out)
+     (encode-array obj out))
+    ;; int8array
+    ((s8vector? obj)
+     (write-s8 VAL-TYPE-INT8ARRAY out)
+     (encode-uvector obj out))
+    ;; uint8array
+    ((u8vector? obj)
+     (write-s8 VAL-TYPE-UINT8ARRAY out)
+     (encode-uvector obj out))
+    ;; int16array
+    ((s16vector? obj)
+     (write-s8 VAL-TYPE-INT16ARRAY out)
+     (encode-uvector obj out))
+    ;; uint16array
+    ((u16vector? obj)
+     (write-s8 VAL-TYPE-UINT16ARRAY out)
+     (encode-uvector obj out))
+    ;; int32array
+    ((s32vector? obj)
+     (write-s8 VAL-TYPE-INT32ARRAY out)
+     (encode-uvector obj out))
+    ;; uint32array
+    ((u32vector? obj)
+     (write-s8 VAL-TYPE-UINT32ARRAY out)
+     (encode-uvector obj out))
+    ;; float32array
+    ((f32vector? obj)
+     (write-s8 VAL-TYPE-FLOAT32ARRAY out)
+     (encode-uvector obj out))
+    ;; float64array
+    ((f64vector? obj)
+     (write-s8 VAL-TYPE-FLOAT64ARRAY out)
+     (encode-uvector obj out))
+    ;; JSON
+    ((list? obj)
+     (write-s8 VAL-TYPE-JSON out)
+     (encode-json obj out))
+    ((worker-callback? obj)
+     (write-s8 VAL-TYPE-PROCEDURE out)
+     (encode-callback obj out))
+    ((procedure? obj)
+     (write-s8 VAL-TYPE-PROCEDURE out)
+     (encode-procedure obj out))
+    (else
+     (errorf "Unsupported object: ~s" obj))))
+
+(define (decode-string in)
+  (let1 len (decode-value in)
+    (if (= len 0)
+      ""
+      (ces-convert (read-uvector <u8vector> len in) 'utf-8))))
+
+(define decoder-table
+  (alist->hash-table
+    `(
+      ;; undefined
+      (,VAL-TYPE-UNDEFINED . ,(^(in) undefined))
+      ;; null
+      (,VAL-TYPE-NULL . ,(^(in) 'null))
+      ;; true
+      (,VAL-TYPE-TRUE . ,(^(in) #t))
+      ;; false
+      (,VAL-TYPE-FALSE . ,(^(in) #f))
+      ;; positive infinity
+      (,VAL-TYPE-POSITIVE-INFINITY . ,(^(in) +inf.0))
+      ;; negative infinity
+      (,VAL-TYPE-NEGATIVE-INFINITY . ,(^(in) -inf.0))
+      ;; NaN
+      (,VAL-TYPE-NAN . ,(^(in) +nan.0))
+      ;; string
+      (,VAL-TYPE-STRING . ,(^(in) (decode-string in)))
+      ;; symbol
+      (,VAL-TYPE-SYMBOL . ,(^(in) (string->symbol (decode-string in))))
+      ;; object
+      (,VAL-TYPE-OBJECT . ,(^(in)
+                             (let* ((class-id (decode-value in))
+                                    (jsobj-id (decode-value in)))
+                               (application-context-slot-atomic-ref 'jsobject-manager
+                                 (lambda (manager)
+                                   (or (find-jsobject manager jsobj-id)
+                                       (let1 jsobj (make (hash-table-get *id->class-table* class-id)
+                                                     :id jsobj-id)
+                                         (register-jsobject! manager jsobj)
+                                         jsobj)))))))
+      ;; date
+      (,VAL-TYPE-DATE . ,(^(in) (seconds->time (/. (decode-value in) 1000))))
+      ;; array
+      (,VAL-TYPE-ARRAY . ,(^(in)
+                            (let1 len (decode-value in)
+                              (vector-ec (: _ len) (decode-value in)))))
+      ;; int8array
+      (,VAL-TYPE-INT8ARRAY . ,(^(in) (let1 len (decode-value in)
+                                       (if (= len 0)
+                                         #s8()
+                                         (read-uvector <s8vector> len in 'little-endian)))))
+      ;; uint8array
+      (,VAL-TYPE-UINT8ARRAY . ,(^(in) (let1 len (decode-value in)
+                                        (if (= len 0)
+                                          #u8()
+                                          (read-uvector <u8vector> len in 'little-endian)))))
+      ;; int16array
+      (,VAL-TYPE-INT16ARRAY . ,(^(in) (let1 len (decode-value in)
+                                        (if (= len 0)
+                                          #s16()
+                                          (read-uvector <s16vector> len in 'little-endian)))))
+      ;; uint16array
+      (,VAL-TYPE-UINT16ARRAY . ,(^(in) (let1 len (decode-value in)
+                                         (if (= len 0)
+                                           #u16()
+                                           (read-uvector <u16vector> len in 'little-endian)))))
+      ;; int32array
+      (,VAL-TYPE-INT32ARRAY . ,(^(in) (let1 len (decode-value in)
+                                        (if (= len 0)
+                                          #s32()
+                                          (read-uvector <s32vector> len in 'little-endian)))))
+      ;; uint32array
+      (,VAL-TYPE-UINT32ARRAY . ,(^(in) (let1 len (decode-value in)
+                                         (if (= len 0)
+                                           #u32()
+                                           (read-uvector <u32vector> len in 'little-endian)))))
+      ;; float32array
+      (,VAL-TYPE-FLOAT32ARRAY . ,(^(in) (let1 len (decode-value in)
+                                          (if (= len 0)
+                                            #f32()
+                                            (read-uvector <f32vector> len in 'little-endian)))))
+      ;; float64array
+      (,VAL-TYPE-FLOAT64ARRAY . ,(^(in) (let1 len (decode-value in)
+                                          (if (= len 0)
+                                            #f64()
+                                            (read-uvector <f64vector> len in 'little-endian)))))
+      ;; JSON
+      (,VAL-TYPE-JSON . ,(^(in)
+                           (let1 len (decode-value in)
+                             (list-ec (: _ (decode-value in))
+                                      (let* ((key (decode-value in))
+                                             (val (decode-value in)))
+                                        (cons key val))))))
+      ;; int8
+      (,VAL-TYPE-INT8 . ,read-s8)
+      ;; uint8
+      (,VAL-TYPE-UINT8 . ,read-u8)
+      ;; int16
+      (,VAL-TYPE-INT16 . ,(cut read-s16 <> 'little-endian))
+      ;; uint16
+      (,VAL-TYPE-UINT16 . ,(cut read-u16 <> 'little-endian))
+      ;; int32
+      (,VAL-TYPE-INT32 . ,(cut read-s32 <> 'little-endian))
+      ;; uint32
+      (,VAL-TYPE-UINT32 . ,(cut read-u32 <> 'little-endian))
+      ;; float64
+      (,VAL-TYPE-FLOAT64 . ,(cut read-f64 <> 'little-endian)))))
+
+(define (decode-value in)
+  (let1 val-type (read-s8 in)
+    (cond
+      ((eof-object? val-type)
+       val-type)
+      ((<= val-type 0)
+       (- val-type))
+      (else
+       (let1 decoder (or (hash-table-get decoder-table val-type #f)
+                         (errorf "Unsupported value type: ~a" val-type))
+         (decoder in))))))
+
+;;;
+
 (define *jsargtype-serializer-table* (make-hash-table 'eq?))
 (define *jsargtype-datastream-method-table* (make-hash-table 'eq?))
 
@@ -593,52 +912,27 @@
        (hash-table-put! *jsargtype-serializer-table* 'type-name serializer)
        (hash-table-put! *jsargtype-datastream-method-table* 'type-name 'datastream-method)))))
 
-(define-jsargtype f32 getFloat32 (lambda (v out)
-                                   (write-f32 v out 'little-endian)))
-(define-jsargtype f64 getFloat64 (lambda (v out)
-                                   (write-f64 v out 'little-endian)))
-(define-jsargtype s8 getInt8 (lambda (v out)
-                               (write-s8 v out 'little-endian)))
-(define-jsargtype s16 getInt16 (lambda (v out)
-                                 (write-s16 v out 'little-endian)))
-(define-jsargtype s32 getInt32 (lambda (v out)
-                                 (write-s32 v out 'little-endian)))
-(define-jsargtype u8 getUint8 (lambda (v out)
-                                (write-u8 v out 'little-endian)))
-(define-jsargtype u16 getUint16 (lambda (v out)
-                                  (write-u16 v out 'little-endian)))
-(define-jsargtype u32 getUint32 (lambda (v out)
-                                  (write-u32 v out 'little-endian)))
-(define-jsargtype u8vector getUint8Array (lambda (v out)
-                                           (encode-number (u8vector-length v) out)
-                                           (write-uvector v out)))
-(define-jsargtype f64vector getFloat64Array (lambda (v out)
-                                              (encode-number (f64vector-length v) out)
-                                              (write-uvector v out 0 -1 'little-endian)))
-(define-jsargtype boolean getBoolean (lambda (v out)
-                                       (write-u8 (if v 1 0) out 'little-endian)))
-(define-jsargtype future getUint32 (lambda (v out)
-                                     (write-u32 (link-callback v) out 'little-endian)))
-(define-jsargtype object getObject (lambda (v out)
-                                     (encode-number (jsobject-id v) out)))
-(define-jsargtype string getString (lambda (v out)
-                                     (let1 data (ces-convert-to <u8vector> v 'utf-8)
-                                       (encode-number (u8vector-length data) out)
-                                       (write-uvector data out))))
-(define-jsargtype json getJson (lambda (v out)
-                                 (encode-number (length v) out)
-                                 (for-each (lambda (pair)
-                                             (encode-value (car pair) out)
-                                             (encode-value (cdr pair) out))
-                                           v)))
-
-(define-jsargtype any getAny (lambda (v out)
-                               (encode-value v out)))
-
+(define-jsargtype string getString encode-string)
+(define-jsargtype symbol getSymbol encode-symbol)
+(define-jsargtype object getObject encode-object)
+(define-jsargtype time getDate encode-time)
+(define-jsargtype array getArray encode-array)
+(define-jsargtype s8vector getInt8Array encode-uvector)
+(define-jsargtype u8vector getUint8Array encode-uvector)
+(define-jsargtype s16vector getInt16Array encode-uvector)
+(define-jsargtype u16vector getUint16Array encode-uvector)
+(define-jsargtype s32vector getInt32Array encode-uvector)
+(define-jsargtype u32vector getUint32Array encode-uvector)
+(define-jsargtype f32vector getFloat32Array encode-uvector)
+(define-jsargtype f64vector getFloat64Array encode-uvector)
+(define-jsargtype json getJson encode-json)
+(define-jsargtype any getAny encode-value)
+(define-jsargtype future getUint32 (lambda (id out)
+                                     (write-u32 id out 'little-endian)))
 (define-jsargtype list getArray (lambda (v out)
-                                (encode-number (length v) out)
-                                (dolist (e v)
-                                  (encode-value e out))))
+                                  (encode-integer (length v) out)
+                                  (dolist (e v)
+                                    (encode-value e out))))
 
 (define (write-command-args types args out)
   (for-each (lambda (type arg)
@@ -720,15 +1014,17 @@
                 args))
 
 (define (jscall/result js-proc :rest args)
-  (let1 callback #f
+  (let1 future-id #f
     (receive vals (shift cont
-                    (set! callback (worker-callback cont))
+                    ;; Use allocate-future-id directly instead of link-callback because this callback is
+                    ;; one-off object. So it isn't necessary to register the object in client.
+                    (set! future-id (allocate-future-id (worker-callback cont)))
                     (call-command (slot-ref js-proc 'command-id)
                                   (slot-ref js-proc 'types)
-                                  (cons callback args))
+                                  (cons future-id args))
                     (flush-commands))
-      (when callback
-        (unlink-callback callback))
+      (when future-id
+        (free-future-id future-id))
       (apply values vals))))
 
 (define-macro (jslet arg-specs :rest body)
@@ -955,10 +1251,10 @@
              (loop (+ i 1)))
             (else
              (and-let1 old-id (vector-ref id-vector index)
-               (jslet ((old-id::u32 old-id))
+               (jslet ((old-id))
                  (Graviton.freeObjectId old-id))
                (hash-table-delete! id->index-table old-id)
-               (log-framework-debug "Freed jsobject: #x~8,'0x" old-id))
+               (log-framework-debug "Freed jsobject: #x~8,'0x (by GC)" old-id))
              (vector-set! id-vector index (jsobject-id jsobj))
              (weak-vector-set! object-vector index jsobj)
              (hash-table-put! id->index-table (jsobject-id jsobj) index)
@@ -1029,14 +1325,15 @@
     (application-context-slot-atomic-ref 'jsobject-manager
       (lambda (manager)
         (with-slots (id-vector object-vector id->index-table next-index) manager
-          (jslet ((id::u32))
+          (jslet ((id))
             (Graviton.freeObjectId id))
           (and-let1 index (hash-table-get id->index-table id #f)
             (vector-set! id-vector index #f)
             (weak-vector-set! object-vector index #f)
             (hash-table-delete! id->index-table id)
             (set! next-index index))
-          (set! (~ obj'%id) #f))))))
+          (set! (~ obj'%id) #f))
+        (log-framework-debug "Freed jsobject: #x~8,'0x (by manually)" id)))))
 
 (define-syntax with-jsobjects
   (syntax-rules ()
@@ -1233,312 +1530,6 @@
 
 ;;;
 
-(define-constant VAL-TYPE-UNDEFINED 1)
-(define-constant VAL-TYPE-NULL 2)
-(define-constant VAL-TYPE-TRUE 3)
-(define-constant VAL-TYPE-FALSE 4)
-(define-constant VAL-TYPE-PROCEDURE 5)
-(define-constant VAL-TYPE-POSITIVE-INFINITY 6)
-(define-constant VAL-TYPE-NEGATIVE-INFINITY 7)
-(define-constant VAL-TYPE-NAN 8)
-(define-constant VAL-TYPE-STRING 9)
-(define-constant VAL-TYPE-SYMBOL 10)
-(define-constant VAL-TYPE-OBJECT 11)
-(define-constant VAL-TYPE-DATE 12)
-(define-constant VAL-TYPE-ARRAY 13)
-(define-constant VAL-TYPE-INT8ARRAY 14)
-(define-constant VAL-TYPE-UINT8ARRAY 15)
-(define-constant VAL-TYPE-INT16ARRAY 16)
-(define-constant VAL-TYPE-UINT16ARRAY 17)
-(define-constant VAL-TYPE-INT32ARRAY 18)
-(define-constant VAL-TYPE-UINT32ARRAY 19)
-(define-constant VAL-TYPE-FLOAT32ARRAY 20)
-(define-constant VAL-TYPE-FLOAT64ARRAY 21)
-(define-constant VAL-TYPE-JSON 22)
-(define-constant VAL-TYPE-INT8 23)
-(define-constant VAL-TYPE-UINT8 24)
-(define-constant VAL-TYPE-INT16 25)
-(define-constant VAL-TYPE-UINT16 26)
-(define-constant VAL-TYPE-INT32 27)
-(define-constant VAL-TYPE-UINT32 28)
-(define-constant VAL-TYPE-FLOAT64 29)
-
-(define (encode-string str out)
-  (let1 data (ces-convert-to <u8vector> str (gauche-character-encoding) 'utf-8)
-    (encode-number (u8vector-length data) out)
-    (write-uvector data out)))
-
-(define (encode-number v out)
-  (define (encode-float64 v out)
-    (write-s8 VAL-TYPE-FLOAT64 out)
-    (write-f64 v out 'little-endian))
-
-  (if (integer? v)
-    (if (<= 0 v)
-      ;; zero or positive
-      (cond
-        ((<= v #x80)
-         (write-s8 (- v) out))
-        ((<= v #xff)
-         (write-s8 VAL-TYPE-UINT8 out)
-         (write-u8 v out))
-        ((<= v #xffff)
-         (write-s8 VAL-TYPE-UINT16 out)
-         (write-u16 v out 'little-endian))
-        ((<= v #xffffffff)
-         (write-s8 VAL-TYPE-UINT32 out)
-         (write-u32 v out 'little-endian))
-        (else
-         (encode-float64 v out)))
-      ;; negative
-      (cond
-        ((<= #x-80 v)
-         (write-s8 VAL-TYPE-INT8 out)
-         (write-s8 v out))
-        ((<= #x-8000 v)
-         (write-s8 VAL-TYPE-INT16 out)
-         (write-s16 v out 'little-endian))
-        ((<= #x-80000000 v)
-         (write-s8 VAL-TYPE-INT32 out)
-         (write-s32 v out 'little-endian))
-        (else
-         (encode-float64 v out))))
-    ;; value is float
-    (encode-float64 v out)))
-
-
-(define (encode-value obj out)
-  (cond
-    ;; undefined
-    ((undefined? obj)
-     (write-s8 VAL-TYPE-UNDEFINED out))
-    ;; null
-    ((eq? obj 'null)
-     (write-s8 VAL-TYPE-NULL out))
-    ;; true
-    ((or (eq? obj #t) (eq? obj 'true))
-     (write-s8 VAL-TYPE-TRUE out))
-    ;; false
-    ((or (eq? obj #f) (eq? obj 'false))
-     (write-s8 VAL-TYPE-FALSE out))
-    ;; number
-    ((real? obj)
-     (encode-number obj out))
-    ;; positive infinity
-    ((equal? obj +inf.0)
-     (write-s8 VAL-TYPE-POSITIVE-INFINITY out))
-    ;; negative infinity
-    ((equal? obj -inf.0)
-     (write-s8 VAL-TYPE-NEGATIVE-INFINITY out))
-    ;; NaN
-    ((and (number? obj) (nan? obj))
-     (write-s8 VAL-TYPE-NAN out))
-    ;; string
-    ((string? obj)
-     (write-s8 VAL-TYPE-STRING out)
-     (encode-string obj out))
-    ;; symbol
-    ((symbol? obj)
-     (write-s8 VAL-TYPE-SYMBOL out)
-     (encode-string (symbol->string obj) out))
-    ;; object
-    ((is-a? obj <jsobject>)
-     (let1 jsobj-id (jsobject-id obj)
-       (write-s8 VAL-TYPE-OBJECT out)
-       ;; class-id isn't necessary because the object already exists in Javascript world.
-       (encode-number jsobj-id out)))
-    ((is-a? obj <jsobject-provider>)
-     (let1 jsobj-id (jsobject-id obj)
-       (write-s8 VAL-TYPE-OBJECT out)
-       ;; class-id isn't necessary because the object already exists in Javascript world.
-       (encode-number jsobj-id out)))
-    ;; date
-    ((is-a? obj <time>)
-     (write-s8 VAL-TYPE-DATE out)
-     (encode-number (* (time->seconds obj) 1000) out))
-    ;; array
-    ((vector? obj)
-     (write-s8 VAL-TYPE-ARRAY out)
-     (encode-number (vector-length obj) out)
-     (dotimes (i (vector-length obj))
-       (encode-value (vector-ref obj i) out)))
-    ;; int8array
-    ((s8vector? obj)
-     (write-s8 VAL-TYPE-INT8ARRAY out)
-     (encode-number (s8vector-length obj) out)
-     (write-uvector obj out))
-    ;; uint8array
-    ((u8vector? obj)
-     (write-s8 VAL-TYPE-UINT8ARRAY out)
-     (encode-number (u8vector-length obj) out)
-     (write-uvector obj out))
-    ;; int16array
-    ((s16vector? obj)
-     (write-s8 VAL-TYPE-INT16ARRAY out)
-     (encode-number (s16vector-length obj) out)
-     (write-uvector obj out 0 -1 'little-endian))
-    ;; uint16array
-    ((u16vector? obj)
-     (write-s8 VAL-TYPE-UINT16ARRAY out)
-     (encode-number (u16vector-length obj) out)
-     (write-uvector obj out 0 -1 'little-endian))
-    ;; int32array
-    ((s32vector? obj)
-     (write-s8 VAL-TYPE-INT32ARRAY out)
-     (encode-number (s32vector-length obj) out)
-     (write-uvector obj out 0 -1 'little-endian))
-    ;; uint32array
-    ((u32vector? obj)
-     (write-s8 VAL-TYPE-UINT32ARRAY out)
-     (encode-number (u32vector-length obj) out)
-     (write-uvector obj out 0 -1 'little-endian))
-    ;; float32array
-    ((f32vector? obj)
-     (write-s8 VAL-TYPE-FLOAT32ARRAY out)
-     (encode-number (f32vector-length obj) out)
-     (write-uvector obj out 0 -1 'little-endian))
-    ;; float64array
-    ((f64vector? obj)
-     (write-s8 VAL-TYPE-FLOAT64ARRAY out)
-     (encode-number (f64vector-length obj) out)
-     (write-uvector obj out 0 -1 'little-endian))
-    ;; JSON
-    ((list? obj)
-     (write-s8 VAL-TYPE-JSON out)
-     (encode-number (length obj) out)
-     (for-each (lambda (pair)
-                 (encode-value (car pair) out)
-                 (encode-value (cdr pair) out))
-               obj))
-    ((worker-callback? obj)
-     (write-s8 VAL-TYPE-PROCEDURE out)
-     (let1 id (link-callback obj)
-       (write-u32 id out 'little-endian)))
-    ((procedure? obj)
-     (write-s8 VAL-TYPE-PROCEDURE out)
-     (let1 id (link-callback (worker-callback obj))
-       (write-u32 id out 'little-endian)))
-    (else
-     (errorf "Unsupported object: ~s" obj))))
-
-(define (decode-string in)
-  (let1 len (decode-value in)
-    (if (= len 0)
-      ""
-      (ces-convert (read-uvector <u8vector> len in) 'utf-8))))
-
-(define decoder-table
-  (alist->hash-table
-    `(
-      ;; undefined
-      (,VAL-TYPE-UNDEFINED . ,(^(in) undefined))
-      ;; null
-      (,VAL-TYPE-NULL . ,(^(in) 'null))
-      ;; true
-      (,VAL-TYPE-TRUE . ,(^(in) #t))
-      ;; false
-      (,VAL-TYPE-FALSE . ,(^(in) #f))
-      ;; positive infinity
-      (,VAL-TYPE-POSITIVE-INFINITY . ,(^(in) +inf.0))
-      ;; negative infinity
-      (,VAL-TYPE-NEGATIVE-INFINITY . ,(^(in) -inf.0))
-      ;; NaN
-      (,VAL-TYPE-NAN . ,(^(in) +nan.0))
-      ;; string
-      (,VAL-TYPE-STRING . ,(^(in) (decode-string in)))
-      ;; symbol
-      (,VAL-TYPE-SYMBOL . ,(^(in) (string->symbol (decode-string in))))
-      ;; object
-      (,VAL-TYPE-OBJECT . ,(^(in)
-                             (let* ((class-id (decode-value in))
-                                    (jsobj-id (decode-value in)))
-                               (application-context-slot-atomic-ref 'jsobject-manager
-                                 (lambda (manager)
-                                   (or (find-jsobject manager jsobj-id)
-                                       (let1 jsobj (make (hash-table-get *id->class-table* class-id)
-                                                     :id jsobj-id)
-                                         (register-jsobject! manager jsobj)
-                                         jsobj)))))))
-      ;; date
-      (,VAL-TYPE-DATE . ,(^(in) (seconds->time (/. (decode-value in) 1000))))
-      ;; array
-      (,VAL-TYPE-ARRAY . ,(^(in)
-                            (let1 len (decode-value in)
-                              (vector-ec (: _ len) (decode-value in)))))
-      ;; int8array
-      (,VAL-TYPE-INT8ARRAY . ,(^(in) (let1 len (decode-value in)
-                                       (if (= len 0)
-                                         #s8()
-                                         (read-uvector <s8vector> len in 'little-endian)))))
-      ;; uint8array
-      (,VAL-TYPE-UINT8ARRAY . ,(^(in) (let1 len (decode-value in)
-                                        (if (= len 0)
-                                          #u8()
-                                          (read-uvector <u8vector> len in 'little-endian)))))
-      ;; int16array
-      (,VAL-TYPE-INT16ARRAY . ,(^(in) (let1 len (decode-value in)
-                                        (if (= len 0)
-                                          #s16()
-                                          (read-uvector <s16vector> len in 'little-endian)))))
-      ;; uint16array
-      (,VAL-TYPE-UINT16ARRAY . ,(^(in) (let1 len (decode-value in)
-                                         (if (= len 0)
-                                           #u16()
-                                           (read-uvector <u16vector> len in 'little-endian)))))
-      ;; int32array
-      (,VAL-TYPE-INT32ARRAY . ,(^(in) (let1 len (decode-value in)
-                                        (if (= len 0)
-                                          #s32()
-                                          (read-uvector <s32vector> len in 'little-endian)))))
-      ;; uint32array
-      (,VAL-TYPE-UINT32ARRAY . ,(^(in) (let1 len (decode-value in)
-                                         (if (= len 0)
-                                           #u32()
-                                           (read-uvector <u32vector> len in 'little-endian)))))
-      ;; float32array
-      (,VAL-TYPE-FLOAT32ARRAY . ,(^(in) (let1 len (decode-value in)
-                                          (if (= len 0)
-                                            #f32()
-                                            (read-uvector <f32vector> len in 'little-endian)))))
-      ;; float64array
-      (,VAL-TYPE-FLOAT64ARRAY . ,(^(in) (let1 len (decode-value in)
-                                          (if (= len 0)
-                                            #f64()
-                                            (read-uvector <f64vector> len in 'little-endian)))))
-      ;; JSON
-      (,VAL-TYPE-JSON . ,(^(in)
-                           (let1 len (decode-value in)
-                             (list-ec (: _ (decode-value in))
-                                      (let* ((key (decode-value in))
-                                             (val (decode-value in)))
-                                        (cons key val))))))
-      ;; int8
-      (,VAL-TYPE-INT8 . ,read-s8)
-      ;; uint8
-      (,VAL-TYPE-UINT8 . ,read-u8)
-      ;; int16
-      (,VAL-TYPE-INT16 . ,(cut read-s16 <> 'little-endian))
-      ;; uint16
-      (,VAL-TYPE-UINT16 . ,(cut read-u16 <> 'little-endian))
-      ;; int32
-      (,VAL-TYPE-INT32 . ,(cut read-s32 <> 'little-endian))
-      ;; uint32
-      (,VAL-TYPE-UINT32 . ,(cut read-u32 <> 'little-endian))
-      ;; float64
-      (,VAL-TYPE-FLOAT64 . ,(cut read-f64 <> 'little-endian)))))
-
-(define (decode-value in)
-  (let1 val-type (read-s8 in)
-    (cond
-      ((eof-object? val-type)
-       val-type)
-      ((<= val-type 0)
-       (- val-type))
-      (else
-       (let1 decoder (or (hash-table-get decoder-table val-type #f)
-                         (errorf "Unsupported value type: ~a" val-type))
-         (decoder in))))))
-
 (define (decode-value-list in)
   (port-map values (cut decode-value in)))
 
@@ -1568,13 +1559,15 @@
              (loop))
             (else
              (hash-table-put! tbl id receiver)
+             (log-framework-debug "Allocated future ID: ~8,'0x" id)
              id))))
       (loop))))
 
 (define (free-future-id id)
   (with-future-table
     (lambda (tbl future-next-id)
-      (hash-table-delete! tbl id))))
+      (hash-table-delete! tbl id)
+      (log-framework-debug "Freed future ID: ~8,'0x" id))))
 
 (define (notify-values future-id :rest vals)
   (with-future-table
@@ -1595,17 +1588,17 @@
       (or (hash-table-get tbl callback #f)
           (rlet1 id (allocate-future-id callback)
             (hash-table-put! tbl callback id)
-            (log-framework-debug "Allocated future ID: #x~8,'0x" id))))))
+            (log-framework-debug "Linked callback: ~s (future ID: #x~8,'0x)" callback id))))))
 
 (define (unlink-callback callback)
   (application-context-slot-atomic-ref 'callback->id-table
     (lambda (tbl)
       (and-let1 id (hash-table-get tbl callback #f)
-        (jslet ((id::u32))
+        (jslet ((id))
           (Graviton.freeProcedure id))
         (free-future-id id)
         (hash-table-delete! tbl callback)
-        (log-framework-debug "Freed future ID: #x~8,'0x" id)))))
+        (log-framework-debug "Unlinked callback: ~s (future ID: #x~8,'0x)" callback id)))))
 
 (define (unlink-procedure proc)
   (for-each unlink-callback

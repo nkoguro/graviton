@@ -122,7 +122,7 @@
 (define-jsobject-method <grv-text> read-line (:key (prompt "") (focus? #t) (content "") (position 0))
   (jslet/result ((self::object)
                  (prompt::string)
-                 (focus?::boolean)
+                 (focus?)
                  (content::string)
                  (position))
     (self.readLine (lambda (content)
