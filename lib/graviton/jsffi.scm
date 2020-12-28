@@ -73,8 +73,6 @@
           jslet
           jslet/result
 
-          with-jstransaction
-
           <jsobject>
           <jsobject-meta>
           define-jsobject-method
@@ -548,34 +546,6 @@
 (define (js-main-module-absolute-paths)
   (hash-table-keys *js-code-table*))
 
-;;;
-
-(define current-send-buffer (make-parameter #f))
-
-(define (with-send-buffer proc)
-  (cond
-    ((current-send-buffer)
-     (proc (current-send-buffer)))
-    (else
-     (with-jstransaction
-       (lambda ()
-         (proc (current-send-buffer)))))))
-
-(define (flush-commands :optional (finish-transaction? #f))
-  (when (current-send-buffer)
-    (let1 output-data (get-output-uvector (current-send-buffer) :shared #t)
-      (unless (= (uvector-length output-data) 0)
-        (application-context-slot-atomic-ref 'websocket-output-port
-          (lambda (out)
-            (send-binary-frame out output-data)))
-        (unless finish-transaction?
-          (current-send-buffer (open-output-uvector)))))))
-
-(define (with-jstransaction thunk)
-  (parameterize ((current-send-buffer (open-output-uvector)))
-    (begin0
-        (thunk)
-      (flush-commands #t))))
 
 ;;;
 
@@ -946,10 +916,9 @@
    types args))
 
 (define (call-command command-id types args)
-  (with-send-buffer
-    (lambda (out)
-      (write-u16 command-id out 'little-endian)
-      (write-command-args types args out))))
+  (let1 out (client-request-output)
+    (write-u16 command-id out 'little-endian)
+    (write-command-args types args out)))
 
 ;;;
 
@@ -1022,8 +991,7 @@
                     (set! future-id (allocate-future-id (worker-callback cont)))
                     (call-command (slot-ref js-proc 'command-id)
                                   (slot-ref js-proc 'types)
-                                  (cons future-id args))
-                    (flush-commands))
+                                  (cons future-id args)))
       (when future-id
         (free-future-id future-id))
       (apply values vals))))

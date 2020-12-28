@@ -51,16 +51,14 @@
     (let* ((canvas (document'query-selector "canvas"))
            (ctx (canvas'get-context "2d")))
       (on-event ('draw-tile :priority 'low) (pixels)
-        (with-jstransaction
-          (lambda ()
-            (fold (lambda (pixel prev-color)
-                    (match-let1 (x y color) pixel
-                      (unless (equal? prev-color color)
-                        (set! (~ ctx'fill-style) color))
-                      (ctx'fill-rect x y 1 1)
-                      color))
-                  #f
-                  pixels)))))
+        (fold (lambda (pixel prev-color)
+                (match-let1 (x y color) pixel
+                  (unless (equal? prev-color color)
+                    (set! (~ ctx'fill-style) color))
+                  (ctx'fill-rect x y 1 1)
+                  color))
+              #f
+              pixels)))
 
     (let* ((worker (run-worker-thread compute-worker-main :name "mandelbrot compute worker" :size 4))
            (delta-x (/. 3 *width*))

@@ -38,6 +38,7 @@
   (use gauche.selector)
   (use gauche.threads)
   (use gauche.uvector)
+  (use gauche.vport)
   (use graviton.app)
   (use graviton.async)
   (use graviton.misc)
@@ -47,9 +48,8 @@
   (use srfi-27)
   (use util.match)
 
-  (export send-text-frame
-          send-binary-frame
-          send-pong-frame
+  (export client-request-output
+          flush-client-request
 
           websocket-main-loop
 
@@ -90,6 +90,22 @@
 
 (define (send-pong-frame out data)
   (send-frame out #xa data))
+
+;;;
+
+(define client-request-output (make-parameter #f))
+
+(define (flush-client-request)
+  (application-context-slot-atomic-ref 'websocket-output-port
+    (lambda (wout)
+      (let1 data (get-output-uvector (client-request-output) :shared #t)
+        (when (< 0 (u8vector-length data))
+          (send-binary-frame wout data)
+          (client-request-output (open-output-uvector)))))))
+
+(add-hook! worker-thread-start-hook (lambda ()
+                                      (client-request-output (open-output-uvector))))
+(add-hook! worker-process-event-start-hook flush-client-request)
 
 ;;;
 

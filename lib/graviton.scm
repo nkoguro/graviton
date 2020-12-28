@@ -81,9 +81,9 @@
           grv-browser
           grv-log-config
 
-          with-jstransaction
-
           bind-url-path
+
+          flush-client-request
 
           define-document-content
 

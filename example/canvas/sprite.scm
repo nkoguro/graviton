@@ -113,6 +113,4 @@
                 (/. 1 sec-per-frame))
           (stat-time "repaint"
                      *num-samples*
-                     (with-jstransaction
-                       (lambda ()
-                         (update-frame canvas sprite balls sec-per-frame)))))))))
+                     (update-frame canvas sprite balls sec-per-frame)))))))

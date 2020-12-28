@@ -32,6 +32,7 @@
 
 (define-module graviton.async
   (use data.queue)
+  (use gauche.hook)
   (use gauche.parameter)
   (use gauche.partcont)
   (use gauche.threads)
@@ -43,6 +44,8 @@
 
   (export current-worker
           worker-thread-idle-timeout
+          worker-process-event-start-hook
+          worker-thread-start-hook
           <worker>
           <worker-thread>
           make-worker
@@ -94,16 +97,23 @@
 (define-method write-object ((obj <worker-thread>) port)
   (format port "#<worker-thread ~s>" (~ obj'name)))
 
+(define worker-process-event-start-hook (make-hook))
+
 (define (worker-process-event worker :optional (timeout #f))
+  (define (invoke-thunk priority thunk)
+    (parameterize ((current-priority priority))
+      (reset
+        (thunk))))
+
   (parameterize ((current-worker worker))
+    (run-hook worker-process-event-start-hook)
+
     (match (dequeue-task! worker timeout)
       ((? eof-object? eof)
        #f)
       (#f
        (and-let1 thunk (~ worker'idle-handler)
-         (parameterize ((current-priority 'low))
-           (reset
-             (thunk))))
+         (invoke-thunk 'low thunk))
        #t)
       (((? real? timestamp) (? symbol? event-name) args ...)
        (let* ((proc+priority (or (hash-table-get (~ worker'event-table) event-name #f)
@@ -111,18 +121,14 @@
               (proc (car proc+priority))
               (priority (cdr proc+priority)))
          (if (eq? priority 'high)
-           (parameterize ((current-priority priority))
-             (reset
-               (apply proc args)))
+           (invoke-thunk priority (cut apply proc args))
            (enqueue-task! worker
                           (task-priority->value priority)
                           (cons priority (^() (apply proc args)))
                           :timestamp timestamp)))
        #t)
       (((? symbol? priority) . (? procedure? thunk))
-       (parameterize ((current-priority priority))
-         (reset
-           (thunk)))
+       (invoke-thunk priority thunk)
        #t)
       (v
        (errorf "Invalid value in task-queue: ~s" v)))))
@@ -150,11 +156,15 @@
                    (set-box! ,worker-box worker)
                    (worker-run worker))))))))))
 
+(define worker-thread-start-hook (make-hook))
+
 (define (worker-thread-run-event-loop worker-thread thunk)
   (guard (e (else (report-error e)
                   (app-exit 70)))
     (parameterize ((current-worker worker-thread)
                    (current-priority 'default))
+      (run-hook worker-thread-start-hook)
+
       (reset
         (thunk)))
     (while (worker-process-event worker-thread (worker-thread-idle-timeout))
