@@ -54,6 +54,59 @@
 
 (select-module graviton.app)
 
+;;;
+
+(define-class <recursive-lock-atom> ()
+  ((values :init-keyword :values)
+   (mutex :init-form (make-mutex))))
+
+(define (ratom :rest vals)
+  (make <recursive-lock-atom> :values vals))
+
+(define (ratom-lock! ratom)
+  (with-slots (mutex) ratom
+    (cond
+      ((eq? (mutex-state mutex) (current-thread))
+       (let1 n (mutex-specific mutex)
+         (mutex-specific-set! mutex (+ n 1))))
+      (else
+       (mutex-lock! mutex)
+       (mutex-specific-set! mutex 0)))))
+
+(define (ratom-unlock! ratom)
+  (with-slots (mutex) ratom
+    (cond
+      ((not (eq? (mutex-state mutex) (current-thread)))
+       #f)
+      (else
+       (let1 n (mutex-specific mutex)
+         (if (= n 0)
+           (mutex-unlock! mutex)
+           (mutex-specific-set! mutex (- n 1))))))))
+
+;; Don't use dynamic-wind here.
+;; The internal values may be changed after re-enter by calling the continuation in dynamic-wind case (shift unlocks the mutex).
+;; It means atomicity is broken.
+(define (with-locking-ratom ratom thunk)
+  (unwind-protect
+      (begin
+        (ratom-lock! ratom)
+        (thunk))
+    (ratom-unlock! ratom)))
+
+(define (ratomic ratom proc)
+  (with-locking-ratom ratom
+    (lambda ()
+      (apply proc (slot-ref ratom 'values)))))
+
+(define (ratomic-update! ratom proc)
+  (with-locking-ratom ratom
+    (lambda ()
+      (receive vals (apply proc (slot-ref ratom 'values))
+        (slot-set! ratom 'values vals)))))
+
+;;;
+
 (define *application-context-slot-initial-forms* '())
 
 (define application-context-next-id (make-id-generator))
@@ -94,28 +147,28 @@
     (lambda (tbl)
       (hash-table-get tbl id #f))))
 
-(define (application-context-id)
-  (slot-ref (application-context) 'id))
+(define (application-context-id :optional ctx)
+  (slot-ref (or ctx (application-context)) 'id))
 
-(define (get-application-context-slot-atom name)
+(define (get-application-context-slot-ratom name)
   (with-slots (mutex slot-table) (application-context)
-    (define (get-atom)
+    (define (get-ratom)
       (or (hash-table-get slot-table name #f)
           (and-let1 thunk (assq-ref *application-context-slot-initial-forms* name #f)
-            (rlet1 val-atom (apply atom (thunk))
-              (hash-table-put! slot-table name val-atom)))
+            (rlet1 val-ratom (apply ratom (thunk))
+              (hash-table-put! slot-table name val-ratom)))
           (errorf "application-context doesn't have such slot: ~a" name)))
     (cond
       ((eq? (mutex-state mutex) (current-thread))
-       (get-atom))
+       (get-ratom))
       (else
-       (with-locking-mutex mutex get-atom)))))
+       (with-locking-mutex mutex get-ratom)))))
 
 (define (application-context-slot-atomic-ref name proc)
   (unless (application-context)
     (errorf "application-context-slot-atomic-ref called without application-context, name=~a, proc=~s, thread=~s" name proc (current-thread)))
-  (let1 val-atom (get-application-context-slot-atom name)
-    (atomic val-atom proc)))
+  (let1 val-ratom (get-application-context-slot-ratom name)
+    (ratomic val-ratom proc)))
 
 (define (application-context-slot-ref name)
   (application-context-slot-atomic-ref name values))
@@ -123,8 +176,8 @@
 (define (application-context-slot-atomic-update! name proc)
   (unless (application-context)
     (errorf "application-context-slot-atomic-update! called without application-context, name=~a, proc=~s, thread=~s" name proc (current-thread)))
-  (let1 val-atom (get-application-context-slot-atom name)
-    (atomic-update! val-atom proc)))
+  (let1 val-ratom (get-application-context-slot-ratom name)
+    (ratomic-update! val-ratom proc)))
 
 (define (application-context-slot-set! name :rest vals)
   (application-context-slot-atomic-update! name (lambda _ (apply values vals))))

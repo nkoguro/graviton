@@ -1,6 +1,7 @@
 (use gauche.parseopt)
 (use gauche.record)
 (use graviton)
+(use graviton.grut)
 (use graviton.misc)
 (use math.const)
 (use srfi-27)
@@ -73,6 +74,10 @@
   (update-balls! balls tick)
   (draw-balls canvas sprite balls))
 
+(define-grut-window
+  (canvas :id canvas :width *canvas-width* :height *canvas-height*)
+  :theme 'dark :margin 0)
+
 (define (main args)
   (let-args (cdr args) ((num-sprites "s|sprites=i" 100)
                         (use-browser? "b|browser" #f)
@@ -83,20 +88,12 @@
       (grv-browser)
       (grv-player))
 
-    (define-document-content
-      (html:body :style "background-color:black; margin:0"
-                 (html:canvas :id "screen"
-                              :width *canvas-width*
-                              :height *canvas-height*
-                              :class "grv-object-fit-contain")))
-
     (grv-begin
       (on-jsevent window "keyup" (key)
         (when (equal? key "Escape")
           (grv-exit 0)))
 
       (let ((sprite (document'create-element "canvas"))
-            (canvas (document'query-selector "#screen"))
             (balls (list-ec (: i num-sprites)
                             (make-ball (modulo i *num-patterns*)
                                        (random-integer *canvas-width*)

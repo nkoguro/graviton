@@ -68,6 +68,7 @@
           <event-callback>
           worker-callback
           worker-callback?
+          shift-callback
           scheduler-add!
           scheduler-delete!
           worker-sleep!
@@ -108,30 +109,36 @@
   (parameterize ((current-worker worker))
     (run-hook worker-process-event-start-hook)
 
-    (match (dequeue-task! worker timeout)
-      ((? eof-object? eof)
-       #f)
-      (#f
-       (and-let1 thunk (~ worker'idle-handler)
-         (invoke-thunk 'low thunk))
-       #t)
-      (((? real? timestamp) (? symbol? event-name) args ...)
-       (let* ((proc+priority (or (hash-table-get (~ worker'event-table) event-name #f)
-                                 (errorf "Event: ~a not found: ~s" event-name args)))
-              (proc (car proc+priority))
-              (priority (cdr proc+priority)))
-         (if (eq? priority 'high)
-           (invoke-thunk priority (cut apply proc args))
-           (enqueue-task! worker
-                          (task-priority->value priority)
-                          (cons priority (^() (apply proc args)))
-                          :timestamp timestamp)))
-       #t)
-      (((? symbol? priority) . (? procedure? thunk))
-       (invoke-thunk priority thunk)
-       #t)
-      (v
-       (errorf "Invalid value in task-queue: ~s" v)))))
+    (log-framework-debug "Start worker-process-event: ~s" worker)
+    (begin0
+        (match (dequeue-task! worker timeout)
+          ((? eof-object? eof)
+           #f)
+          (#f
+           (and-let1 thunk (~ worker'idle-handler)
+             (log-framework-debug "Invoke idle handler")
+             (invoke-thunk 'low thunk))
+           #t)
+          (((? real? timestamp) (? symbol? event-name) args ...)
+           (let* ((proc+priority (or (hash-table-get (~ worker'event-table) event-name #f)
+                                     (errorf "Event: ~a not found: ~s" event-name args)))
+                  (proc (car proc+priority))
+                  (priority (cdr proc+priority)))
+             (log-framework-debug "Process event: ~a" event-name)
+             (if (eq? priority 'high)
+               (invoke-thunk priority (cut apply proc args))
+               (enqueue-task! worker
+                              (task-priority->value priority)
+                              (cons priority (^() (apply proc args)))
+                              :timestamp timestamp)))
+           #t)
+          (((? symbol? priority) . (? procedure? thunk))
+           (log-framework-debug "Invoke thunk: ~s" thunk)
+           (invoke-thunk priority thunk)
+           #t)
+          (v
+           (errorf "Invalid value in task-queue: ~s" v)))
+      (log-framework-debug "End worker-process-event: ~s" worker))))
 
 (define (make-worker thunk)
   (rlet1 worker (make <worker>)
@@ -161,12 +168,12 @@
 (define (worker-thread-run-event-loop worker-thread thunk)
   (guard (e (else (report-error e)
                   (app-exit 70)))
-    (parameterize ((current-worker worker-thread)
-                   (current-priority 'default))
-      (run-hook worker-thread-start-hook)
+    (current-worker worker-thread)
+    (current-priority 'default)
+    (run-hook worker-thread-start-hook)
 
-      (reset
-        (thunk)))
+    (reset
+      (thunk))
     (while (worker-process-event worker-thread (worker-thread-idle-timeout))
       #t)))
 
@@ -321,11 +328,16 @@
           (hash-table-clear! queue-table))))))
 
 (define (worker-submit-task worker thunk :key (priority 'default))
-  (enqueue-task! worker (task-priority->value priority) (cons priority thunk)))
+  (enqueue-task! worker (task-priority->value priority) (cons priority thunk))
+  (log-framework-debug "Enqueued thunk: ~s for worker: ~s with priority: ~a" thunk worker priority))
 
 (define (worker-yield!)
-  (shift cont
-    (worker-submit-task (current-worker) cont :priority (current-priority))))
+  ;; Get the current worker and current priority before shift. shift exits (parameterize ...), so
+  ;; current-worker and current-priority will not work in shift.
+  (let ((worker (current-worker))
+        (priority (current-priority)))
+    (shift cont
+      (worker-submit-task worker cont :priority priority))))
 
 (define (register-event-handler! event proc :key (priority 'default))
   (hash-table-put! (~ (current-worker)'event-table) event (cons proc priority)))
@@ -364,12 +376,18 @@
   ((procedure :init-keyword :procedure)
    (priority :init-keyword :priority)))
 
+(define-method write-object ((obj <procedure-callback>) port)
+  (format port "#<procedure-callback: ~s (worker: ~s, priority: ~a)>" (~ obj'procedure) (~ obj'worker) (~ obj'priority)))
+
 (define-class <event-callback> (<worker-callback>)
   ((event-name :init-keyword :event-name)
    (arg-transformer :init-keyword :arg-transformer)))
 
-(define-method worker-callback ((proc <procedure>) :key (priority #f))
-  (make <procedure-callback> :worker (current-worker) :procedure proc :priority (or priority (current-priority))))
+(define-method write-object ((obj <event-callback>) port)
+  (format port "#<event-callback: ~a (worker: ~s)>" (~ obj'event-name) (~ obj'worker)))
+
+(define-method worker-callback ((proc <procedure>) :key (priority #f) (worker #f))
+  (make <procedure-callback> :worker (or worker (current-worker)) :procedure proc :priority (or priority (current-priority))))
 
 (define-method worker-callback ((event-name <symbol>) :optional (arg-transformer #f))
   (make <event-callback> :worker (current-worker) :event-name event-name :arg-transformer (or arg-transformer values)))
@@ -390,6 +408,15 @@
 
 (define-method object-equal? ((callback1 <event-callback>) (callback2 <event-callback>))
   (every (^x (equal? (~ callback1 x) (~ callback2 x))) '(worker event-name)))
+
+(define-syntax shift-callback
+  (syntax-rules ()
+    ((_ callback expr ...)
+     (let ((worker (current-worker))
+           (priority (current-priority)))
+       (shift cont
+         (let1 callback (worker-callback cont :worker worker :priority priority)
+           expr ...))))))
 
 ;;;
 
@@ -461,8 +488,8 @@
   (worker-fire-event (application-context-slot-ref 'scheduler) 'del callback))
 
 (define (worker-sleep! time-or-sec)
-  (shift cont
-    (apply scheduler-add! (worker-callback cont)
+  (shift-callback callback
+    (apply scheduler-add! callback
            (cond
              ((time? time-or-sec)
               (list :at time-or-sec))

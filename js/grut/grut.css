@@ -1,0 +1,56 @@
+.grut-body {
+    overflow-x: hidden;
+    overflow-y: hidden;
+}
+
+.grut-light {
+    background-color: white;
+    color: black;
+}
+
+.grut-dark {
+    background-color: black;
+    color: white;
+}
+
+.grut-monospace-font {
+    font-family: Consolas, SFMono-Regular, 'Roboto Mono', 'Courier New', Courier, monospace;
+    font-weight: normal;
+}
+
+.grut-text {
+    background-color: transparent;
+}
+
+.grut-canvas {
+    background-color: transparent;
+}
+
+.grut-object-fit-contain {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform-origin: center
+}
+
+.grut-object-fit-cover {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform-origin: center
+}
+
+.grut-object-fit-fill {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform-origin: center
+}
+
+.grut-object-fit-none {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    transform-origin: center
+}

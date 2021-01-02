@@ -606,11 +606,7 @@ class TextMark {
 
 const TEXT_CONSOLE_STYLE = `
 :host {
-    background-color: black;
-    color: white;
     display: block;
-    font-family: Consolas, SFMono-Regular, 'Roboto Mono', 'Courier New', Courier, monospace;
-    font-weight: normal;
     outline: none;
     overflow-wrap: break-word;
     overflow-x: hidden;
@@ -876,7 +872,9 @@ class GrvAbstractText extends HTMLElement {
         let dummyDiv = document.createElement('div');
         dummyDiv.innerText = 'M';
         this.view.appendChild(dummyDiv);
-        this.lineHeight = dummyDiv.clientHeight;
+        let charRect = dummyDiv.getBoundingClientRect();
+        this.lineHeight = charRect.height;
+        this.characterWidth = charRect.width;
         this.view.removeChild(dummyDiv);
     }
 

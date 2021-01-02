@@ -1,0 +1,93 @@
+(use gauche.logger)
+(use gauche.parseopt)
+(use graviton)
+(use graviton.grut)
+(use srfi-13)
+(use text.html-lite)
+(use util.match)
+
+(define (read-sexpr text)
+  (let ((prompt      "webgosh>")
+        (cont-prompt " (cont)>")
+        (str ""))
+    (let loop ((prompt prompt))
+      (set! str (string-append str (text'read-line :prompt prompt)))
+      (receive (sexpr state) (guard (e ((and (<read-error> e)
+                                             (string-contains (condition-message e "") "EOF inside a list"))
+                                        (set! str (string-append str "\n"))
+                                        (values #f 'continue))
+                                       (else (values #f e)))
+                               (values (read-from-string str) 'done))
+        (match state
+          ('continue
+           (loop cont-prompt))
+          ('done
+           (values sexpr #f))
+          (err
+           (values #f err)))))))
+
+;; read-eval-print-loop uses with-error-handler, but it can be incompatible with partial continuation.
+(define (repl)
+  (define (reader)
+    (receive (expr err) (read-sexpr text)
+      (cond
+        (err
+         (beep 1000 0.1)
+         (report-error err)
+         (reader))
+        ((eof-object? expr)
+         (reader))
+        (else
+         (evaluator expr)))))
+  (define (evaluator expr)
+    (receive (vals err) (guard (e (else (values #f e)))
+                          (values (values->list (eval expr (with-module gauche.internal (vm-current-module)))) #f))
+      (cond
+        (err
+         (beep 1000 0.1)
+         (report-error err)
+         (reader))
+        (else
+         (printer vals)))))
+  (define (printer vals)
+    (for-each (lambda (v)
+                (format #t "~s~%" v))
+              vals)
+    (reader))
+  (reader))
+
+(define *text-width* #f)
+(define *text-height* #f)
+(define *font-size* #f)
+
+(define-grut-window
+  (text :id text :width *text-width* :height *text-height* :font-size *font-size*)
+  (canvas :id canvas :context-2d ctx :width 1000 :height 1000)
+  :theme 'dark :title "gosh on Web")
+
+(define (main args)
+  (let-args (cdr args) ((use-browser? "b|browser" #f)
+                        (font-size "font-size=s" #f)
+                        (width "w|width=i" #f)
+                        (height "h|height=i" #f))
+    (if use-browser?
+      (grv-browser)
+      (grv-player :resizable? #t))
+
+    (set! *text-width* width)
+    (set! *text-height* height)
+    (set! *font-size* font-size))
+
+  (grv-begin
+    (on-jsevent window "keyup" (key)
+      (when (equal? key "Escape")
+        (log-format "Exit by Escape key")
+        (grv-exit)))
+
+    (call-with-output-grv-text text
+      (lambda (out)
+        (parameterize ((current-output-port out)
+                       (current-error-port out))
+          (print "Welcome to gosh on Web!\n"
+                 "Press Escape to exit.\n")
+          (repl))))))

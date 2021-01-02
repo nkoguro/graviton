@@ -70,22 +70,27 @@
   (use text.tree)
   (use util.match)
 
-  (extend graviton.async graviton.browser-objects graviton.event graviton.canvas graviton.audio graviton.text)
+  (extend graviton.async graviton.browser-objects graviton.event graviton.canvas graviton.audio)
 
   (export grv-start
           grv-started?
           grv-begin
           grv-exit
 
+          grv-title
+          grv-title-set!
+
           grv-player
           grv-browser
           grv-log-config
 
+          load-css
           bind-url-path
 
           flush-client-request
 
           define-document-content
+          document-body-provider-set!
 
           make-jsobject
           ))
@@ -105,6 +110,28 @@
 
 (define (load-css-list)
   (reverse *load-css-list*))
+
+;;;
+
+(define *grv-default-title*
+  (if (and (list? (command-line))
+           (<= (length (command-line)) 1))
+    (path-sans-extension (sys-basename (list-ref (command-line) 0)))
+    "Graviton"))
+
+(define (grv-title)
+  (cond
+    ((application-context)
+     (~ document'title))
+    (else
+     *grv-default-title*)))
+
+(define (grv-title-set! title)
+  (cond
+    ((application-context)
+     (set! (~ document'title) title))
+    (else
+     (set! *grv-default-title* title))))
 
 ;;;
 
@@ -178,14 +205,14 @@
            (lambda ()
              body)))))
 
+(define (document-body-provider-set! proc)
+  (set! document-body-proc proc))
+
 (define-constant HEADER-APPLICATION-CONTEXT-ID "id")
 
 (define-http-handler "/"
   (lambda (req app)
-    (guard (e (else (report-error e)
-                    (exit 70)))
-      (let1 ctx (make-application-context)
-        (response-cookie-add! req HEADER-APPLICATION-CONTEXT-ID (~ ctx'id)))
+    (define (respond/body)
       (respond/ok req (tree->string
                         (html:html
                          (html:head
@@ -201,8 +228,27 @@
                             (map (lambda (js-mod)
                                    (html:script :type "module" :src js-mod))
                                  (js-main-module-absolute-paths)))
-                          (html:title (client-title)))
-                         (document-body-proc)))))))
+                          (html:title *grv-default-title*))
+                         (document-body-proc)))))
+
+    (guard (e (else (report-error e)
+                    (exit 70)))
+      (cond
+        ((player-application-context)
+         => (lambda (player-ctx)
+              (let-params req ((ctx "c:id" :convert lookup-application-context))
+                (cond
+                  ((eq? player-ctx ctx)
+                   (~ player-ctx'id)
+                   (response-cookie-add! req HEADER-APPLICATION-CONTEXT-ID (~ ctx'id))
+                   (respond/body))
+                  (else
+                   (respond/ng req 403))))))
+        (else
+         (let1 ctx (or (player-application-context)
+                       (make-application-context))
+           (response-cookie-add! req HEADER-APPLICATION-CONTEXT-ID (~ ctx'id)))
+         (respond/body))))))
 
 (define *init-hook* (make-hook))
 
@@ -272,12 +318,12 @@
 
 (define-http-handler #/.+/
   (lambda (req app)
-    (let* ((url-path (slot-ref req 'path))
-           (ctx (lookup-application-context (request-cookie-ref req HEADER-APPLICATION-CONTEXT-ID))))
-      (receive (body content-type) (url-path->body&content-type ctx url-path)
-        (if body
-          (respond/ok req body :content-type content-type)
-          (respond/ng req 404))))))
+    (let-params req ((ctx "c:id" :convert lookup-application-context))
+      (let1 url-path (slot-ref req 'path)
+        (receive (body content-type) (url-path->body&content-type ctx url-path)
+          (if body
+            (respond/ok req body :content-type content-type)
+            (respond/ng req 404)))))))
 
 ;;;
 
@@ -330,7 +376,8 @@
                    (url . ,url)
                    (open-dev-tools . ,(player-open-dev-tools?))
                    (show . ,(player-show?))
-                   (resizable . ,(player-resizable?))))
+                   (resizable . ,(player-resizable?))
+                   (id . ,(application-context-id (player-application-context)))))
          (config-file (receive (out filename) (sys-mkstemp (build-path (temporary-directory) "grvcfg"))
                         (construct-json config out)
                         (close-port out)
@@ -348,6 +395,7 @@
    (close-on-exit? :init-value #t)
    (show? :init-value #t)
    (resizable? :init-value #f)
+   (application-context :init-form (make-application-context))
    (stdout-filename :init-form (build-path (temporary-directory) (format "graviton-player.~a.out" (sys-getpid))))
    (stderr-filename :init-form (build-path (temporary-directory) (format "graviton-player.~a.err" (sys-getpid))))))
 
@@ -365,34 +413,40 @@
 (define (client-port)
   (slot-ref *client-config* 'port))
 
-(define (client-title)
-  (slot-ref *client-config* 'title))
-
 (define (client-close-on-exit?)
   (slot-ref *client-config* 'close-on-exit?))
 
 (define (player-window-size)
-  (slot-ref *client-config* 'window-size))
+  (and (is-a? *client-config* <player-config>)
+       (slot-ref *client-config* 'window-size)))
 
 (define (player-open-dev-tools?)
-  (slot-ref *client-config* 'open-dev-tools?))
+  (and (is-a? *client-config* <player-config>)
+       (slot-ref *client-config* 'open-dev-tools?)))
 
 (define (player-show?)
-  (slot-ref *client-config* 'show?))
+  (and (is-a? *client-config* <player-config>)
+       (slot-ref *client-config* 'show?)))
 
 (define (player-resizable?)
-  (slot-ref *client-config* 'resizable?))
+  (and (is-a? *client-config* <player-config>)
+       (slot-ref *client-config* 'resizable?)))
 
 (define (player-stdout-filename)
-  (slot-ref *client-config* 'stdout-filename))
+  (and (is-a? *client-config* <player-config>)
+       (slot-ref *client-config* 'stdout-filename)))
 
 (define (player-stderr-filename)
-  (slot-ref *client-config* 'stderr-filename))
+  (and (is-a? *client-config* <player-config>)
+  (slot-ref *client-config* 'stderr-filename)))
+
+(define (player-application-context)
+  (and (is-a? *client-config* <player-config>)
+       (slot-ref *client-config* 'application-context)))
 
 (define (grv-player :key
                     window-size
                     open-dev-tools?
-                    title
                     show?
                     resizable?
                     stdout-filename
@@ -400,14 +454,13 @@
   (set! *client-config* (config-with-params <player-config>
                           window-size
                           open-dev-tools?
-                          title
                           show?
                           resizable?
                           stdout-filename
                           stderr-filename)))
 
-(define (grv-browser :key port title)
-  (set! *client-config* (config-with-params <browser-config> port title)))
+(define (grv-browser :key port)
+  (set! *client-config* (config-with-params <browser-config> port)))
 
 (define (grv-start thunk)
   (main-worker-thunk-set! thunk)

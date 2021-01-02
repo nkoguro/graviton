@@ -296,8 +296,10 @@ class DataReadStream {
     decodeTypedArray(getter, typedArrayClass) {
         let len = this.getAny();
         if (IS_LITTLE_ENDIAN) {
-            let data = new typedArrayClass(this.dataView.buffer, this.position, len);
-            this.position += len * typedArray.BYTES_PER_ELEMENT;
+            let byteLen = len * typedArrayClass.BYTES_PER_ELEMENT;
+            let buf = this.dataView.buffer.slice(this.position, this.position + byteLen);
+            let data = new typedArrayClass(buf, 0, len);
+            this.position += byteLen;
             return data;
         } else {
             let data = new typedArrayClass(len);
@@ -671,6 +673,10 @@ export function notifyValues(futureId, ...vals) {
         let sendData = encodeValueList(futureId, vals);
         webSocket.send(sendData.buffer);
     }
+}
+
+export function logDebugMessage(msg) {
+    callAction('logDebugMessage', msg);
 }
 
 export function notifyException(exception) {

@@ -3,7 +3,7 @@
 ;;
 
 (use graviton)
-(use text.html-lite)
+(use graviton.grut)
 (use util.combinations)
 (use util.match)
 
@@ -36,29 +36,27 @@
               (push! pixels (list x y (n->color n *max-n*)))))))
       (worker-fire-event (main-worker) 'draw-tile pixels))))
 
+(define-grut-window
+  (canvas :context-2d ctx :width *width* :height *height*)
+  :background-color "black")
+
 (define (main args)
   (grv-player)
-
-  (define-document-content
-    (html:body :style "background-color: black"
-               (html:canvas :width *width* :height *height* :class "grv-object-fit-contain")))
 
   (grv-begin
     (on-jsevent window "keyup" (key)
       (when (equal? key "Escape")
         (grv-exit)))
 
-    (let* ((canvas (document'query-selector "canvas"))
-           (ctx (canvas'get-context "2d")))
-      (on-event ('draw-tile :priority 'low) (pixels)
-        (fold (lambda (pixel prev-color)
-                (match-let1 (x y color) pixel
-                  (unless (equal? prev-color color)
-                    (set! (~ ctx'fill-style) color))
-                  (ctx'fill-rect x y 1 1)
-                  color))
-              #f
-              pixels)))
+    (on-event ('draw-tile :priority 'low) (pixels)
+      (fold (lambda (pixel prev-color)
+              (match-let1 (x y color) pixel
+                (unless (equal? prev-color color)
+                  (set! (~ ctx'fill-style) color))
+                (ctx'fill-rect x y 1 1)
+                color))
+            #f
+            pixels))
 
     (let* ((worker (run-worker-thread compute-worker-main :name "mandelbrot compute worker" :size 4))
            (delta-x (/. 3 *width*))

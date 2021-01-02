@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+const { BrowserWindow, Menu, app, ipcMain, session } = require('electron');
 
 let config = null;
 
@@ -37,20 +37,41 @@ function createWindow() {
             nodeIntegration: false
         }
     });
-    win.once('ready-to-show', () => {
+    const readyToShowPromise = new Promise(resolve => {
+        win.once('ready-to-show', () => {
+            resolve();
+        });
+    });
+    const setBackgroundColorPromise = new Promise(resolve => {
+        ipcMain.once('setBackgroundColor', (event, backgroundColor) => {
+            resolve(backgroundColor);
+        });
+    });
+    Promise.all([readyToShowPromise, setBackgroundColorPromise]).then((values) => {
+        const [, backgroundColor] = values;
         if (config['show']) {
-            win.resizable = config['resizable'];
+            win.setBackgroundColor(backgroundColor);
             win.show();
         }
     });
+    
     if (config['open-dev-tools']) {
         win.openDevTools();
     }
     Menu.setApplicationMenu(null);
-    win.loadURL(config['url'])
+    let cookie = {
+        url: config['url'],
+        name: 'id',
+        value: config['id']
+    };
+    session.defaultSession.cookies.set(cookie).then(() => {
+        win.loadURL(config['url'])
         .catch((err) => {
             app.exit(70);
         });
+    }).catch((err) => {
+        app.exit(70);
+    });
 }
 
 ipcMain.on('closePlayer', (event, arg) => {

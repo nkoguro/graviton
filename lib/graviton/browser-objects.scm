@@ -50,7 +50,6 @@
           <css-style-declaration>
           <element>
           <html-element>
-          html->element
 
           <document>
           document
@@ -58,18 +57,15 @@
           <html-body-element>
 
           <html-image-element>
-          load-image
 
           <window>
           window
-          window-size
 
           <screen>
           <event>
           <blob>
           <html-media-element>
           <html-audio-element>
-          load-audio
           <html-video-element>
           ))
 
@@ -217,15 +213,7 @@
    (computed-role :jsproperty "computedRole"
                   :read-only? #t)
    (id :jsproperty "id")
-   (inner-html :allocation :virtual
-               :slot-ref (lambda (jsobj)
-                           (jslet/result ((jsobj::object))
-                             (result (~ jsobj 'innerHTML))))
-               :slot-set! (lambda (jsobj v)
-                            (jslet/result ((jsobj::object)
-                                           (v::string (tree->string v)))
-                              (set! (~ jsobj 'innerHTML) v)
-                              (Graviton.processGrvSpecialClass jsobj))))
+   (inner-html :jsproperty "innerHTML")
    (local-name :jsproperty "localName"
                :read-only? #t)
    (namespace-uri :jsproperty "namespaceURI"
@@ -270,6 +258,8 @@
   ("hasAttributeNS" :result)
   ("hasAttributes" :result)
   ("hasPointerCapture" :result)
+  "insertAdjacentElement"
+  "insertAdjacentHTML"
   ("matches" :result)
   ("querySelector" :result)
   ("querySelectorAll" :result)
@@ -287,20 +277,6 @@
   "setAttributeNS"
   "setPointerCapture"
   ("toggleAttribute" :result))
-
-(define-jsobject-method <element> insert-adjacent-element (position element)
-  (jslet ((self::object)
-          (position::string)
-          (element::object))
-    (self.insertAdjacentElement position element)
-    (Graviton.processGrvSpecialClass element)))
-
-(define-jsobject-method <element> insert-adjacent-html (position text)
-  (jslet ((self::object)
-          (position::string)
-          (text::string (tree->string text)))
-    (self.insertAdjacentHTML position text)
-    (Graviton.processGrvSpecialClass self)))
 
 (define-class <html-element> (<element>)
   ((access-key :jsproperty "accessKey")
@@ -338,17 +314,6 @@
   "blur"
   "click"
   "focus")
-
-(define (html->element html)
-  (jslet/result ((html::string (tree->string html)))
-    (let ((div (document.createElement "div")))
-      (set! div.innerHTML html)
-      (let ((node div.firstChild))
-        (cond
-          ((is-a? node Element)
-           (result node))
-          (else
-           (result #f)))))))
 
 (define-class <document> (<node>)
   ((anchors :jsproperty "anchors"
@@ -428,16 +393,8 @@
                 :read-only? #t))
   :jsclass "Document")
 
-(define-application-context-slot document #f)
-
-(define document (make <jsobject-provider>
-                   :provider (lambda ()
-                               (application-context-slot-atomic-update! 'document
-                                 (lambda (doc)
-                                   (unless doc
-                                     (set! doc (jslet/result ()
-                                                 (result document))))
-                                   doc)))))
+(define-jsobject-singleton document (jslet/result ()
+                                      (result document)))
 
 (define-automatic-jsobject-methods <document>
   ("adoptNode" :result)
@@ -514,24 +471,6 @@
       :read-only? #t))
   :jsclass "HTMLImageElement")
 
-(define (load-image url :key (content-type #f) (on-error :error))
-  (or (jslet/result ((url::string))
-        (let ((img (make Image)))
-          (set! img.src url)
-          (set! img.onload (lambda ()
-                             (set! img.onload undefined)
-                             (set! img.onerror undefined)
-                             (result img)))
-          (set! img.onerror (lambda ()
-                              (set! img.onload undefined)
-                              (set! img.onerror undefined)
-                              (result #f)))))
-      (case on-error
-        ((#f) #f)
-        ((:error) (errorf "Failed to load image: ~a" url))
-        (else
-         (errorf "bad value for :on-error argument; must be #f or :error, but got ~s" on-error)))))
-
 (define-automatic-jsobject-methods <html-image-element>
   "decode")
 
@@ -585,16 +524,8 @@
    (window :jsproperty "window"))
   :jsclass "Window")
 
-(define-application-context-slot window #f)
-
-(define window (make <jsobject-provider>
-                 :provider (lambda ()
-                             (application-context-slot-atomic-update! 'window
-                               (lambda (win)
-                                 (unless win
-                                   (set! win (jslet/result ()
-                                               (result window))))
-                                 win)))))
+(define-jsobject-singleton window (jslet/result ()
+                                    (result window)))
 
 (define-automatic-jsobject-methods <window>
   "alert"
@@ -618,10 +549,6 @@
   "scrollTo"
   "sizeToContent"
   "stop")
-
-(define (window-size)
-  (jslet/result ()
-    (result window.innerWidth window.innerHeight)))
 
 (define-class <screen> (<event-target>)
   ((avail-top :jsproperty "availTop")
@@ -709,24 +636,6 @@
 (define-class <html-audio-element> (<html-media-element>)
   ()
   :jsclass "HTMLAudioElement")
-
-(define (load-audio url :key (content-type #f) (on-error :error))
-  (receive (audio err) (jslet/result ((url::string))
-                         (let1 audio (make Audio url)
-                           (set! audio.onloadeddata (lambda ()
-                                                      (set! audio.onloadeddata undefined)
-                                                      (set! audio.onerror undefined)
-                                                      (result audio #f)))
-                           (set! audio.onerror (lambda ()
-                                                 (set! audio.onloadeddata undefined)
-                                                 (set! audio.onerror undefined)
-                                                 (result #f audio.error.message)))))
-    (or audio
-        (case on-error
-          ((#f) #f)
-          ((:error) (errorf "Failed to load audio: ~a (~a)" url err))
-          (else
-           (errorf "bad value for :on-error argument; must be #f or :error, but got ~s" on-error))))))
 
 (define-class <html-video-element> (<html-media-element>)
   ((height :jsproperty "height")

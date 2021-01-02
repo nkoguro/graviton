@@ -30,7 +30,7 @@
 ;;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ;;;
 
-(define-module graviton.text
+(define-module graviton.grut.text
   (use gauche.uvector)
   (use gauche.vport)
   (use graviton.app)
@@ -45,7 +45,11 @@
           call-with-output-grv-text
           with-output-to-grv-text))
 
-(select-module graviton.text)
+(select-module graviton.grut.text)
+
+(import-js ("/_g/grut/text.mjs" :as Text))
+
+;;;
 
 ;; Copied from text.html-lite.
 (define (make-html-element name . args)
@@ -99,9 +103,9 @@
                         r))))
     ))
 
-(import-js ("/_g/text.mjs" :as Text))
-
 (define-html-elements grv-text grv-text-edit :empty)
+
+;;;
 
 (define-class <grv-abstract-text> (<html-element>)
   ()
@@ -120,11 +124,11 @@
   "printText")
 
 (define-jsobject-method <grv-text> read-line (:key (prompt "") (focus? #t) (content "") (position 0))
-  (jslet/result ((self::object)
-                 (prompt::string)
-                 (focus?)
-                 (content::string)
-                 (position))
+  (jslet/result* ((self::object)
+                  (prompt::string)
+                  (focus?)
+                  (content::string)
+                  (position))
     (self.readLine (lambda (content)
                      (result content))
                    prompt

@@ -32,6 +32,7 @@
 
 (define-module graviton.jsffi
   (use binary.io)
+  (use data.queue)
   (use file.util)
   (use gauche.charconv)
   (use gauche.collection)
@@ -72,6 +73,7 @@
           define-jsenum
           jslet
           jslet/result
+          jslet/result*
 
           <jsobject>
           <jsobject-meta>
@@ -82,6 +84,8 @@
           jsobject-property-set!
           jsobject-free!
           with-jsobjects
+          make-jsobject-singleton-provider
+          define-jsobject-singleton
 
           <jsobject-provider>
 
@@ -93,6 +97,7 @@
 
           unlink-callback
           unlink-procedure
+          shift-callback*
           ))
 
 (select-module graviton.jsffi)
@@ -621,7 +626,7 @@
 
 (define (encode-real v out)
   (if (integer? v)
-    (encode-integer v out)
+    (encode-integer (inexact->exact v) out)
     (encode-float64 v out)))
 
 (define (encode-symbol sym out)
@@ -984,11 +989,22 @@
                 args))
 
 (define (jscall/result js-proc :rest args)
+  (let* ((mq (make-mtqueue))
+         (future-id (allocate-future-id mq)))
+    (call-command (slot-ref js-proc 'command-id)
+                  (slot-ref js-proc 'types)
+                  (cons future-id args))
+    (flush-client-request)
+    (let1 vals (dequeue/wait! mq)
+      (free-future-id future-id)
+      (apply values vals))))
+
+(define (jscall/result* js-proc :rest args)
   (let1 future-id #f
-    (receive vals (shift cont
+    (receive vals (shift-callback callback
                     ;; Use allocate-future-id directly instead of link-callback because this callback is
                     ;; one-off object. So it isn't necessary to register the object in client.
-                    (set! future-id (allocate-future-id (worker-callback cont)))
+                    (set! future-id (allocate-future-id callback))
                     (call-command (slot-ref js-proc 'command-id)
                                   (slot-ref js-proc 'types)
                                   (cons future-id args)))
@@ -1007,6 +1023,12 @@
                    ,@(map (lambda (spec)
                             (list-ref (parse-arg-spec spec) 2))
                           arg-specs)))
+
+(define-macro (jslet/result* arg-specs :rest body)
+  `(,jscall/result* ,(compile-jslet/result arg-specs body)
+                    ,@(map (lambda (spec)
+                             (list-ref (parse-arg-spec spec) 2))
+                           arg-specs)))
 
 (define-class <jsenum> ()
   ((symbol->value-table :init-form (make-hash-table))
@@ -1404,6 +1426,24 @@
       (slot-ref jsobj slot)
       (apply slot-set! jsobj slot value))))
 
+(define-application-context-slot jsobject-singleton-table (make-hash-table 'eq?))
+
+(define (make-jsobject-singleton-provider provider)
+  (make <jsobject-provider>
+    :provider  (let1 key (gensym)
+                 (lambda ()
+                   (application-context-slot-atomic-ref 'jsobject-singleton-table
+                     (lambda (tbl)
+                       (or (hash-table-get tbl key #f)
+                           (rlet1 jsobj (provider)
+                             (hash-table-put! tbl key jsobj)))))))))
+
+(define-syntax define-jsobject-singleton
+  (syntax-rules ()
+    ((_ name body ...)
+     (define name (make-jsobject-singleton-provider (lambda () body ...))))))
+
+;;;
 
 (define-class <json-value-meta> (<class>)
   ((rule :init-value #f)
@@ -1507,7 +1547,7 @@
     (lambda (in)
       (let* ((future-id (read-u32 in 'little-endian))
              (vals (decode-value-list in)))
-        (apply notify-values future-id vals)))))
+        (notify-values future-id vals)))))
 
 (register-binary-handler! decode-received-binary-data)
 
@@ -1528,7 +1568,7 @@
              (loop))
             (else
              (hash-table-put! tbl id receiver)
-             (log-framework-debug "Allocated future ID: ~8,'0x" id)
+             (log-framework-debug "Allocated future ID: ~8,'0x for ~s" id receiver)
              id))))
       (loop))))
 
@@ -1538,14 +1578,17 @@
       (hash-table-delete! tbl id)
       (log-framework-debug "Freed future ID: ~8,'0x" id))))
 
-(define (notify-values future-id :rest vals)
+(define (notify-values future-id vals)
   (with-future-table
     (lambda (tbl future-next-id)
       (let1 receiver (hash-table-get tbl future-id #f)
         (match receiver
+          ((? mtqueue? mq)
+           (log-framework-debug "future ID: #x~8,'0x received (args: ~s). Enqueued the result" future-id vals)
+           (enqueue! mq vals))
           ((? worker-callback? callback)
-           (apply callback vals)
-           (log-framework-debug "future ID: #x~8,'0x received (args: ~s). Invoke callback: ~s" future-id vals callback))
+           (log-framework-debug "future ID: #x~8,'0x received (args: ~s). Invoke callback: ~s" future-id vals callback)
+           (apply callback vals))
           (else
            (errorf "[BUG] Invalid receiver for future ID: ~a" future-id)))))))
 
@@ -1579,6 +1622,16 @@
                                                         (equal? (~ callback'worker) (current-worker))
                                                         (equal? (~ callback'procedure) proc))
                                                (push! result callback)))))))))
+
+(define-syntax shift-callback*
+  (syntax-rules ()
+    ((_ callback expr ...)
+     (let1 %cont #f
+       (begin0
+           (shift-callback callback
+             (set! %cont callback)
+             expr ...))
+       (unlink-callback %cont)))))
 
 ;;;
 
@@ -1633,3 +1686,7 @@
 (define (load-js-list)
   (reverse *load-js-list*))
 
+;;;
+
+(define-action "logDebugMessage" (msg)
+  (log-debug "~a" msg))

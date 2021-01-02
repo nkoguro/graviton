@@ -1,6 +1,7 @@
 (use file.util)
 (use gauche.logger)
 (use graviton)
+(use graviton.grut)
 
 (bind-url-path "/pipo.mp3" (build-path (sys-dirname (current-load-path)) "pipo.mp3"))
 

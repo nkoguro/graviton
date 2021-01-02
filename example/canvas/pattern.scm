@@ -1,23 +1,20 @@
 (use file.util)
 (use graviton)
-(use text.html-lite)
+(use graviton.grut)
 
-(define *program-dir* (sys-dirname (current-load-path)))
+(bind-url-path "/" (sys-dirname (current-load-path)))
+
+(define-grut-window
+  (canvas :context-2d ctx :width 300 :height 300))
 
 (define (main args)
   (grv-player)
-
-  (define-document-content
-    (html:body
-     (html:canvas :width 300 :height :300 :class "grv-object-fit-contain")))
 
   (grv-begin
     (on-jsevent window "keyup" (key)
       (when (equal? key "Escape")
         (grv-exit)))
 
-    (let* ((canvas (document'query-selector "canvas"))
-           (ctx (canvas'get-context "2d"))
-           (pat (ctx'create-pattern (load-image (build-path *program-dir* "Canvas_createpattern.png")) "repeat")))
+    (let1 pat (ctx'create-pattern (load-image "/Canvas_createpattern.png") "repeat")
       (set! (~ ctx'fill-style) pat)
       (ctx'fill-rect 0 0 300 300))))

@@ -79,11 +79,7 @@
 
 (define-class <client-config> ()
   ((port :init-value 0
-         :init-keyword :port)
-   (title :init-value (if (and (list? (command-line))
-                               (<= (length (command-line)) 1))
-                          (path-sans-extension (sys-basename (list-ref (command-line) 0)))
-                          "Graviton"))))
+         :init-keyword :port)))
 
 (define-syntax set-config-param!
   (syntax-rules ()

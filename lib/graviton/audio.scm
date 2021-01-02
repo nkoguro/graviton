@@ -368,14 +368,5 @@
    (oversample :jsproperty "oversample"))
   :jsclass "WaveShaperNode")
 
-
-(define-application-context-slot audio-context #f)
-
-(define audio-context (make <jsobject-provider>
-                        :provider (lambda ()
-                                    (application-context-slot-atomic-update! 'audio-context
-                                      (lambda (ctx)
-                                        (unless ctx
-                                          (set! ctx (jslet/result ()
-                                                      (result audioContext))))
-                                        ctx)))))
+(define-jsobject-singleton audio-context (jslet/result ()
+                                           (result audioContext)))

@@ -263,11 +263,10 @@
 (define-application-context-slot websocket-output-port #f)
 
 (define (websocket-main-loop ctx in out)
-  (let ((app-context (make-application-context))
-        (exit-code 0))
+  (let1 exit-code 0
 
     (json-special-handler handle-json-special)
-    (application-context app-context)
+    (application-context ctx)
 
     (application-context-slot-set! 'websocket-output-port out)
 

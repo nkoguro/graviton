@@ -8,6 +8,9 @@ function init() {
         ipcRenderer.send('closePlayer');
     };
     window.clipboard = clipboard;
+    window.addEventListener('load', () => {
+        ipcRenderer.send('setBackgroundColor', window.getComputedStyle(document.body).backgroundColor);
+    });
 }
 
 init();
