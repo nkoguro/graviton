@@ -1,3 +1,4 @@
+import { logDebugMessage } from "../graviton.mjs";
 import { registerAnimationFrameCallback } from "/_g/graviton.mjs";
 
 const MAIN_CURSOR_ID = 'grv-main-cursor-id';
@@ -353,7 +354,7 @@ let textEditRefreshController = new TextEditRefreshController();
 class EventMap {
     constructor(parent) {
         this.parent = parent;
-        this.map = new Map();
+        this.map = {};
     }
 
     static create(map = {}) {
@@ -395,153 +396,57 @@ class EventMap {
 }
 
 let SCREEN_KEYMAP = EventMap.create({
-    'Backspace': (textEdit) => {
-        textEdit.backwardDeleteChar();
-    },
-    'Delete': (textEdit) => {
-        textEdit.deleteChar();
-    },
-    'ArrowLeft': (textEdit) => {
-        textEdit.previousChar();
-    },
-    'ArrowRight': (textEdit) => {
-        textEdit.forwardChar();
-    },
-    'ArrowUp': (textEdit) => {
-        textEdit.previousLine();
-    },
-    'ArrowDown': (textEdit) => {
-        textEdit.nextLine();
-    },
-    'S-ArrowLeft': (textEdit) => {
-        textEdit.previousChar();
-    },
-    'S-ArrowRight': (textEdit) => {
-        textEdit.forwardChar();
-    },
-    'S-ArrowUp': (textEdit) => {
-        textEdit.previousLine();
-    },
-    'S-ArrowDown': (textEdit) => {
-        textEdit.nextLine();
-    },
-    'Home': (textEdit) => {
-        textEdit.moveBeginningOfLine();
-    },
-    'End': (textEdit) => {
-        textEdit.moveEndOfLine()
-    },
-    'S-Home': (textEdit) => {
-        textEdit.moveBeginningOfLine();
-    },
-    'S-End': (textEdit) => {
-        textEdit.moveEndOfLine()
-    },
-    'PageUp': (textEdit) => {
-        textEdit.pageUp();
-    },
-    'PageDown': (textEdit) => {
-        textEdit.pageDown();
-    },
-    'S-PageUp': (textEdit) => {
-        textEdit.pageUp();
-    },
-    'S-PageDown': (textEdit) => {
-        textEdit.pageDown();
-    },
-    'C-x': (textEdit) => {
-        textEdit.processMarkRegion(true, true);
-    },
-    'C-c': (textEdit) => {
-        textEdit.processMarkRegion(false, true);
-    },
-    'C-v': (textEdit) => {
-        textEdit.paste();
-    },
-    'Tab': (textEdit) => {
-        textEdit.insertText('\t');
-    },
-    'C-Space': (textEdit) => {
-        textEdit.toggleMark();
-    },
-    'Insert': (textEdit) => {
-        textEdit.toggleInsertMode();
-    },
-    'Mouse-Down-Button0': (textEdit, event) => {
-        textEdit.startMouseSelection(event);
-    },
-    'Mouse-Up-Button0': (textEdit, event) => {
-        textEdit.endMouseSelection(event);
-    },
-    'Mouse-Move': (textEdit, event) => {
-        textEdit.updateMouseSelection(event);
-    },
-    'Mouse-Leave': (textEdit, event) => {
-        textEdit.endMouseSelection(event);
-    }
+    'Backspace': 'backward-delete-char',
+    'Delete': 'delete-char',
+    'ArrowLeft': 'previous-char',
+    'ArrowRight': 'forward-char',
+    'ArrowUp': 'previous-line',
+    'ArrowDown': 'next-line',
+    'S-ArrowLeft': 'previous-char',
+    'S-ArrowRight': 'forward-char',
+    'S-ArrowUp': 'previous-line',
+    'S-ArrowDown': 'next-line',
+    'Home': 'move-beginning-of-line',
+    'End': 'move-end-of-line',
+    'S-Home': 'move-beginning-of-line',
+    'S-End': 'move-end-of-line',
+    'PageUp': 'scroll-down',
+    'PageDown': 'scroll-up',
+    'S-PageUp': 'scroll-down',
+    'S-PageDown': 'scroll-up',
+    'C-x': 'cut-region',
+    'C-c': 'copy-region',
+    'C-v': 'paste',
+    'Tab': 'self-insert-command',
+    'C-Space': 'toggle-mark',
+    'Insert': 'toggle-insert-mode',
+    'Mouse-Down-Button0': 'start-mouse-selection',
+    'Mouse-Up-Button0': 'end-mouse-selection',
+    'Mouse-Move': 'update-mouse-selection',
+    'Mouse-Leave': 'end-mouse-selection'
 });
 
 const TERMINAL_KEYMAP = EventMap.create({
-    'Backspace': (textEdit) => {
-        textEdit.backwardDeleteCharInputLine();
-    },
-    'Delete': (textEdit) => {
-        textEdit.deleteCharInputLine();
-    },
-    'ArrowLeft': (textEdit) => {
-        textEdit.previousCharInputLine();
-    },
-    'ArrowRight': (textEdit) => {
-        textEdit.forwardCharInputLine();
-    },
-    'S-ArrowLeft': (textEdit) => {
-        textEdit.previousCharInputLine();
-    },
-    'S-ArrowRight': (textEdit) => {
-        textEdit.forwardCharInputLine();
-    },
-    'Home': (textEdit) => {
-        textEdit.moveBeginningOfInputLine();
-    },
-    'End': (textEdit) => {
-        textEdit.moveEndOfLine();
-    },
-    'S-Home': (textEdit) => {
-        textEdit.moveBeginningOfInputLine();
-    },
-    'S-End': (textEdit) => {
-        textEdit.moveEndOfLine()
-    },
-    'C-x': (textEdit) => {
-        textEdit.processMarkRegion(true, true);
-    },
-    'C-c': (textEdit) => {
-        textEdit.processMarkRegion(false, true);
-    },
-    'C-v': (textEdit) => {
-        textEdit.paste();
-    },
-    'Tab': (textEdit) => {
-        textEdit.insertText('\t');
-    },
-    'Enter': (textEdit) => {
-        textEdit.finishLineEdit();
-    },
-    'Insert': (textEdit) => {
-        textEdit.toggleInsertMode();
-    },
-    'Mouse-Down-Button0': (textEdit, event) => {
-        textEdit.startMouseSelection(event);
-    },
-    'Mouse-Up-Button0': (textEdit, event) => {
-        textEdit.endMouseSelection(event);
-    },
-    'Mouse-Move': (textEdit, event) => {
-        textEdit.updateMouseSelection(event);
-    },
-    'Mouse-Leave': (textEdit, event) => {
-        textEdit.endMouseSelection(event);
-    }
+    'Backspace': 'backward-delete-char',
+    'Delete': 'delete-char',
+    'ArrowLeft': 'previous-char',
+    'ArrowRight': 'forward-char',
+    'S-ArrowLeft': 'previous-char',
+    'S-ArrowRight': 'forward-char',
+    'Home': 'move-beginning-of-line',
+    'End': 'move-end-of-line',
+    'S-Home': 'move-beginning-of-line',
+    'S-End': 'move-end-of-line',
+    'C-x': 'cut-region',
+    'C-c': 'copy-region',
+    'C-v': 'paste',
+    'Tab': 'self-insert-command',
+    'Enter': 'complete-line-edit',
+    'Insert': 'toggle-insert-mode',
+    'Mouse-Down-Button0': 'start-mouse-selection',
+    'Mouse-Up-Button0': 'end-mouse-selection',
+    'Mouse-Move': 'update-mouse-selection',
+    'Mouse-Leave': 'end-mouse-selection'
 });
 
 class TextMark {
@@ -757,18 +662,41 @@ class InputContext {
         this.isAlt = false;
         this.isControl = false;
         this.isMeta = false;
+        this.selfCharacter = undefined;
+        this.event = undefined;
     }
 
     static defaultInstance() {
         return new InputContext();
     }
 
-    static fromEvent(evt) {
-        let ctx = new InputContext();
+    static fromEvent(evt, eventName) {
+        const ctx = new InputContext();
+        ctx.event = evt;
         ctx.isShift = evt.shiftKey;
         ctx.isAlt = evt.altKey;
         ctx.isControl = evt.ctrlKey;
         ctx.isMeta = evt.metaKey;
+        ctx.eventName = eventName;
+
+        const key = evt.key;
+        if (typeof key === 'string') {
+            if (key.length === 1) {
+                ctx.selfCharacter = key;
+            } else {
+                switch (key) {
+                    case 'Tab':
+                        ctx.selfCharacter = '\t';
+                        break;
+                    case 'Enter':
+                        ctx.selfCharacter = '\n';
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+
         return ctx;
     }
 }
@@ -828,6 +756,9 @@ class GrvAbstractText extends HTMLElement {
             this.handleMouse(e, 'Leave');
         });
 
+        this.commandTable = {};
+        this.setupCommand();
+
         this.refresh();
     }
 
@@ -838,6 +769,101 @@ class GrvAbstractText extends HTMLElement {
 
     disconnectedCallback() {
         textEditRefreshController.remove(this);
+    }
+
+    setupCommand() {
+        this.commandTable['backward-delete-char'] = () => {
+            this.backwardDeleteChar();
+        };
+        this.commandTable['delete-char'] = () => {
+            this.deleteChar();
+        };
+        this.commandTable['previous-char'] = () => {
+            this.previousChar();
+        };
+        this.commandTable['forward-char'] = () => {
+            this.forwardChar();
+        };
+        this.commandTable['previous-line'] = () => {
+            this.previousLine();
+        };
+        this.commandTable['next-line'] = () => {
+            this.nextLine();
+        };
+        this.commandTable['move-beginning-of-line'] = () => {
+            this.moveBeginningOfLine();
+        };
+        this.commandTable['move-end-of-line'] = () => {
+            this.moveEndOfLine()
+        };
+        this.commandTable['scroll-down'] = () => {
+            this.pageUp();
+        };
+        this.commandTable['scroll-up'] = () => {
+            this.pageDown();
+        };
+        this.commandTable['cut-region'] = () => {
+            this.processMarkRegion(true, true);
+        };
+        this.commandTable['copy-region'] = () => {
+            this.processMarkRegion(false, true);
+        };
+        this.commandTable['paste'] = () => {
+            this.paste();
+        };
+        this.commandTable['self-insert-command'] = () => {
+            this.selfInsert();
+        };
+        this.commandTable['toggle-mark'] = () => {
+            this.toggleMark();
+        };
+        this.commandTable['set-mark'] = () => {
+            this.setMark();
+        };
+        this.commandTable['clear-mark'] = () => {
+            this.clearMark();
+        };
+        this.commandTable['toggle-insert-mode'] = () => {
+            this.toggleInsertMode();
+        };
+        this.commandTable['set-insert-mode'] = () => {
+            this.setInsertMode();
+        };
+        this.commandTable['set-overwrite-mode'] = () => {
+            this.setOverwriteMode();
+        };
+        this.commandTable['start-mouse-selection'] = () => {
+            this.startMouseSelection();
+        };
+        this.commandTable['end-mouse-selection'] = () => {
+            this.endMouseSelection();
+        };
+        this.commandTable['update-mouse-selection'] = () => {
+            this.updateMouseSelection();
+        };
+    }
+
+    getCommandHandler(command) {
+        if (typeof command === 'string') {
+            const handler = this.commandTable[command];
+            if (!handler) {
+                throw new Error(`Undefined command: ${command}`)
+            }
+            return handler
+        } else if (command instanceof Function) {
+            return command;
+        } else {
+            throw new Error(`Invalid command: ${command}`);
+        }
+    }
+
+    callCommand(command) {
+        const proc = this.getCommandHandler(command);
+        proc();
+    }
+
+    bindKey(keyEvent, command) {
+        this.keyMap.set(keyEvent, command);
     }
 
     convertColorNameToRGBA(colorName) {
@@ -1188,7 +1214,7 @@ class GrvAbstractText extends HTMLElement {
             this.cursor.row = startRow;
         }
         if (copyToClipboard) {
-            let cb = navigator.clipboard || clipboard;
+            let cb = navigator.clipboard || window.clipboard;
             if (cb) {
                 cb.writeText(str);
             }
@@ -1200,8 +1226,8 @@ class GrvAbstractText extends HTMLElement {
         if (navigator.clipboard) {
             navigator.clipboard.readText().then((text) => {
                 this.handleInputText(text);
-            });    
-        } else if (clipboard) {
+            });
+        } else if (window.clipboard) {
             this.handleInputText(clipboard.readText());
         }
     }
@@ -1313,6 +1339,16 @@ class GrvAbstractText extends HTMLElement {
             this.processMarkRegion(true, false);
         }
         this.moveCursorFreely(0, this.cursor.row + 1);
+    }
+
+    selfInsert() {
+        if (this.inputContext && this.inputContext.selfCharacter) {
+            if (this.insertMode) {
+                this.insertText(this.inputContext.selfCharacter);
+            } else {
+                this.printText(this.inputContext.selfCharacter);
+            }
+        }
     }
 
     backwardDeleteChar(n = 1) {
@@ -1519,8 +1555,9 @@ class GrvAbstractText extends HTMLElement {
         }
     }
 
-    startMouseSelection(event) {
-        let [col, row] = this.computeTextPosition(event.clientX, event.clientY);
+    startMouseSelection() {
+        const event = this.inputContext.event;
+        const [col, row] = this.computeTextPosition(event.clientX, event.clientY);
         if (col === void 0 || row === void 0) {
             return;
         }
@@ -1534,7 +1571,18 @@ class GrvAbstractText extends HTMLElement {
         this.cursor.row = row;
     }
 
-    updateMouseSelection(event) {
+    callClosureWithInputContext(inputContext, proc) {
+        const savedContext = this.inputContext;
+        try {
+            this.inputContext = inputContext;
+            proc();    
+        } finally {
+            this.inputContext = savedContext;
+        }
+    }
+
+    updateMouseSelection() {
+        const event = this.inputContext.event;
         if (this.autoScrollHandler) {
             clearTimeout(this.autoScrollHandler);
             this.autoScrollHandler = undefined;
@@ -1544,11 +1592,11 @@ class GrvAbstractText extends HTMLElement {
             return;
         }
 
-        let [col, row] = this.computeTextPosition(event.clientX, event.clientY);
+        const [col, row] = this.computeTextPosition(event.clientX, event.clientY);
         if (col === void 0 || row === void 0) {
             return;
         }
-        let prevRow = this.cursor.row;
+        const prevRow = this.cursor.row;
         this.cursor.column = col;
         this.cursor.row = row;
         if (!this.mark) {
@@ -1561,26 +1609,32 @@ class GrvAbstractText extends HTMLElement {
         const SCROLL_LINE_PER_SEC = 10;
         const INTERVAL_MS = 10;
         const SCROLL_START_LINE = 1;
-        let clientRect = this.shadowRoot.host.getBoundingClientRect();
-        let yFromTop = event.clientY;
-        let yFromBottom = (clientRect.bottom - clientRect.top) - event.clientY;
-        let deltaUnit = SCROLL_LINE_PER_SEC * this.lineHeight * INTERVAL_MS / 1000;
+        const clientRect = this.shadowRoot.host.getBoundingClientRect();
+        const yFromTop = event.clientY;
+        const yFromBottom = (clientRect.bottom - clientRect.top) - event.clientY;
+        const deltaUnit = SCROLL_LINE_PER_SEC * this.lineHeight * INTERVAL_MS / 1000;
         if (yFromTop < SCROLL_START_LINE * this.lineHeight) {
             this.shadowRoot.host.scrollTop -= deltaUnit * (1 - yFromTop / (SCROLL_START_LINE * this.lineHeight));
+            const ctx = this.inputContext;
             this.autoScrollHandler = setTimeout(() => {
                 this.autoScrollHandler = undefined;
-                this.updateMouseSelection(event);
+                this.callClosureWithInputContext(ctx, () => {
+                    this.updateMouseSelection();
+                });
             }, INTERVAL_MS);
         } else if (yFromBottom < SCROLL_START_LINE * this.lineHeight) {
             this.shadowRoot.host.scrollTop += deltaUnit * (1 - yFromBottom / (SCROLL_START_LINE * this.lineHeight));
+            const ctx = this.inputContext;
             this.autoScrollHandler = setTimeout(() => {
                 this.autoScrollHandler = undefined;
-                this.updateMouseSelection(event);
+                this.callClosureWithInputContext(ctx, () => {
+                    this.updateMouseSelection();
+                });
             }, INTERVAL_MS);
         }
     }
 
-    endMouseSelection(event) {
+    endMouseSelection() {
         this.isMouseSelecting = false;
     }
 
@@ -1680,17 +1734,12 @@ class GrvAbstractText extends HTMLElement {
             return;
         }
 
-        let eventName = this.keyboardEvent2String(keyboardEvent);
-        let handler = this.keyMap.get(eventName);
-        if (handler) {
+        const eventName = this.keyboardEvent2String(keyboardEvent);
+        const command = this.keyMap.get(eventName);
+        if (command) {
+            const proc = this.getCommandHandler(command);
             keyboardEvent.preventDefault();
-            let savedContext = this.inputContext;
-            try {
-                this.inputContext = InputContext.fromEvent(keyboardEvent);
-                handler(this, keyboardEvent);    
-            } finally {
-                this.inputContext = savedContext;
-            }
+            this.callClosureWithInputContext(InputContext.fromEvent(keyboardEvent, eventName), proc);
         }
     }
 
@@ -1718,21 +1767,16 @@ class GrvAbstractText extends HTMLElement {
     }
 
     handleMouse(event, eventType) {
-        let eventName = this.mouseEvent2String(event, eventType);
+        const eventName = this.mouseEvent2String(event, eventType);
         if (eventName === 'Mouse-Down-Button0') {
             this.focus();
         }
 
-        let handler = this.keyMap.get(this.mouseEvent2String(event, eventType));
-        if (handler) {
+        const command = this.keyMap.get(this.mouseEvent2String(event, eventType));
+        if (command) {
+            const proc = this.getCommandHandler(command);
             event.preventDefault();
-            let savedContext = this.inputContext;
-            try {
-                this.inputContext = InputContext.fromEvent(event);
-                handler(this, event);
-            } finally {
-                this.inputContext = savedContext;
-            }
+            this.callClosureWithInputContext(InputContext.fromEvent(event, eventName), proc);
         }
     }
 }
@@ -1773,6 +1817,29 @@ export class GrvText extends GrvAbstractText {
         this.lineEditHandler = undefined;
     }
 
+    setupCommand() {
+        super.setupCommand();
+
+        this.commandTable['backward-delete-char'] = () => {
+            this.backwardDeleteCharInputLine();
+        };
+        this.commandTable['delete-char'] = () => {
+            this.deleteCharInputLine();
+        };
+        this.commandTable['previous-char'] = () => {
+            this.previousCharInputLine();
+        };
+        this.commandTable['forward-char'] = () => {
+            this.forwardCharInputLine();
+        };
+        this.commandTable['move-beginning-of-line'] = () => {
+            this.moveBeginningOfInputLine();
+        };
+        this.commandTable['complete-line-edit'] = () => {
+            this.completeLineEdit();
+        };
+    }
+
     get pendingEditHandlerMaxLength() {
         return this._pendingEditHandlerMaxLength;
     }
@@ -1786,13 +1853,7 @@ export class GrvText extends GrvAbstractText {
         if (this.pendingEditHandlers.length < this._pendingEditHandlerMaxLength) {
             let currentContext = this.inputContext;
             this.pendingEditHandlers.push(() => {
-                let savedContext = this.inputContext;
-                try {
-                    this.inputContext = currentContext;
-                    handler();
-                } finally {
-                    this.inputContext = savedContext;
-                }
+                this.callClosureWithInputContext(currentContext, handler);
             });
         }
     }
@@ -1898,6 +1959,7 @@ export class GrvText extends GrvAbstractText {
     }
 
     readLine(handler, prompt = '', focus = true, initialContent = '', initialPosition = 0) {
+        this.setInsertMode();
         this.printText(prompt);
         this.startColumn = this.cursor.column;
         this.printText(initialContent);
@@ -1925,59 +1987,64 @@ export class GrvText extends GrvAbstractText {
         }, 0);
     }
 
-    finishLineEdit() {
+    completeLineEdit() {
+        const currentColumn = this.cursor.column;
         this.moveEndOfLine();
 
-        let content = this.attrCharsList[this.cursor.row].slice(this.startColumn).map((attrChar) => attrChar.character).join('');
-
-        this.editable = false;
-        this.printNewline();
+        const content = this.attrCharsList[this.cursor.row].slice(this.startColumn).map((attrChar) => attrChar.character).join('');
 
         if (this.lineEditHandler) {
-            let handler = this.lineEditHandler;
+            const handler = this.lineEditHandler;
             this.lineEditHandler = undefined;
-            handler(content);
+            handler(content, this.inputContext ? this.inputContext.eventName : false);
         }
+
+        this.cursor.column = currentColumn;
+        this.editable = false;
     }
 
     insertInputText(text) {
-        let strs = text.split('\n');
-        let enterHandler = this.keyMap.get('Enter');
-        if (!enterHandler) {
-            enterHandler = (controller, event) => {
-                this.printNewline();
-            };
+        if (!this.editable) {
+            this.pushEditHandler(() => {
+                this.insertInputText(text);
+            });
+            return;
         }
-        for (let i = 0; i < strs.length; ++i) {
-            let str = strs[i];
-            if (str.charAt(str.length - 1) === '\r') {
-                str = str.substring(0, str.length - 1);
-            }
-            if (this.editable) {
-                if (this.insertMode) {
-                    this.insertText(str);
-                } else {
-                    this.printText(str);
-                }
-            } else {
-                this.pushEditHandler(() => {
-                    if (this.insertMode) {
-                        this.insertText(str);
-                    } else {
-                        this.printText(str);
-                    }
-                });
-            }
-            if (i !== strs.length - 1) {
-                let event = new KeyboardEvent('keydown');
-                if (this.editable) {
-                    enterHandler(this, event);
-                } else {
-                    this.pushEditHandler(() => {
-                        enterHandler(this, event);
-                    });
-                }
-            }
+
+        const newlineIndex = text.indexOf('\n');
+        let headText = null;
+        let newlineExists = false;
+        let restText = null;
+        if (newlineIndex === -1) {
+            headText = text;
+            newlineExists = false;
+        } else {
+            headText = text.substring(0, newlineIndex);
+            newlineExists = true;
+            restText = text.substring(newlineIndex + 1);
+        }
+        if (headText.charAt(headText.length - 1) === '\r') {
+            headText = headText.substring(0, headText.length - 1);
+        }
+
+        if (this.insertMode) {
+            this.insertText(headText);
+        } else {
+            this.printText(headText);
+        }
+
+        if (newlineExists) {
+            const event = new KeyboardEvent('keydown', {
+                key: 'Enter'
+            });
+            const ctx = InputContext.fromEvent(event, 'Enter');
+            this.callClosureWithInputContext(ctx, () => {
+                this.completeLineEdit();                
+            });
+        }
+
+        if (restText) {
+            this.insertInputText(restText);
         }
     }
 
@@ -1987,12 +2054,14 @@ export class GrvText extends GrvAbstractText {
 
     // Mouse selection
 
-    startMouseSelection(event) {
+    startMouseSelection() {
+        const event = this.inputContext.event;
         this.savedCursorPosition = [this.cursor.column, this.cursor.row];
         super.startMouseSelection(event);
     }
 
-    endMouseSelection(event) {
+    endMouseSelection() {
+        const event = this.inputContext.event;
         super.endMouseSelection(event);
 
         this.processMarkRegion(false, true);
@@ -2054,44 +2123,44 @@ class ANSIEscapeSequenceInterpreter {
             // Cursor Up
             case 'A':
                 this.textEdit.moveCursorFreely(
-                    this.cursor.column,
-                    Math.max(0, this.cursor.row - (stack[0] || 1)));
+                    this.textEdit.cursor.column,
+                    Math.max(0, this.textEdit.cursor.row - (stack[0] || 1)));
                 break;
             // Cursor Down
             case 'B':
                 this.textEdit.moveCursorFreely(
-                    this.cursor.column,
-                    this.cursor.row + (stack[0] || 1));
+                    this.textEdit.cursor.column,
+                    this.textEdit.cursor.row + (stack[0] || 1));
                 break;
             // Cursor Forward
             case 'C':
                 this.textEdit.moveCursorFreely(
-                    this.cursor.column + 1,
-                    this.cursor.row);
+                    this.textEdit.cursor.column + 1,
+                    this.textEdit.cursor.row);
                 break;
             // Cursor Back
             case 'D':
                 this.textEdit.moveCursorFreely(
-                    Math.max(0, this.cursor.column - 1),
-                    this.cursor.row);
+                    Math.max(0, this.textEdit.cursor.column - 1),
+                    this.textEdit.cursor.row);
                 break;
             // Cursor Next Line
             case 'E':
                 this.textEdit.moveCursorFreely(
                     0,
-                    this.cursor.row + (stack[0] || 1));
+                    this.textEdit.cursor.row + (stack[0] || 1));
                 break;
             // Cursor Previous Line
             case 'F':
                 this.textEdit.moveCursorFreely(
                     0,
-                    Math.max(0, this.cursor.row - (stack[0] || 1)));
+                    Math.max(0, this.textEdit.cursor.row - (stack[0] || 1)));
                 break;
             // Cursor Horizontal Absolute
             case 'G':
                 this.textEdit.moveCursorFreely(
                     (stack[0] || this.textEdit.cursor.column + 1) - 1,
-                    this.cursor.row);
+                    this.textEdit.cursor.row);
                 break;
             // Cursor Position
             case 'H':
@@ -2317,14 +2386,14 @@ class ANSIEscapeSequenceInterpreter {
     clearScreenAfterCursor() {
         this.clearLineAfterCursor();
         let numRows = this.textEdit.rows;
-        for (let i = numRows - 1; i > this.cursor.row; --i) {
+        for (let i = numRows - 1; i > this.textEdit.cursor.row; --i) {
             this.removeLine(i);
         }
     }
 
     clearScreenBeforeCursor() {
         this.clearLineBeforeCursor();
-        for (let i = 0; i < this.cursor.row; ++i) {
+        for (let i = 0; i < this.textEdit.cursor.row; ++i) {
             let line = this.textEdit.line(i);
             line.splice(0, line.length);
         }
@@ -2572,33 +2641,3 @@ class ANSIEscapeSequenceInterpreter {
         }
     }
 }
-
-///
-/**
-function initText() {
-    let textEdit = document.getElementById('console');
-    textEdit.cursor.mode = 'vertical-blink';
-    textEdit.insertText('Hello, world!0123\n456\u001b[31mfoobarbaz\u001b[1;32m\u001b[2;3Habc');
-
-    textEdit.moveEndOfLine();
-    textEdit.insertText('\n');
-    let handler = (content) => {
-        console.log('Input => ' + content);
-        switch (content) {
-            case 'show':
-                textEdit.printText('\u001b[?47h');
-                break;
-            case 'hide':
-                textEdit.printText('\u001b[?47l');
-                break;
-            default:
-                textEdit.printText(`Input => "${content}"\n`);
-                break;
-        }
-        textEdit.startLineEdit(handler, '% ');
-    };
-    textEdit.startLineEdit(handler, '% ');
-}
-
-window.addEventListener('load', initText);
-*/

@@ -37,6 +37,7 @@
   (use graviton.browser-objects)
   (use graviton.jsffi)
   (use text.html-lite)
+  (use util.match)
 
   (export html:grv-text
           html:grv-text-edit
@@ -112,7 +113,8 @@
   :jsclass "GrvAbstractText")
 
 (define-class <grv-text> (<grv-abstract-text>)
-  ()
+  (ediable :jsproperty "editable"
+           :read-only? #t)
   :jsclass "GrvText")
 
 (define-class <grv-text-edit> (<grv-abstract-text>)
@@ -120,8 +122,21 @@
   :jsclass "GrvTextEdit")
 
 (define-automatic-jsobject-methods <grv-abstract-text>
+  "bindKey"
+  "callCommand"
   "insertText"
   "printText")
+
+(define-jsobject-method <grv-abstract-text> cursor-column ()
+  (jslet/result ((self::object))
+    (result self.cursor.column)))
+
+(define-jsobject-method <grv-abstract-text> cursor-row ()
+  (jslet/result ((self::object))
+    (result self.cursor.row)))
+
+(define-automatic-jsobject-methods <grv-text>
+  "completeLineEdit")
 
 (define-jsobject-method <grv-text> read-line (:key (prompt "") (focus? #t) (content "") (position 0))
   (jslet/result* ((self::object)
@@ -129,8 +144,8 @@
                   (focus?)
                   (content::string)
                   (position))
-    (self.readLine (lambda (content)
-                     (result content))
+    (self.readLine (lambda (content key)
+                     (result content key))
                    prompt
                    focus?
                    content
@@ -157,6 +172,7 @@
         (else
          (loop (+ i char-len))))))))
 
+
 (define (get-output-grv-text text-element :key (buffer-size 0))
   (rlet1 out (make <buffered-output-port>
                :flush (let1 pending-buf #u8()
@@ -177,4 +193,3 @@
     (unwind-protect
         (proc out)
       (close-output-port out))))
-

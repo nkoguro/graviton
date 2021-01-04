@@ -6,25 +6,59 @@
 (use text.html-lite)
 (use util.match)
 
+(define (read-multi-line text prompter validator)
+  (let loop ((current-prompt (prompter 0))
+             (line-alist '())
+             (row 0)
+             (pos 0))
+    (receive (line key) (text'read-line :prompt (string-append "\x1b;[2K\x1b;[1G" current-prompt)
+                                        :content (assv-ref line-alist row "")
+                                        :position pos)
+      (let1 line-alist (assv-set! line-alist row line)
+        (match key
+          ("ArrowUp"
+           (let ((next-row (max 0 (- row 1)))
+                 (next-pos (- (text'cursor-column) (string-length current-prompt))))
+             (when (< next-row row)
+               (text'print-text "\x1b;[F"))
+             (loop (prompter next-row) line-alist next-row next-pos)))
+          ("ArrowDown"
+           (let ((next-row (min (+ row 1) (- (length line-alist) 1)))
+                 (next-pos (- (text'cursor-column) (string-length current-prompt))))
+             (when (< row next-row)
+               (text'print-text "\x1b;[E"))
+             (loop (prompter next-row) line-alist next-row next-pos)))
+          ("Enter"
+           (let1 str (string-join (map cdr (sort line-alist (^(p1 p2) (< (car p1) (car p2))))) "\n")
+             (cond
+               ((validator str)
+                (dotimes ((- (length line-alist) row))
+                  (text'print-text "\n"))
+                str)
+               (else
+                (text'print-text "\n")
+                (loop (prompter (+ row 1)) line-alist (+ row 1) 0)))))
+          ("C-c"
+           (text'print-text "\n")
+           #f))))))
+
 (define (read-sexpr text)
-  (let ((prompt      "webgosh>")
-        (cont-prompt " (cont)>")
-        (str ""))
-    (let loop ((prompt prompt))
-      (set! str (string-append str (text'read-line :prompt prompt)))
-      (receive (sexpr state) (guard (e ((and (<read-error> e)
-                                             (string-contains (condition-message e "") "EOF inside a list"))
-                                        (set! str (string-append str "\n"))
-                                        (values #f 'continue))
-                                       (else (values #f e)))
-                               (values (read-from-string str) 'done))
-        (match state
-          ('continue
-           (loop cont-prompt))
-          ('done
-           (values sexpr #f))
-          (err
-           (values #f err)))))))
+  (let1 str (read-multi-line text (lambda (row)
+                                    (if (= row 0)
+                                      "webgosh>"
+                                      " (cont)>"))
+                             (lambda (str)
+                               (guard (e ((and (<read-error> e)
+                                               (string-contains (condition-message e "") "EOF inside a list"))
+                                          #f)
+                                         (else
+                                          #t))
+                                 (read-from-string str)
+                                 #t)))
+    (if str
+      (guard (e (else (values #f e)))
+        (values (read-from-string str) #f))
+      (values (eof-object) #f))))
 
 ;; read-eval-print-loop uses with-error-handler, but it can be incompatible with partial continuation.
 (define (repl)
@@ -78,11 +112,16 @@
     (set! *text-height* height)
     (set! *font-size* font-size))
 
+  (grv-log-config :log-level 1)
   (grv-begin
     (on-jsevent window "keyup" (key)
       (when (equal? key "Escape")
         (log-format "Exit by Escape key")
         (grv-exit)))
+
+    (text'bind-key "ArrowUp" "complete-line-edit")
+    (text'bind-key "ArrowDown" "complete-line-edit")
+    (text'bind-key "C-c" "complete-line-edit")
 
     (call-with-output-grv-text text
       (lambda (out)
