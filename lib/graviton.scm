@@ -344,16 +344,7 @@
 (define *control-channel* (make-server-control-channel))
 
 (define (server-url sock)
-  (let1 host (cond
-               ((equal? (graviton-config 'wsl) "2")
-                ;; WSL2 localhost can't be seen from Windows rarely. Try to look up the IP address until it is fixed.
-                (if-let1 m (#/inet ((\d+)\.(\d+)\.(\d+)\.(\d+))/ (guard (e (else ""))
-                                                                   (process-output->string "ip address show dev eth0")))
-                         (m 1)
-                         "localhost"))
-               (else
-                "localhost"))
-    (format "http://~a:~a/" host (sockaddr-port (socket-address sock)))))
+  (format "http://localhost:~a/" (sockaddr-port (socket-address sock))))
 
 (define (invoke-player sock)
   (let* ((config-file (generate-player-config-file (server-url sock)))
