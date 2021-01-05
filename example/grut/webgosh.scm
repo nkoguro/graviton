@@ -95,9 +95,9 @@
 (define *font-size* #f)
 
 (define-grut-window
-  (text :id text :width *text-width* :height *text-height* :font-size *font-size*)
+  (text :id text :width *text-width* :height *text-height* :font-size *font-size* :overflow-y "scroll")
   (canvas :id canvas :context-2d ctx :width 1000 :height 1000)
-  :theme 'dark :title "gosh on Web")
+  :theme 'dark :title "gosh on Web" :margin "0 0 0 5")
 
 (define (main args)
   (let-args (cdr args) ((use-browser? "b|browser" #f)
