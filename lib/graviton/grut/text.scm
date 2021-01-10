@@ -104,7 +104,7 @@
                         r))))
     ))
 
-(define-html-elements grv-text grv-text-edit :empty)
+(define-html-elements grv-text grv-text-edit)
 
 ;;;
 
@@ -113,8 +113,8 @@
   :jsclass "GrvAbstractText")
 
 (define-class <grv-text> (<grv-abstract-text>)
-  (ediable :jsproperty "editable"
-           :read-only? #t)
+  ((ediable :jsproperty "editable"
+            :read-only? #t))
   :jsclass "GrvText")
 
 (define-class <grv-text-edit> (<grv-abstract-text>)
