@@ -65,7 +65,7 @@
 
           get-js-code
           js-main-module-absolute-paths
-          load-js-list
+          load-js+type-list
 
           import-js
           load-js
@@ -1678,13 +1678,17 @@
 
 ;;;
 
-(define *load-js-list* '())
+(define *load-js+type-list* '())
 
-(define (load-js js-path)
-  (push! *load-js-list* (absolute-js-path js-path)))
+(define (load-js js-path :key (type #f))
+  (push! *load-js+type-list* (cons (absolute-js-path js-path)
+                                   (or type
+                                       (if (equal? (path-extension js-path) "mjs")
+                                         "module"
+                                         #f)))))
 
-(define (load-js-list)
-  (reverse *load-js-list*))
+(define (load-js+type-list)
+  (reverse *load-js+type-list*))
 
 ;;;
 

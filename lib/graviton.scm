@@ -222,9 +222,10 @@
                                  (html:link :rel "stylesheet" :type "text/css" :href css))
                                (load-css-list))
                           (append
-                            (map (lambda (js-path)
-                                   (html:script :src js-path))
-                                 (load-js-list))
+                            (map (match-lambda
+                                   ((js-path . type)
+                                    (html:script :type type :src js-path)))
+                                 (load-js+type-list))
                             (map (lambda (js-mod)
                                    (html:script :type "module" :src js-mod))
                                  (js-main-module-absolute-paths)))
