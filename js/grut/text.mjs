@@ -189,10 +189,12 @@ class TextCursor {
 
     show() {
         this.visible = true;
+        this.textEdit.requestUpdateRow(this.row);
     }
 
     hide() {
         this.visible = false;
+        this.textEdit.requestUpdateRow(this.row);
     }
 }
 
