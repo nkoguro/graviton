@@ -713,6 +713,7 @@ class GrvAbstractText extends HTMLElement {
         this.autoScrollHandler = undefined;
         this.newlineMode = true;
         this.insertMode = true;
+        this.isCompositionStarted = false;
         this.inputContext = InputContext.defaultInstance();
 
         this.cursor = new TextCursor(this);
@@ -1691,20 +1692,31 @@ class GrvAbstractText extends HTMLElement {
             return;
         }
 
-        let text = this.extractInputContent();
+        const text = this.extractInputContent();
         this.handleInputText(text);
         this.clearInputContent();
     }
 
     handleCompositionStart(event) {
+        this.isCompositionStarted = true;
         this.enableInputAreaIMEStyle();
     }
 
     handleCompositionEnd(event) {
-        let text = this.extractInputContent();
-        this.handleInputText(text);
-        this.clearInputContent();
-        this.disableInputAreaIMEStyle();
+        this.isCompositionStarted = false;
+        // CompositionEnd event can be fired when the user is still typing.
+        // In this case, modifying the input area will break the current IME state.
+        // For the workaround, inserting text is moved to the next event loop
+        // and not to insert the text if composition state is started.
+        setTimeout(() => {
+            if (this.isCompositionStarted) {
+                return;
+            }
+            const text = this.extractInputContent();
+            this.handleInputText(text);
+            this.clearInputContent();
+            this.disableInputAreaIMEStyle();
+        }, 0);
     }
 
     keyboardEvent2String(keyboardEvent) {
