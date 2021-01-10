@@ -55,6 +55,8 @@
           request-animation-frame-callback!
           cancel-animation-frame-callback!
           on-repaint
+
+          jsevent-wait
           ))
 
 (select-module graviton.event)
@@ -227,3 +229,32 @@
          (request-animation-frame-callback! callback))))
     ((_ (sec-per-frame) body ...)
      (on-repaint :priority #f (sec-per-frame) body ...))))
+
+(define (jsevent-wait jsobj type :key (jsproperties #f) (timeout #f) (timeout-val #f) (use-capture? #f))
+  (let ((worker (current-worker))
+        (priority (current-priority))
+        (returned? #f))
+    (let1 v (shift cont
+              (when timeout
+                (let1 timeout-callback (worker-callback (^() (cont timeout-val)) :worker worker :priority priority)
+                  (scheduler-add! timeout-callback :after timeout)))
+              (letrec* ((event-callback (worker-callback (lambda (v)
+                                                           (free-future-id future-id)
+                                                           (cont v))
+                                                         :worker worker
+                                                         :priority priority))
+                        (future-id (allocate-future-id event-callback)))
+                (jslet ((jsobj::object)
+                        (type::string)
+                        (jsproperties::list)
+                        (future-id)
+                        (use-capture?))
+                  (Event.registerOneShotEventHandler jsobj type jsproperties future-id use-capture?))))
+      (cond
+        (returned?
+         (shift _
+           ;; Escape from the current reset scope.
+           #f))
+        (else
+         (set! returned? #t)
+         v)))))

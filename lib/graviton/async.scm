@@ -43,6 +43,7 @@
   (use util.match)
 
   (export current-worker
+          current-priority
           worker-thread-idle-timeout
           worker-process-event-start-hook
           worker-thread-start-hook

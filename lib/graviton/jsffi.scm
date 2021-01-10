@@ -94,6 +94,9 @@
           json->obj
           json-rule
 
+          allocate-future-id
+          free-future-id
+
           unlink-callback
           unlink-procedure
           shift-callback*
