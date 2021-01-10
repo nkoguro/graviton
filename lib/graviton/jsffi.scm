@@ -37,7 +37,6 @@
   (use gauche.charconv)
   (use gauche.collection)
   (use gauche.hook)
-  (use gauche.mop.singleton)
   (use gauche.parameter)
   (use gauche.partcont)
   (use gauche.record)
