@@ -47,6 +47,7 @@
 
           <event-target>
           <node>
+          <node-list>
           <css-style-declaration>
           <element>
           <html-element>
@@ -174,6 +175,17 @@
   "normalize"
   "removeChild"
   ("replaceChild" :result))
+
+(define-class <node-list> (<jsobject>)
+  ((length :jsproperty "length"))
+  :jsclass "NodeList")
+
+(define-automatic-jsobject-methods <node-list>
+  ("item" :result)
+  ("entries" :result)
+  "forEach"
+  ("keys" :result)
+  ("values" :result))
 
 ;;; CSS style declaration
 
