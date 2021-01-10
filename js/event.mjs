@@ -12,19 +12,19 @@ function extractEventValues(event, props) {
     return vals;
 }
 
-export function registerEventHandler(obj, type, props, callback) {
-    let eventHandler = (e) => {
-        let args = extractEventValues(e, props);
+export function registerEventHandler(obj, type, props, callback, useCapture) {
+    const eventHandler = (e) => {
+        const args = extractEventValues(e, props);
         callback(...args);
     };
     eventHandlerTable.set(callback, eventHandler);
-    obj.addEventListener(type, eventHandler);
+    obj.addEventListener(type, eventHandler, useCapture);
 }
 
-export function unregisterEventHandler(obj, type, callback) {
-    let eventHandler = eventHandlerTable.get(callback);
+export function unregisterEventHandler(obj, type, callback, useCapture) {
+    const eventHandler = eventHandlerTable.get(callback);
     if (eventHandler) {
-        obj.removeEventListener(type, eventHandler);
+        obj.removeEventListener(type, eventHandler, useCapture);
         eventHandlerTable.delete(callback);
     }
 }

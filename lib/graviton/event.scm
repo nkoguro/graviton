@@ -99,7 +99,7 @@
                                '()
                                (string-split str ".")))))
 
-(define-method jsevent-callback-set! ((jsobj <jsobject>) event-type prop-specs (callback <worker-callback>))
+(define-method jsevent-callback-set! ((jsobj <jsobject>) event-type prop-specs (callback <worker-callback>) :key (use-capture? #f))
   (jsevent-callback-delete! jsobj event-type)
   (application-context-slot-atomic-ref 'jsevent-callback-table
     (lambda (tbl)
@@ -107,17 +107,18 @@
   (jslet ((obj::object jsobj)
           (event-type::string)
           (prop-specs)
-          (callback))
-    (Event.registerEventHandler obj event-type prop-specs callback))
+          (callback)
+          (use-capture?))
+    (Event.registerEventHandler obj event-type prop-specs callback use-capture?))
   (undefined))
 
-(define-method jsevent-callback-set! ((jsobj <jsobject>) event-type prop-specs (proc <procedure>))
-  (jsevent-callback-set! jsobj event-type prop-specs (worker-callback proc)))
+(define-method jsevent-callback-set! ((jsobj <jsobject>) event-type prop-specs (proc <procedure>) :key (use-capture? #f))
+  (jsevent-callback-set! jsobj event-type prop-specs (worker-callback proc) :use-capture? use-capture?))
 
-(define-method jsevent-callback-set! ((jsobj-provider <jsobject-provider>) event-type prop-specs proc-or-callback)
-  (jsevent-callback-set! (jsobj-provider) event-type prop-specs proc-or-callback))
+(define-method jsevent-callback-set! ((jsobj-provider <jsobject-provider>) event-type prop-specs proc-or-callback :key (use-capture? #f))
+  (jsevent-callback-set! (jsobj-provider) event-type prop-specs proc-or-callback :use-capture? use-capture?))
 
-(define-method jsevent-callback-delete! ((jsobj <jsobject>) event-type)
+(define-method jsevent-callback-delete! ((jsobj <jsobject>) event-type :key (use-capture? #f))
   (and-let1 callback (application-context-slot-atomic-ref 'jsevent-callback-table
                       (lambda (tbl)
                         (let1 key (list jsobj event-type)
@@ -126,13 +127,14 @@
                             (hash-table-delete! tbl key)))))
     (jslet ((obj::object jsobj)
             (event-type::string)
-            (callback))
-      (Event.unregisterEventHandler obj event-type callback))
+            (callback)
+            (use-capture?))
+      (Event.unregisterEventHandler obj event-type callback use-capture?))
     (unlink-callback callback)
     (undefined)))
 
-(define-method jsevent-callback-delete! ((jsobj-provider <jsobject-provider>) event-type)
-  (jsevent-callback-delete! (jsobj-provider) event-type))
+(define-method jsevent-callback-delete! ((jsobj-provider <jsobject-provider>) event-type :key (use-capture? #f))
+  (jsevent-callback-delete! (jsobj-provider) event-type :use-capture? use-capture?))
 
 (define (estimate-prop-spec sym)
   (define (scm->camel-case str)
@@ -163,9 +165,14 @@
   (er-macro-transformer
     (lambda (form rename id=?)
       (match form
+        ((_ jsobj (type ':use-capture? use-capture?) (? list? arg-specs) body ...)
+         (receive (args props) (parse-arg-specs arg-specs)
+           (quasirename rename `(jsevent-callback-set! ,jsobj ,type ,props (lambda ,args ,@body) ,:use-capture? ,use-capture?))))
         ((_ jsobj type (? list? arg-specs) body ...)
          (receive (args props) (parse-arg-specs arg-specs)
            (quasirename rename `(jsevent-callback-set! ,jsobj ,type ,props (lambda ,args ,@body)))))
+        ((_ jsobj (type ':use-capture? use-capture?) #f)
+         (quasirename rename `(jsevent-callback-delete! ,jsobj ,type ,:use-capture? ,use-capture?)))
         ((_ jsobj type #f)
          (quasirename rename `(jsevent-callback-delete! ,jsobj ,type)))
         (_
