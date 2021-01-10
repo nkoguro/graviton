@@ -50,6 +50,7 @@
 
   (export client-request-output
           flush-client-request
+          with-client-request
 
           websocket-main-loop
 
@@ -102,6 +103,12 @@
         (when (< 0 (u8vector-length data))
           (send-binary-frame wout data)
           (client-request-output (open-output-uvector)))))))
+
+(define (with-client-request thunk)
+  (parameterize ((client-request-output (open-output-uvector)))
+    (begin0
+        (thunk)
+      (flush-client-request))))
 
 (add-hook! worker-thread-start-hook (lambda ()
                                       (client-request-output (open-output-uvector))))

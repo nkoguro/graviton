@@ -1435,7 +1435,7 @@
                    (application-context-slot-atomic-ref 'jsobject-singleton-table
                      (lambda (tbl)
                        (or (hash-table-get tbl key #f)
-                           (rlet1 jsobj (provider)
+                           (rlet1 jsobj (with-client-request provider)
                              (hash-table-put! tbl key jsobj)))))))))
 
 (define-syntax define-jsobject-singleton
