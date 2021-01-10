@@ -118,7 +118,7 @@
   :jsclass "GrvText")
 
 (define-class <grv-text-edit> (<grv-abstract-text>)
-  ()
+  ((text-content :jsproperty "textContent"))
   :jsclass "GrvTextEdit")
 
 (define-automatic-jsobject-methods <grv-abstract-text>

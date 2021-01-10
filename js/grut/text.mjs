@@ -1814,6 +1814,11 @@ export class GrvTextEdit extends GrvAbstractText {
     get textContent() {
         return this.attrCharsList.map(this.attrChars2String).join('\n');
     }
+
+    set textContent(text) {
+        this.clearTextContent();
+        this.insertText(text);
+    }
 }
 
 export class GrvText extends GrvAbstractText {
