@@ -140,8 +140,13 @@ function adjustGrvTextGeometry(grvText) {
     }
 }
 
+function grutInit() {
+    if (!document.body.dataset.grutWindow) {
+        return;
+    }
 
-window.addEventListener('load', () => {
     document.querySelectorAll("grv-text, grv-text-edit").forEach(adjustGrvTextGeometry);
     processGrutSpecialClass(document.body);
-});
+}
+
+window.addEventListener('load', grutInit);

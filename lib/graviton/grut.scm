@@ -187,6 +187,7 @@
                                             '("grut-body"))
                                           " ")
                                  :style (keywords->style (list ,@rest))
+                                 :data-grut-window "true"
                                  ,@elements)))
                   (when ,title
                     (grv-title-set! ,title))
