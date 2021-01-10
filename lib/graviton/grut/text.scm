@@ -135,6 +135,14 @@
   (jslet/result ((self::object))
     (result self.cursor.row)))
 
+(define-jsobject-method <grv-abstract-text> show-cursor ()
+  (jslet ((self::object))
+    (self.cursor.show)))
+
+(define-jsobject-method <grv-abstract-text> hide-cursor ()
+  (jslet ((self::object))
+    (self.cursor.hide)))
+
 (define-automatic-jsobject-methods <grv-text>
   "completeLineEdit")
 
