@@ -1150,8 +1150,11 @@ class GrvAbstractText extends HTMLElement {
         this.requestUpdateRow(this.rows - 1);
     }
 
-    removeLine(row = this.cursor.row) {
-        this.attrCharsList.splice(row, 1);
+    removeLine(row = this.cursor.row, numLines = 1) {
+        this.attrCharsList.splice(row, numLines);
+        if (this.attrCharsList.length === 0) {
+            this.attrCharsList = [[]];
+        }
         // Need to update the last deleted line, so the end must be this.rows + 1.
         for (let i = row; i < this.rows + 1; ++i) {
             this.requestUpdateRow(i);
@@ -1818,6 +1821,12 @@ export class GrvTextEdit extends GrvAbstractText {
     set textContent(text) {
         this.clearTextContent();
         this.insertText(text);
+    }
+
+    clearTextContent() {
+        this.removeLine(0, this.rows);
+        this.cursor.column = 0;
+        this.cursor.row = 0;
     }
 }
 

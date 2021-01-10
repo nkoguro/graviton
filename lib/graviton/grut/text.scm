@@ -159,6 +159,9 @@
                    content
                    position)))
 
+(define-automatic-jsobject-methods <grv-text-edit>
+  "clearTextContent")
+
 (define (compute-output-length buf)
   (let1 len (u8vector-length buf)
     (let loop ((i 0))
