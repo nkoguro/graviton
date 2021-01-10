@@ -35,7 +35,7 @@ function processGrutSpecialClass(element) {
 }
 
 function processGrutSpecialClassInner(element) {
-    let grutSpecialClass = grutSpecialClassList.find((className) => {
+    const grutSpecialClass = grutSpecialClassList.find((className) => {
         return element.classList.contains(className);
     });
     if (!grutSpecialClass) {
@@ -126,13 +126,13 @@ function processGrutSpecialClassInner(element) {
  */
 
 function adjustGrvTextGeometry(grvText) {
-    let dataWidth = Number(grvText.dataset.width);
+    const dataWidth = Number(grvText.dataset.width);
     if (dataWidth) {
         grvText.style.width = grvText.characterWidth * dataWidth;
     } else {
         grvText.style.width = '100%';
     }
-    let dataHeight = Number(grvText.dataset.height);
+    const dataHeight = Number(grvText.dataset.height);
     if (dataHeight) {
         grvText.style.height = grvText.lineHeight * dataHeight;
     } else {
