@@ -1578,7 +1578,7 @@ class GrvAbstractText extends HTMLElement {
         const savedContext = this.inputContext;
         try {
             this.inputContext = inputContext;
-            proc();    
+            proc();
         } finally {
             this.inputContext = savedContext;
         }
@@ -2058,7 +2058,7 @@ export class GrvText extends GrvAbstractText {
             });
             const ctx = InputContext.fromEvent(event, 'Enter');
             this.callClosureWithInputContext(ctx, () => {
-                this.completeLineEdit();                
+                this.completeLineEdit();
             });
         }
 
