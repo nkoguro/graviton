@@ -55,17 +55,27 @@ function processGrutSpecialClassInner(element) {
     }
     let containerData = objectFitContainerDataTable.get(containerElement.dataset.grutObjectFitContainerId);
     if (!containerData) {
-        let containerId = `container${objectFitContainerNextId++}`;
-        let containerWidthVar = `--grut-${containerId}-width`;
-        let containerHeightVar = `--grut-${containerId}-height`;
-        let handler = () => {
-            let rect = containerElement.getBoundingClientRect();
-            containerElement.style.setProperty(containerWidthVar, rect.width);
-            containerElement.style.setProperty(containerHeightVar, rect.height);
+        const containerId = `container${objectFitContainerNextId++}`;
+        const containerWidthVar = `--grut-${containerId}-width`;
+        const containerHeightVar = `--grut-${containerId}-height`;
+        const containerCenterXVar = `--grut-${containerId}-center-x`;
+        const containerCenterYVar = `--grut-${containerId}-center-y`;
+        const handler = () => {
+            const rect = containerElement.getBoundingClientRect();
+            const width = rect.width;
+            const height = rect.height;
+            const centerX = rect.left + width / 2;
+            const centerY = rect.top + height / 2;
+            containerElement.style.setProperty(containerWidthVar, width);
+            containerElement.style.setProperty(containerHeightVar, height);
+            containerElement.style.setProperty(containerCenterXVar, centerX);
+            containerElement.style.setProperty(containerCenterYVar, centerY);
         };
         containerData = {
             'width-var': containerWidthVar,
             'height-var': containerHeightVar,
+            'center-x-var': containerCenterXVar,
+            'center-y-var': containerCenterYVar,
             'handler': handler
         }
         containerElement.dataset.grutObjectFitContainerId = containerId;
@@ -88,13 +98,23 @@ function processGrutSpecialClassInner(element) {
     objectFitDataTable.set(objectFitId, objectData);
     switch (grutSpecialClass) {
         case 'grut-object-fit-contain':
+            element.style.left = `var(${containerData['center-x-var']})`;
+            element.style.top = `var(${containerData['center-y-var']})`;
             element.style.transform = `translate(-50%, -50%) scale(min(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar})))`;
             break;
         case 'grut-object-fit-cover':
-            element.style.transform = `translate(-50%, -50%) scale(max(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar})))`;
+            element.style.left = `var(${containerCenterXVar})`;
+            element.style.top = `var(${containerCenterYVar})`;
+            element.style.transform = `scale(max(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar})))`;
             break;
         case 'grut-object-fit-fill':
-            element.style.transform = `translate(-50%, -50%) scale(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar}))`;
+            element.style.left = `var(${containerCenterXVar})`;
+            element.style.top = `var(${containerCenterYVar})`;
+            element.style.transform = `scale(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar}))`;
+            break;
+        case 'grut-object-fit-none':
+            element.style.left = `var(${containerCenterXVar})`;
+            element.style.top = `var(${containerCenterYVar})`;
             break;
     }
     handler();
