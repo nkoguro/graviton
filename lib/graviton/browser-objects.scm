@@ -405,8 +405,8 @@
                 :read-only? #t))
   :jsclass "Document")
 
-(define-jsobject-singleton document (jslet/result ()
-                                      (result document)))
+(define-global-jsobject document (jslet/result ()
+                                   (result document)))
 
 (define-automatic-jsobject-methods <document>
   ("adoptNode" :result)
@@ -536,8 +536,8 @@
    (window :jsproperty "window"))
   :jsclass "Window")
 
-(define-jsobject-singleton window (jslet/result ()
-                                    (result window)))
+(define-global-jsobject window (jslet/result ()
+                                 (result window)))
 
 (define-automatic-jsobject-methods <window>
   "alert"

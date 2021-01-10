@@ -102,8 +102,8 @@
                            :style (keywords->style (list ,@rest))))
          (if id
            (quasirename rename
-             `(define ,id (make-jsobject-singleton-provider (lambda ()
-                                                              (document'get-element-by-id (symbol->string ',id))))))
+             `(define ,id (make-global-jsobject-provider (lambda ()
+                                                           (document'get-element-by-id (symbol->string ',id))))))
            #f))))
     (('text-edit opts ...)
      (let-keywords opts ((id #f)
@@ -120,8 +120,8 @@
                                 :style (keywords->style (list ,@rest))))
          (if id
            (quasirename rename
-             `(define ,id (make-jsobject-singleton-provider (lambda ()
-                                                              (document'get-element-by-id (symbol->string ',id))))))
+             `(define ,id (make-global-jsobject-provider (lambda ()
+                                                           (document'get-element-by-id (symbol->string ',id))))))
            #f))))
     (('canvas opts ...)
      (let-keywords opts ((id #f)
@@ -138,10 +138,10 @@
                            :width ,width
                            :height ,height
                            :style (keywords->style (list ,@rest))))
-           (let* ((canvas (make-jsobject-singleton-provider
+           (let* ((canvas (make-global-jsobject-provider
                             (lambda ()
                               (document'get-element-by-id (symbol->string (or id gen-canvas-id))))))
-                  (ctx2d (make-jsobject-singleton-provider
+                  (ctx2d (make-global-jsobject-provider
                            (lambda ()
                              (canvas'get-context "2d")))))
              (quasirename rename

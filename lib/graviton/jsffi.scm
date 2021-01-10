@@ -83,8 +83,8 @@
           jsobject-property-set!
           jsobject-free!
           with-jsobjects
-          make-jsobject-singleton-provider
-          define-jsobject-singleton
+          make-global-jsobject-provider
+          define-global-jsobject
 
           <jsobject-provider>
 
@@ -1425,22 +1425,22 @@
       (slot-ref jsobj slot)
       (apply slot-set! jsobj slot value))))
 
-(define-application-context-slot jsobject-singleton-table (make-hash-table 'eq?))
+(define-application-context-slot global-jsobject-table (make-hash-table 'eq?))
 
-(define (make-jsobject-singleton-provider provider)
+(define (make-global-jsobject-provider provider)
   (make <jsobject-provider>
     :provider  (let1 key (gensym)
                  (lambda ()
-                   (application-context-slot-atomic-ref 'jsobject-singleton-table
+                   (application-context-slot-atomic-ref 'global-jsobject-table
                      (lambda (tbl)
                        (or (hash-table-get tbl key #f)
                            (rlet1 jsobj (with-client-request provider)
                              (hash-table-put! tbl key jsobj)))))))))
 
-(define-syntax define-jsobject-singleton
+(define-syntax define-global-jsobject
   (syntax-rules ()
     ((_ name body ...)
-     (define name (make-jsobject-singleton-provider (lambda () body ...))))))
+     (define name (make-global-jsobject-provider (lambda () body ...))))))
 
 ;;;
 

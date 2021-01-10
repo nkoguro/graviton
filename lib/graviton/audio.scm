@@ -368,5 +368,5 @@
    (oversample :jsproperty "oversample"))
   :jsclass "WaveShaperNode")
 
-(define-jsobject-singleton audio-context (jslet/result ()
-                                           (result audioContext)))
+(define-global-jsobject audio-context (jslet/result ()
+                                        (result audioContext)))

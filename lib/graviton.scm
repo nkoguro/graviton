@@ -92,6 +92,8 @@
           define-document-content
           document-body-provider-set!
 
+          define-global-jsobject
+
           make-jsobject
           ))
 
