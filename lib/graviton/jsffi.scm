@@ -72,7 +72,6 @@
           define-jsenum
           jslet
           jslet/result
-          jslet/result*
 
           <jsobject>
           <jsobject-meta>
@@ -990,7 +989,14 @@
                 (slot-ref js-proc 'types)
                 args))
 
+(define use-jscall/result-sync? (make-parameter #f))
+
 (define (jscall/result js-proc :rest args)
+  (if (use-jscall/result-sync?)
+    (jscall/result-sync js-proc args)
+    (jscall/result-async js-proc args)))
+
+(define (jscall/result-sync js-proc args)
   (let* ((mq (make-mtqueue))
          (future-id (allocate-future-id mq)))
     (call-command (slot-ref js-proc 'command-id)
@@ -1001,7 +1007,7 @@
       (free-future-id future-id)
       (apply values vals))))
 
-(define (jscall/result* js-proc :rest args)
+(define (jscall/result-async js-proc args)
   (let1 future-id #f
     (receive vals (shift-callback callback
                     ;; Use allocate-future-id directly instead of link-callback because this callback is
@@ -1025,12 +1031,6 @@
                    ,@(map (lambda (spec)
                             (list-ref (parse-arg-spec spec) 2))
                           arg-specs)))
-
-(define-macro (jslet/result* arg-specs :rest body)
-  `(,jscall/result* ,(compile-jslet/result arg-specs body)
-                    ,@(map (lambda (spec)
-                             (list-ref (parse-arg-spec spec) 2))
-                           arg-specs)))
 
 (define-class <jsenum> ()
   ((symbol->value-table :init-form (make-hash-table))
@@ -1437,7 +1437,8 @@
                    (application-context-slot-atomic-ref 'global-jsobject-table
                      (lambda (tbl)
                        (or (hash-table-get tbl key #f)
-                           (rlet1 jsobj (with-client-request provider)
+                           (rlet1 jsobj (parameterize ((use-jscall/result-sync? #t))
+                                          (with-client-request provider))
                              (hash-table-put! tbl key jsobj)))))))))
 
 (define-syntax define-global-jsobject

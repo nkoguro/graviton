@@ -147,11 +147,11 @@
   "completeLineEdit")
 
 (define-jsobject-method <grv-text> read-line (:key (prompt "") (focus? #t) (content "") (position 0))
-  (jslet/result* ((self::object)
-                  (prompt::string)
-                  (focus?)
-                  (content::string)
-                  (position))
+  (jslet/result ((self::object)
+                 (prompt::string)
+                 (focus?)
+                 (content::string)
+                 (position))
     (self.readLine (lambda (content key)
                      (result content key))
                    prompt
