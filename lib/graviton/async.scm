@@ -69,6 +69,7 @@
           <event-callback>
           worker-callback
           worker-callback?
+          worker-shift
           shift-callback
           scheduler-add!
           scheduler-delete!
@@ -410,14 +411,22 @@
 (define-method object-equal? ((callback1 <event-callback>) (callback2 <event-callback>))
   (every (^x (equal? (~ callback1 x) (~ callback2 x))) '(worker event-name)))
 
-(define-syntax shift-callback
+(define-syntax worker-shift
   (syntax-rules ()
-    ((_ callback expr ...)
+    ((_ cont expr ...)
      (let ((worker (current-worker))
            (priority (current-priority)))
        (shift cont
-         (let1 callback (worker-callback cont :worker worker :priority priority)
+         (parameterize ((current-worker worker)
+                        (current-priority priority))
            expr ...))))))
+
+(define-syntax shift-callback
+  (syntax-rules ()
+    ((_ callback expr ...)
+     (worker-shift cont
+       (let1 callback (worker-callback cont)
+         expr ...)))))
 
 ;;;
 
