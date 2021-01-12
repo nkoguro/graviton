@@ -1837,6 +1837,7 @@ export class GrvText extends GrvAbstractText {
         this.mode = 'terminal';
         this.keyMap = TERMINAL_KEYMAP;
 
+        this.cursor.hide();
         this.editable = false;
         this.startColumn = 0;
         this.pendingEditHandlers = [];
@@ -1992,6 +1993,7 @@ export class GrvText extends GrvAbstractText {
         this.startColumn = this.cursor.column;
         this.printText(initialContent);
         this.cursor.column = this.startColumn + initialPosition;
+        this.cursor.show();
         this.lineEditHandler = handler;
         this.editable = true;
         if (focus) {
@@ -2028,6 +2030,7 @@ export class GrvText extends GrvAbstractText {
         }
 
         this.cursor.column = currentColumn;
+        this.cursor.hide();
         this.editable = false;
     }
 
