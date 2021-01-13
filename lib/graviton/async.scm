@@ -361,13 +361,13 @@
     ((_ event proc)
      (register-event-handler! event proc))))
 
-(define (register-idle-handler! proc)
-  (set! (~ (current-worker)'idle-handler) proc))
+(define (register-idle-handler! thunk)
+  (set! (~ (current-worker)'idle-handler) thunk))
 
 (define-syntax on-idle
   (syntax-rules ()
-    ((_ (arg ...) body ...)
-     (register-idle-handler! (lambda (arg ...) body ...)))
+    ((_ () body ...)
+     (register-idle-handler! (lambda () body ...)))
     ((_ proc)
      (register-idle-handler! proc))))
 
