@@ -298,6 +298,7 @@ class TextLine {
     splice(start, deleteCount, ...attrChars) {
         this.attributedCharacters.splice(start, deleteCount, ...attrChars);
         this.textEdit.requestUpdateRow(this.row);
+        this.textEdit.lastUpdateTimestamp = Date.now();
     }
 
     slice(start = 0, end = this.attributedCharacters.length) {
@@ -709,6 +710,7 @@ class GrvAbstractText extends HTMLElement {
 
         this.attrCharsList = [[]];
         this.updatedRowSet = new Set([0]);
+        this.lastUpdateTimestamp = 0;
         this.currentAttribute = DEFAULT_ATTRIBUTE;
         this.mark = null;
         this.isMouseSelecting = false;
@@ -1137,6 +1139,7 @@ class GrvAbstractText extends HTMLElement {
         for (let i = row; i < this.rows; ++i) {
             this.requestUpdateRow(i);
         }
+        this.lastUpdateTimestamp = Date.now();
     }
 
     concatLine(row = this.cursor.row) {
@@ -1148,6 +1151,7 @@ class GrvAbstractText extends HTMLElement {
     appendEmptyLine() {
         this.attrCharsList.push([]);
         this.requestUpdateRow(this.rows - 1);
+        this.lastUpdateTimestamp = Date.now();
     }
 
     removeLine(row = this.cursor.row, numLines = 1) {

@@ -109,7 +109,8 @@
 ;;;
 
 (define-class <grv-abstract-text> (<html-element>)
-  ()
+  ((last-update-timestamp :jsproperty "lastUpdateTimestamp"
+                          :read-only? #t))
   :jsclass "GrvAbstractText")
 
 (define-class <grv-text> (<grv-abstract-text>)
