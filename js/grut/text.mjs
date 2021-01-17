@@ -354,7 +354,7 @@ class TextEditRefreshController {
 
 let textEditRefreshController = new TextEditRefreshController();
 
-class EventMap {
+export class EventMap {
     constructor(parent) {
         this.parent = parent;
         this.map = {};
@@ -362,12 +362,6 @@ class EventMap {
 
     static create(map = {}) {
         let eventMap = new EventMap(null);
-        eventMap.setAll(map);
-        return eventMap;
-    }
-
-    createChild(map = {}) {
-        let eventMap = new EventMap(this);
         eventMap.setAll(map);
         return eventMap;
     }
@@ -387,7 +381,7 @@ class EventMap {
         return undefined;
     }
 
-    set(event, val) {
+    bind(event, val) {
         this.map[event] = val;
     }
 
@@ -398,7 +392,7 @@ class EventMap {
     }
 }
 
-let SCREEN_KEYMAP = EventMap.create({
+export const SCREEN_KEYMAP = EventMap.create({
     'Backspace': 'backward-delete-char',
     'Delete': 'delete-char',
     'ArrowLeft': 'previous-char',
@@ -429,7 +423,7 @@ let SCREEN_KEYMAP = EventMap.create({
     'Mouse-Leave': 'end-mouse-selection'
 });
 
-const TERMINAL_KEYMAP = EventMap.create({
+export const TERMINAL_KEYMAP = EventMap.create({
     'Backspace': 'backward-delete-char',
     'Delete': 'delete-char',
     'ArrowLeft': 'previous-char',
@@ -705,7 +699,7 @@ class InputContext {
 }
 
 class GrvAbstractText extends HTMLElement {
-    constructor() {
+    constructor(baseKeyMap) {
         super();
 
         this.attrCharsList = [[]];
@@ -763,6 +757,9 @@ class GrvAbstractText extends HTMLElement {
 
         this.commandTable = {};
         this.setupCommand();
+
+        this.baseKeyMap = baseKeyMap;
+        this.currentKeyMap = baseKeyMap;
 
         this.refresh();
     }
@@ -850,13 +847,22 @@ class GrvAbstractText extends HTMLElement {
 
     getCommandHandler(command) {
         if (typeof command === 'string') {
-            const handler = this.commandTable[command];
-            if (!handler) {
-                throw new Error(`Undefined command: ${command}`)
+            if (this.commandTable[command]) {
+                return this.commandTable[command];
+            } else {
+                throw new Error(`Undefined command: ${command}`);
             }
-            return handler
         } else if (command instanceof Function) {
             return command;
+        } else if (command instanceof Array) {
+            const handlers = command.map((cmd) => this.getCommandHandler(cmd));
+            return () => {
+                handlers.forEach((proc) => proc());
+            };
+        } else if (command instanceof EventMap) {
+            return () => {
+                this.currentKeyMap = command;
+            }
         } else {
             throw new Error(`Invalid command: ${command}`);
         }
@@ -865,10 +871,6 @@ class GrvAbstractText extends HTMLElement {
     callCommand(command) {
         const proc = this.getCommandHandler(command);
         proc();
-    }
-
-    bindKey(keyEvent, command) {
-        this.keyMap.set(keyEvent, command);
     }
 
     convertColorNameToRGBA(colorName) {
@@ -1756,7 +1758,8 @@ class GrvAbstractText extends HTMLElement {
         }
 
         const eventName = this.keyboardEvent2String(keyboardEvent);
-        const command = this.keyMap.get(eventName);
+        const command = this.currentKeyMap.get(eventName);
+        this.currentKeyMap = this.baseKeyMap;
         if (command) {
             const proc = this.getCommandHandler(command);
             keyboardEvent.preventDefault();
@@ -1793,7 +1796,7 @@ class GrvAbstractText extends HTMLElement {
             this.focus();
         }
 
-        const command = this.keyMap.get(this.mouseEvent2String(event, eventType));
+        const command = this.baseKeyMap.get(this.mouseEvent2String(event, eventType));
         if (command) {
             const proc = this.getCommandHandler(command);
             event.preventDefault();
@@ -1804,10 +1807,7 @@ class GrvAbstractText extends HTMLElement {
 
 export class GrvTextEdit extends GrvAbstractText {
     constructor() {
-        super();
-
-        this.mode = 'screen';
-        this.keyMap = SCREEN_KEYMAP;
+        super(SCREEN_KEYMAP);
     }
 
     handleInputText(text) {
@@ -1836,10 +1836,7 @@ export class GrvTextEdit extends GrvAbstractText {
 
 export class GrvText extends GrvAbstractText {
     constructor() {
-        super();
-
-        this.mode = 'terminal';
-        this.keyMap = TERMINAL_KEYMAP;
+        super(TERMINAL_KEYMAP);
 
         this.cursor.hide();
         this.editable = false;

@@ -119,9 +119,9 @@
         (log-format "Exit by Escape key")
         (grv-exit)))
 
-    (text'bind-key "ArrowUp" "complete-line-edit")
-    (text'bind-key "ArrowDown" "complete-line-edit")
-    (text'bind-key "C-c" "complete-line-edit")
+    (grv-text-key-map'bind "ArrowUp" "complete-line-edit")
+    (grv-text-key-map'bind "ArrowDown" "complete-line-edit")
+    (grv-text-key-map'bind "C-c" "complete-line-edit")
 
     (call-with-output-grv-text text
       (lambda (out)

@@ -41,6 +41,10 @@
 
   (export html:grv-text
           html:grv-text-edit
+          <event-map>
+          make-key-map
+          grv-text-edit-key-map
+          grv-text-key-map
           <grv-text>
           <grv-text-edit>
           call-with-output-grv-text
@@ -108,10 +112,28 @@
 
 ;;;
 
+(define-class <event-map> (<jsobject>)
+  ()
+  :jsclass "EventMap")
+
+(define (make-key-map :optional (parent #f))
+  (jslet/result ((parent))
+    (if parent
+      (result (make Text.EventMap parent))
+      (result (make Text.EventMap null)))))
+
+(define-automatic-jsobject-methods <event-map>
+  "bind")
+
 (define-class <grv-abstract-text> (<html-element>)
   ((last-update-timestamp :jsproperty "lastUpdateTimestamp"
                           :read-only? #t))
   :jsclass "GrvAbstractText")
+
+(define-global-jsobject grv-text-edit-key-map (jslet/result ()
+                                                (result Text.SCREEN_KEYMAP)))
+(define-global-jsobject grv-text-key-map (jslet/result ()
+                                           (result Text.TERMINAL_KEYMAP)))
 
 (define-class <grv-text> (<grv-abstract-text>)
   ((ediable :jsproperty "editable"
