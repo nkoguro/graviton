@@ -220,6 +220,15 @@
     (call-with-output-file filename (cut display content <>))
     (set! (~ win'last-update-timestamp) (~ win'text-edit'last-update-timestamp))))
 
+(define (write-file)
+  (let* ((win (selected-window))
+         (filename (rlet1 filename (read-from-minibuffer "Write file: ")
+                     (set! (~ win'filename) filename)
+                     (set! (~ win'name) (generate-new-window-name (sys-basename filename)))))
+         (content (~ win'text-edit'text-content)))
+    (call-with-output-file filename (cut display content <>))
+    (set! (~ win'last-update-timestamp) (~ win'text-edit'last-update-timestamp))))
+
 (define (main args)
   (let-args (cdr args)
       ((browser? "browser" #f))
@@ -237,6 +246,7 @@
       (c-x-map'bind "C-c" (^() (grv-exit)))
       (c-x-map'bind "C-f" find-file)
       (c-x-map'bind "C-s" save-window)
+      (c-x-map'bind "C-w" write-file)
       (grv-text-edit-key-map'bind "C-x" (vector c-x-map (lambda ()
                                                           (message "C-x")))))
 
