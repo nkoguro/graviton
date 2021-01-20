@@ -34,13 +34,13 @@ export function closeConnection() {
     }
 }
 
-let classIdTable = new Map();
-let objectTable = new Map();
-let objectIdTable = new Map();
+const classIdTable = new Map();
+const objectTable = new Map();
+const objectIdTable = new Map();
 let objectNextId = 0;
 
 function lookupObject(objectId) {
-    let obj = objectTable.get(objectId);
+    const obj = objectTable.get(objectId);
     if (obj === undefined) {
         throw `Object not found: ${objectId}`;
     }
@@ -77,7 +77,7 @@ function findObjectId(obj) {
 }
 
 export function freeObjectId(objectId) {
-    let obj = objectTable.get(objectId);
+    const obj = objectTable.get(objectId);
     objectIdTable.delete(obj);
     objectTable.delete(objectId);
     if (objectId < objectNextId) {
@@ -85,7 +85,7 @@ export function freeObjectId(objectId) {
     }
 }
 
-let enumTable = new Map();
+const enumTable = new Map();
 
 export function registerEnum(enumName, vals) {
     enumTable.set(enumName, vals);
@@ -96,8 +96,8 @@ function extractValueWithProperties(obj, props) {
         return obj;
     }
 
-    let val = obj[props[0]];
-    let rest = props.slice(1);
+    const val = obj[props[0]];
+    const rest = props.slice(1);
     if (Number.isInteger(val.length)) {
         return Array.from(val).map((v) => extractPropertyValue(v, rest));
     } else {
@@ -106,7 +106,7 @@ function extractValueWithProperties(obj, props) {
 }
 
 function convertObjectToArray(obj, arrayRule) {
-    let result = [];
+    const result = [];
     arrayRule.forEach((propSpec) => {
         if (propSpec instanceof Array) {
             result.push(extractValueWithProperties(obj, propSpec));
@@ -118,15 +118,15 @@ function convertObjectToArray(obj, arrayRule) {
 }
 
 function convertObjectToObject(obj, objectRule) {
-    let result = {};
+    const result = {};
     Object.keys(objectRule).forEach((k) => {
-        let rule = objectRule[k];
+        const rule = objectRule[k];
         if (rule === true) {
             result[k] = obj[k];
         } else if (typeof rule === 'string') {
             result[k] = obj[rule];
         } else if (rule instanceof Array) {
-            let [elementKey, elementRule] = rule;
+            const [elementKey, elementRule] = rule;
             result[k] = convertObjectToObject(obj[elementKey], elementRule);
         } else {
             result[k] = convertObjectToObject(obj[k], rule);
@@ -153,7 +153,7 @@ export function jsonValue(obj, rule) {
     return new JSONValue(rule ? convertObject(obj, rule) : obj);
 }
 
-let procedureTable = new Map();
+const procedureTable = new Map();
 
 function registerProcedure(futureId, proc) {
     procedureTable.set(futureId, proc);
@@ -211,98 +211,98 @@ class DataReadStream {
     }
 
     getFloat32() {
-        let v = this.dataView.getFloat32(this.position, true);
+        const v = this.dataView.getFloat32(this.position, true);
         this.position += 4;
         return v;
     }
 
     getFloat64() {
-        let v = this.dataView.getFloat64(this.position, true);
+        const v = this.dataView.getFloat64(this.position, true);
         this.position += 8;
         return v;
     }
 
     getInt16() {
-        let v = this.dataView.getInt16(this.position, true);
+        const v = this.dataView.getInt16(this.position, true);
         this.position += 2;
         return v;
     }
 
     getInt32() {
-        let v = this.dataView.getInt32(this.position, true);
+        const v = this.dataView.getInt32(this.position, true);
         this.position += 4;
         return v;
     }
 
     getInt8() {
-        let v = this.dataView.getInt8(this.position);
+        const v = this.dataView.getInt8(this.position);
         this.position += 1;
         return v;
     }
 
     getUint16() {
-        let v = this.dataView.getUint16(this.position, true);
+        const v = this.dataView.getUint16(this.position, true);
         this.position += 2;
         return v;
     }
 
     getUint32() {
-        let v = this.dataView.getUint32(this.position, true);
+        const v = this.dataView.getUint32(this.position, true);
         this.position += 4;
         return v;
     }
 
     getUint8() {
-        let v = this.dataView.getUint8(this.position);
+        const v = this.dataView.getUint8(this.position);
         this.position += 1;
         return v;
     }
 
     getBoolean() {
-        let v = this.getUint8();
+        const v = this.getUint8();
         return v !== 0;
     }
 
     getString() {
-        let data = this.getUint8Array();
+        const data = this.getUint8Array();
         return this.textDecoder.decode(data);
     }
 
     getJson() {
-        let len = this.getAny();
-        let obj = {};
+        const len = this.getAny();
+        const obj = {};
         for (let i = 0; i < len; ++i) {
-            let key = this.getAny();
-            let val = this.getAny();
+            const key = this.getAny();
+            const val = this.getAny();
             obj[key] = val;
         }
         return obj;
     }
 
     getInt8Array() {
-        let len = this.getAny();
-        let data = new Int8Array(this.dataView.buffer, this.position, len);
+        const len = this.getAny();
+        const data = new Int8Array(this.dataView.buffer, this.position, len);
         this.position += len;
         return data;
     }
 
     getUint8Array() {
-        let len = this.getAny();
-        let data = new Uint8Array(this.dataView.buffer, this.position, len);
+        const len = this.getAny();
+        const data = new Uint8Array(this.dataView.buffer, this.position, len);
         this.position += len;
         return data;
     }
 
     decodeTypedArray(getter, typedArrayClass) {
-        let len = this.getAny();
+        const len = this.getAny();
         if (IS_LITTLE_ENDIAN) {
-            let byteLen = len * typedArrayClass.BYTES_PER_ELEMENT;
-            let buf = this.dataView.buffer.slice(this.position, this.position + byteLen);
-            let data = new typedArrayClass(buf, 0, len);
+            const byteLen = len * typedArrayClass.BYTES_PER_ELEMENT;
+            const buf = this.dataView.buffer.slice(this.position, this.position + byteLen);
+            const data = new typedArrayClass(buf, 0, len);
             this.position += byteLen;
             return data;
         } else {
-            let data = new typedArrayClass(len);
+            const data = new typedArrayClass(len);
             for (let i = 0; i < len; ++i) {
                 data[i] = getter();
             }
@@ -335,12 +335,12 @@ class DataReadStream {
     }
 
     getObject() {
-        let objectId = this.getAny();
+        const objectId = this.getAny();
         return lookupObject(objectId);
     }
 
     getEnum(name) {
-        let index = this.getUint8();
+        const index = this.getUint8();
         return enumTable.get(name)[index];
     }
 
@@ -349,13 +349,13 @@ class DataReadStream {
     }
 
     getDate() {
-        let ms = this.getAny();
+        const ms = this.getAny();
         return new Date(ms);
     }
 
     getArray() {
-        let len = this.getAny();
-        let array = [];
+        const len = this.getAny();
+        const array = [];
         for (let i = 0; i < len; ++i) {
             array.push(this.getAny());
         }
@@ -363,7 +363,7 @@ class DataReadStream {
     }
 
     getProcedure() {
-        let futureId = this.getUint32();
+        const futureId = this.getUint32();
         let proc = findProcedure(futureId);
         if (!proc) {
             proc = (...args) => {
@@ -375,7 +375,7 @@ class DataReadStream {
     }
 
     getAny() {
-        let valType = this.getInt8();
+        const valType = this.getInt8();
         if (valType <= 0) {
             return -valType;
         }
@@ -446,12 +446,12 @@ class DataReadStream {
 }
 
 function encodeValueWithString(valType, str) {
-    let textEncoder = new TextEncoder();
-    let strData = textEncoder.encode(str);
-    let strLen = strData.byteLength;
-    let strLenData = encodeNumber(strLen);
-    let data = new Uint8Array(1 + strLenData.byteLength + strData.byteLength);
-    let dataView = new DataView(data.buffer);
+    const textEncoder = new TextEncoder();
+    const strData = textEncoder.encode(str);
+    const strLen = strData.byteLength;
+    const strLenData = encodeNumber(strLen);
+    const data = new Uint8Array(1 + strLenData.byteLength + strData.byteLength);
+    const dataView = new DataView(data.buffer);
     dataView.setUint8(0, valType);
     data.set(strLenData, 1);
     data.set(strData, 1 + strLenData.byteLength);
@@ -465,22 +465,22 @@ function encodeNumber(v) {
                 return Int8Array.of(-v);
             } else if (v <= 0xff) {
                 // Uint8
-                let data = new Uint8Array(1 + 1);
-                let dataView = new DataView(data.buffer);
+                const data = new Uint8Array(1 + 1);
+                const dataView = new DataView(data.buffer);
                 dataView.setInt8(0, VAL_TYPE_UINT8);
                 dataView.setUint8(1, v);
                 return data;
             } else if (v <= 0xffff) {
                 // Uint16
-                let data = new Uint8Array(1 + 2);
-                let dataView = new DataView(data.buffer);
+                const data = new Uint8Array(1 + 2);
+                const dataView = new DataView(data.buffer);
                 dataView.setInt8(0, VAL_TYPE_UINT16);
                 dataView.setUint16(1, v, true);
                 return data;
             } else if (v <= 0xffffffff) {
                 // Uint32
-                let data = new Uint8Array(1 + 4);
-                let dataView = new DataView(data.buffer);
+                const data = new Uint8Array(1 + 4);
+                const dataView = new DataView(data.buffer);
                 dataView.setInt8(0, VAL_TYPE_UINT32);
                 dataView.setUint32(1, v, true);
                 return data;
@@ -489,22 +489,22 @@ function encodeNumber(v) {
         } else {
             if (-0x80 <= v) {
                 // Int8
-                let data = new Uint8Array(1 + 1);
-                let dataView = new DataView(data.buffer);
+                const data = new Uint8Array(1 + 1);
+                const dataView = new DataView(data.buffer);
                 dataView.setInt8(0, VAL_TYPE_INT8);
                 dataView.setInt8(1, v);
                 return data;
             } else if (-0x8000 <= v) {
                 // Int16
-                let data = new Uint8Array(1 + 2);
-                let dataView = new DataView(data.buffer);
+                const data = new Uint8Array(1 + 2);
+                const dataView = new DataView(data.buffer);
                 dataView.setInt8(0, VAL_TYPE_INT16);
                 dataView.setInt16(1, v, true);
                 return data;
             } else if (-0x80000000 <= v) {
                 // Int32
-                let data = new Uint8Array(1 + 4);
-                let dataView = new DataView(data.buffer);
+                const data = new Uint8Array(1 + 4);
+                const dataView = new DataView(data.buffer);
                 dataView.setInt8(0, VAL_TYPE_INT32);
                 dataView.setInt32(1, v, true);
                 return data;
@@ -513,17 +513,17 @@ function encodeNumber(v) {
         }
     }
     // Float64
-    let data = new Uint8Array(1 + 8);
-    let dataView = new DataView(data.buffer);
+    const data = new Uint8Array(1 + 8);
+    const dataView = new DataView(data.buffer);
     dataView.setInt8(0, VAL_TYPE_FLOAT64);
     dataView.setFloat64(1, v, true);
     return data;
 }
 
 function encodeTypedArray(valType, typedArray, filler) {
-    let lenData = encodeNumber(typedArray.byteLength);
-    let data = new Uint8Array(1 + lenData.byteLength + typedArray.byteLength);
-    let dataView = new DataView(data.buffer);
+    const lenData = encodeNumber(typedArray.byteLength);
+    const data = new Uint8Array(1 + lenData.byteLength + typedArray.byteLength);
+    const dataView = new DataView(data.buffer);
     dataView.setInt8(0, valType);
     data.set(lenData, 1);
 
@@ -531,7 +531,7 @@ function encodeTypedArray(valType, typedArray, filler) {
     if (IS_LITTLE_ENDIAN) {
         data.set(typedArray, offset);
     } else {
-        let setVal = filler.bind(dataView);
+        const setVal = filler.bind(dataView);
         typedArray.forEach((v) => {
             setVal(offset, v, true);
             offset += typedArray.BYTES_PER_ELEMENT;
@@ -562,19 +562,19 @@ function encodeValue(val) {
     } else if (typeof val === 'symbol') {
         return encodeValueWithString(VAL_TYPE_SYMBOL, val);
     } else if (val instanceof Date) {
-        let msData = encodeNumber(val.getTime());
-        let data = new Uint8Array(1 + msData.byteLength);
-        let dataView = new DataView(data.buffer);
+        const msData = encodeNumber(val.getTime());
+        const data = new Uint8Array(1 + msData.byteLength);
+        const dataView = new DataView(data.buffer);
         dataView.setInt8(0, VAL_TYPE_DATE);
         data.set(msData, 1);
         return data;
     } else if (val instanceof Array) {
-        let len = val.length;
-        let lenData = encodeNumber(len);
-        let encodedElements = val.map(encodeValue);
-        let dataLen = 1 + lenData.byteLength + encodedElements.reduce((acc, v) => acc + v.byteLength, 0);
-        let data = new Uint8Array(dataLen);
-        let dataView = new DataView(data.buffer);
+        const len = val.length;
+        const lenData = encodeNumber(len);
+        const encodedElements = val.map(encodeValue);
+        const dataLen = 1 + lenData.byteLength + encodedElements.reduce((acc, v) => acc + v.byteLength, 0);
+        const data = new Uint8Array(dataLen);
+        const dataView = new DataView(data.buffer);
         dataView.setInt8(0, VAL_TYPE_ARRAY);
         data.set(lenData, 1);
         encodedElements.reduce((offset, v) => {
@@ -583,15 +583,15 @@ function encodeValue(val) {
         }, 1 + lenData.byteLength);
         return data;
     } else if (val instanceof Int8Array) {
-        let lenData = encodeNumber(val.byteLength);
-        let data = new Uint8Array(1 + lenData.byteLength + val.byteLength);
+        const lenData = encodeNumber(val.byteLength);
+        const data = new Uint8Array(1 + lenData.byteLength + val.byteLength);
         data[0] = VAL_TYPE_INT8ARRAY;
         data.set(lenData, 1);
         data.set(val, 1 + lenData.byteLength);
         return data;
     } else if (val instanceof Uint8Array || val instanceof Uint8ClampedArray) {
-        let lenData = encodeNumber(val.byteLength);
-        let data = new Uint8Array(1 + lenData.byteLength + val.byteLength);
+        const lenData = encodeNumber(val.byteLength);
+        const data = new Uint8Array(1 + lenData.byteLength + val.byteLength);
         data[0] = VAL_TYPE_UINT8ARRAY;
         data.set(lenData, 1);
         data.set(val, 1 + lenData.byteLength);
@@ -609,13 +609,13 @@ function encodeValue(val) {
     } else if (val instanceof Float64Array) {
         return encodeTypedArray(VAL_TYPE_FLOAT64ARRAY, val, DataView.prototype.setFloat64);
     } else if (val instanceof JSONValue) {
-        let obj = val.value;
-        let keys = Object.keys(obj);
-        let lenData = encodeNumber(keys.length);
-        let keyDataList = [];
-        let keyDataLen = 0;
-        let valDataList = [];
-        let valDataLen = 0;
+        const obj = val.value;
+        const keys = Object.keys(obj);
+        const lenData = encodeNumber(keys.length);
+        const keyDataList = [];
+        const keyDataLen = 0;
+        const valDataList = [];
+        const valDataLen = 0;
         for (let key in keys) {
             let keyData = encodeValue(key)
             keyDataList.push(keyData);
@@ -624,7 +624,7 @@ function encodeValue(val) {
             valDataList.push(valData);
             valDataLen += valData.byteLength;
         }
-        let data = new Uint8Array(1 + lenData.byteLength + keyDataLen + valDataLen);
+        const data = new Uint8Array(1 + lenData.byteLength + keyDataLen + valDataLen);
         data[0] = VAL_TYPE_JSON;
         let offset = 1;
         data.set(lenData, offset);
@@ -637,11 +637,11 @@ function encodeValue(val) {
         }
         return data;
     } else {
-        let classId = findClassId(val);
-        let objectId = findObjectId(val);
-        let classIdData = encodeNumber(classId);
-        let objectIdData = encodeNumber(objectId);
-        let data = new Uint8Array(1 + classIdData.byteLength + objectIdData.byteLength);
+        const classId = findClassId(val);
+        const objectId = findObjectId(val);
+        const classIdData = encodeNumber(classId);
+        const objectIdData = encodeNumber(objectId);
+        const data = new Uint8Array(1 + classIdData.byteLength + objectIdData.byteLength);
         data[0] = VAL_TYPE_OBJECT;
         let offset = 1;
         data.set(classIdData, offset);
@@ -652,10 +652,10 @@ function encodeValue(val) {
 }
 
 function encodeValueList(futureId, vals) {
-    let encodedValues = vals.map(encodeValue);
-    let dataLen = 4 + encodedValues.reduce((acc, v) => acc + v.byteLength, 0);
-    let data = new Uint8Array(dataLen);
-    let dataView = new DataView(data.buffer);
+    const encodedValues = vals.map(encodeValue);
+    const dataLen = 4 + encodedValues.reduce((acc, v) => acc + v.byteLength, 0);
+    const data = new Uint8Array(dataLen);
+    const dataView = new DataView(data.buffer);
     dataView.setUint32(0, futureId, true);
     encodedValues.reduce((offset, v) => {
         data.set(v, offset);
@@ -670,7 +670,7 @@ export function callAction(name, ...args) {
 
 export function notifyValues(futureId, ...vals) {
     if (futureId) {
-        let sendData = encodeValueList(futureId, vals);
+        const sendData = encodeValueList(futureId, vals);
         webSocket.send(sendData.buffer);
     }
 }
@@ -704,17 +704,17 @@ window.addEventListener('error', (e) => {
  * Graviton binary commands
  */
 
-let binaryCommands = [];
+const binaryCommands = [];
 
 export function registerBinaryCommand(commandId, func) {
     binaryCommands[commandId] = func;
 }
 
 function dispatchBinaryMessage(abuf) {
-    let ds = new DataReadStream(abuf);
+    const ds = new DataReadStream(abuf);
     while (ds.hasData()) {
-        let commandIndex = ds.getUint16();
-        let func = binaryCommands[commandIndex];
+        const commandIndex = ds.getUint16();
+        const func = binaryCommands[commandIndex];
         if (func) {
             try {
                 func(ds);
@@ -728,126 +728,19 @@ function dispatchBinaryMessage(abuf) {
 }
 
 /**
- * grv-object-fit-* class handling
- */
-
-const objectFitContainerDataTable = new Map();
-const objectFitDataTable = new Map();
-let objectFitContainerNextId = 0;
-let objectFitNextId = 0;
-const grvSpecialClassList = ['grv-object-fit-contain', 'grv-object-fit-cover', 'grv-object-fit-fill'];
-
-const resizeObserver = new ResizeObserver(entries => {
-    for (let entry of entries) {
-        let e = entry.target;
-        let containerData = objectFitContainerDataTable.get(e.dataset.grvObjectFitContainerId);
-        if (containerData) {
-            containerData.handler();
-        }
-
-        let objectFitData = objectFitDataTable.get(e.dataset.grvObjectFitId);
-        if (objectFitData) {
-            objectFitData.handler();
-        }
-    }
-});
-
-export function processGrvSpecialClass(element) {
-    if (!(element instanceof HTMLElement)) {
-        return;
-    }
-
-    let selector = grvSpecialClassList.map((klass) => `.${klass}`).join(',');
-    Array.from(element.querySelectorAll(selector)).forEach((e) => {
-        processGrvSpecialClassInner(e);
-    });
-}
-
-function processGrvSpecialClassInner(element) {
-    let grvSpecialClass = grvSpecialClassList.find((className) => {
-        return element.classList.contains(className);
-    });
-    if (!grvSpecialClass) {
-        return;
-    }
-
-    let containerElement = undefined;
-    for (let e = element.parentElement; e; e = e.parentElement) {
-        let computedStyle = window.getComputedStyle(e);
-        if (computedStyle.position !== 'static') {
-            containerElement = e;
-            break;
-        }
-    }
-    if (!containerElement) {
-        containerElement = document.body;
-    }
-    let containerData = objectFitContainerDataTable.get(containerElement.dataset.grvObjectFitContainerId);
-    if (!containerData) {
-        let containerId = `container${objectFitContainerNextId++}`;
-        let containerWidthVar = `--grv-${containerId}-width`;
-        let containerHeightVar = `--grv-${containerId}-height`;
-        let handler = () => {
-            let rect = containerElement.getBoundingClientRect();
-            containerElement.style.setProperty(containerWidthVar, rect.width);
-            containerElement.style.setProperty(containerHeightVar, rect.height);
-        };
-        containerData = {
-            'width-var': containerWidthVar,
-            'height-var': containerHeightVar,
-            'handler': handler
-        }
-        containerElement.dataset.grvObjectFitContainerId = containerId;
-        objectFitContainerDataTable.set(containerId, containerData);
-        handler();
-        resizeObserver.observe(containerElement);
-    }
-
-    let objectFitId = `object${objectFitNextId++}`;
-    let objectWidthVar = '--grv-object-width';
-    let objectHeightVar = '--grv-object-height';
-    let handler = () => {
-        element.style.setProperty(objectWidthVar, element.offsetWidth);
-        element.style.setProperty(objectHeightVar, element.offsetHeight);
-    }
-    let objectData = {
-        'handler': handler
-    };
-    element.dataset.grvObjectFitId = objectFitId;
-    objectFitDataTable.set(objectFitId, objectData);
-    switch (grvSpecialClass) {
-        case 'grv-object-fit-contain':
-            element.style.transform = `translate(-50%, -50%) scale(min(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar})))`;
-            break;
-        case 'grv-object-fit-cover':
-            element.style.transform = `translate(-50%, -50%) scale(max(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar})))`;
-            break;
-        case 'grv-object-fit-fill':
-            element.style.transform = `translate(-50%, -50%) scale(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar}))`;
-            break;
-    }
-    handler();
-    resizeObserver.observe(element);
-}
-
-window.addEventListener('load', () => {
-    processGrvSpecialClass(document.body);
-});
-
-/**
  * funcall & make
  */
 
 export function funcall(calleeName, args) {
-    let [f, self] = calleeName.split(".").reduce((acc, name) => {
-        let [obj, self] = acc;
+    const [f, self] = calleeName.split(".").reduce((acc, name) => {
+        const [obj, self] = acc;
         return [obj[name], obj];
     }, [window, undefined]);
     return f.apply(self, args);
 }
 
 export function makeJSObject(className, args) {
-    let klass = window[className];
+    const klass = window[className];
     if (!klass) {
         throw `Class not found: ${className}`;
     }
@@ -859,7 +752,7 @@ export function makeJSObject(className, args) {
  */
 
 let animationFrameServerCallback = undefined;
-let animationFrameCallbacks = [];
+const animationFrameCallbacks = [];
 
 function handleAnimationFrame(timestamp) {
     if (animationFrameServerCallback) {
@@ -883,7 +776,7 @@ export function registerAnimationFrameCallback(callback) {
 }
 
 export function unregisterAnimationFrameCallback(callback) {
-    let i = animationFrameCallbacks.findIndex((x) => x === callback);
+    const i = animationFrameCallbacks.findIndex((x) => x === callback);
     if (i < 0) {
         return;
     }

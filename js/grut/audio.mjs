@@ -249,12 +249,12 @@ class SoundTrack {
                 this.invokeCompletionResolves();
                 return false;
             case 'playing': {
-                let rangeStartMs = audioContext.currentTime * 1000;
-                let rangeEndMs = rangeStartMs + soundPlayIntervalMs * 2;
+                const rangeStartMs = audioContext.currentTime * 1000;
+                const rangeEndMs = rangeStartMs + soundPlayIntervalMs * 2;
                 while (this.soundletQueue.length > 0) {
-                    let soundlet = this.soundletQueue[0];
-                    let startTime = this.computeNextStartTime(now);
-                    let startTimeMs = startTime * 1000;
+                    const soundlet = this.soundletQueue[0];
+                    const startTime = this.computeNextStartTime(now);
+                    const startTimeMs = startTime * 1000;
                     if (startTimeMs <= rangeEndMs) {
                         soundlet.play(startTime);
                         this.releasedTime = startTime + soundlet.soundLength;
@@ -353,7 +353,7 @@ class SoundTrackManager {
 
 
     enqueue(trackName, soundDataList) {
-        let track = this.getTrack(trackName);
+        const track = this.getTrack(trackName);
         soundDataList.forEach((soundData) => {
             const soundlet = this.decodeSoundData(soundData);
             if (soundlet) {
@@ -363,9 +363,9 @@ class SoundTrackManager {
     }
 
     start(trackNames) {
-        let now = audioContext.currentTime;
-        let tracks = trackNames.map((name) => {
-            let track = this.getTrack(name);
+        const now = audioContext.currentTime;
+        const tracks = trackNames.map((name) => {
+            const track = this.getTrack(name);
             track.state = 'playing';
             return track;
         });

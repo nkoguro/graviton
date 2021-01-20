@@ -10,13 +10,13 @@ const grutSpecialClassList = ['grut-object-fit-contain', 'grut-object-fit-cover'
 
 const resizeObserver = new ResizeObserver(entries => {
     for (let entry of entries) {
-        let e = entry.target;
-        let containerData = objectFitContainerDataTable.get(e.dataset.grutObjectFitContainerId);
+        const e = entry.target;
+        const containerData = objectFitContainerDataTable.get(e.dataset.grutObjectFitContainerId);
         if (containerData) {
             containerData.handler();
         }
 
-        let objectFitData = objectFitDataTable.get(e.dataset.grutObjectFitId);
+        const objectFitData = objectFitDataTable.get(e.dataset.grutObjectFitId);
         if (objectFitData) {
             objectFitData.handler();
         }
@@ -28,7 +28,7 @@ function processGrutSpecialClass(element) {
         return;
     }
 
-    let selector = grutSpecialClassList.map((klass) => `.${klass}`).join(',');
+    const selector = grutSpecialClassList.map((klass) => `.${klass}`).join(',');
     Array.from(element.querySelectorAll(selector)).forEach((e) => {
         processGrutSpecialClassInner(e);
     });
@@ -44,7 +44,7 @@ function processGrutSpecialClassInner(element) {
 
     let containerElement = undefined;
     for (let e = element.parentElement; e; e = e.parentElement) {
-        let computedStyle = window.getComputedStyle(e);
+        const computedStyle = window.getComputedStyle(e);
         if (computedStyle.position !== 'static') {
             containerElement = e;
             break;
@@ -84,14 +84,14 @@ function processGrutSpecialClassInner(element) {
         resizeObserver.observe(containerElement);
     }
 
-    let objectFitId = `object${objectFitNextId++}`;
-    let objectWidthVar = '--grut-object-width';
-    let objectHeightVar = '--grut-object-height';
-    let handler = () => {
+    const objectFitId = `object${objectFitNextId++}`;
+    const objectWidthVar = '--grut-object-width';
+    const objectHeightVar = '--grut-object-height';
+    const handler = () => {
         element.style.setProperty(objectWidthVar, element.offsetWidth);
         element.style.setProperty(objectHeightVar, element.offsetHeight);
     }
-    let objectData = {
+    const objectData = {
         'handler': handler
     };
     element.dataset.grutObjectFitId = objectFitId;
