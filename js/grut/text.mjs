@@ -43,8 +43,8 @@ class TextAttribute {
     }
 
     blend(attr) {
-        let newCssClasses = this.cssClasses.concat(attr.cssClasses);
-        let newStyleJson = Object.assign({}, this.cssStyleJson);
+        const newCssClasses = this.cssClasses.concat(attr.cssClasses);
+        const newStyleJson = Object.assign({}, this.cssStyleJson);
         Object.keys(attr.cssStyleJson).forEach((key) => {
             newStyleJson[key] = attr.cssStyleJson[key];
         });
@@ -66,8 +66,8 @@ class TextAttribute {
             }
         }
 
-        let thisCssStyleKeys = Object.keys(this.cssStyleJson);
-        let thatCssStyleKeys = Object.keys(obj.cssStyleJson);
+        const thisCssStyleKeys = Object.keys(this.cssStyleJson);
+        const thatCssStyleKeys = Object.keys(obj.cssStyleJson);
         if (thisCssStyleKeys.length !== thatCssStyleKeys.length) {
             return false;
         }
@@ -134,7 +134,7 @@ class TextCursor {
         if (row < 0 || this.textEdit.rows <= row) {
             throw new RangeError('Invalid cursor row');
         }
-        let prevRow = this.row;
+        const prevRow = this.row;
         this._row = row;
         this.textEdit.requestUpdateRow(prevRow, this.row);
     }
@@ -227,10 +227,10 @@ class LineUpdater {
     update() {
         let i = 0;
         for (i = 0; i < this.attrChars.length; ++i) {
-            let attrChar = this.attrChars[i];
-            let attr = this.computeAttr(attrChar.attribute, i, false);
-            let c = attrChar.character;
-            let span = this.spanIter.next();
+            const attrChar = this.attrChars[i];
+            const attr = this.computeAttr(attrChar.attribute, i, false);
+            const c = attrChar.character;
+            const span = this.spanIter.next();
             if (this.context.cursor.existsAt(i, this.row)) {
                 span.id = MAIN_CURSOR_ID;
             } else {
@@ -241,8 +241,8 @@ class LineUpdater {
         }
 
         if (this.context.cursor.existsAt(i, this.row)) {
-            let attr = this.computeAttr(DEFAULT_ATTRIBUTE, i, true);
-            let span = this.spanIter.next();
+            const attr = this.computeAttr(DEFAULT_ATTRIBUTE, i, true);
+            const span = this.spanIter.next();
             span.id = MAIN_CURSOR_ID;
             attr.updateSpan(span);
             span.innerText = ' ';
@@ -260,19 +260,19 @@ class SpanIterator {
 
     next() {
         if (this.node instanceof HTMLBRElement) {
-            let span = document.createElement('span');
+            const span = document.createElement('span');
             this.lineDiv.insertBefore(span, this.node);
             return span;
         } else {
             // lineDiv can have <span> or <br> only. So this.node isn't <br>, it must be <span>.
-            let result = this.node;
+            const result = this.node;
             this.node = this.node.nextSibling;
             return result;
         }
     }
 
     purge() {
-        let removeNodes = [];
+        const removeNodes = [];
         let node = this.node;
         while (!(node instanceof HTMLBRElement)) {
             removeNodes.push(node);
@@ -306,8 +306,8 @@ class TextLine {
     }
 
     splitAt(column) {
-        let prevAttrChars = this.attributedCharacters.slice(0, column);
-        let nextAttrChars = this.attributedCharacters.slice(column);
+        const prevAttrChars = this.attributedCharacters.slice(0, column);
+        const nextAttrChars = this.attributedCharacters.slice(column);
         return [prevAttrChars, nextAttrChars];
     }
 }
@@ -352,7 +352,7 @@ class TextEditRefreshController {
     }
 }
 
-let textEditRefreshController = new TextEditRefreshController();
+const textEditRefreshController = new TextEditRefreshController();
 
 export class EventMap {
     constructor(parent) {
@@ -361,13 +361,13 @@ export class EventMap {
     }
 
     static create(map = {}) {
-        let eventMap = new EventMap(null);
+        const eventMap = new EventMap(null);
         eventMap.setAll(map);
         return eventMap;
     }
 
     get(event) {
-        let val = this.map[event];
+        const val = this.map[event];
         if (val === false) {
             return undefined;
         } else if (val) {
@@ -488,7 +488,7 @@ class TextMark {
     }
 
     contains(col, row) {
-        let [startCol, startRow, endCol, endRow] = this.region();
+        const [startCol, startRow, endCol, endRow] = this.region();
 
         if (startRow === endRow) {
             return startRow === row && startCol <= col && col < endCol;
@@ -621,9 +621,9 @@ class AlternateScreen {
     swap() {
         this.grvText.requestAllUpdate();
 
-        let attrCharsList = this.grvText.attrCharsList;
-        let scrollTop = this.grvText.shadowRoot.host.scrollTop;
-        let cursor = this.grvText.cursor;
+        const attrCharsList = this.grvText.attrCharsList;
+        const scrollTop = this.grvText.shadowRoot.host.scrollTop;
+        const cursor = this.grvText.cursor;
 
         this.grvText.attrCharsList = this.attrCharsList;
         this.grvText.shadowRoot.host.scrollTop = this.scrollTop;
@@ -721,7 +721,7 @@ class GrvAbstractText extends HTMLElement {
         this.inputArea = this.createInputArea();
 
         this.attachShadow({ mode: 'open', delegatesFocus: true });
-        let style = document.createElement('style');
+        const style = document.createElement('style');
         style.textContent = TEXT_CONSOLE_STYLE;
         this.shadowRoot.appendChild(style);
         this.view = document.createElement('div');
@@ -874,24 +874,24 @@ class GrvAbstractText extends HTMLElement {
     }
 
     convertColorNameToRGBA(colorName) {
-        let canvas = document.createElement('canvas');
+        const canvas = document.createElement('canvas');
         canvas.width = 1;
         canvas.height = 1;
-        let ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d');
         ctx.fillStyle = colorName;
         ctx.fillRect(0, 0, 1, 1);
         return ctx.getImageData(0, 0, 1, 1).data;
     }
 
     updateStyle() {
-        let viewStyle = window.getComputedStyle(this);
+        const viewStyle = window.getComputedStyle(this);
         this.view.style.setProperty(BACKGROUND_COLOR_PROPERTY, viewStyle['background-color']);
-        let color = viewStyle['color'];
+        const color = viewStyle['color'];
         this.view.style.setProperty(COLOR_PROPERTY, color);
-        let colorRGBA = this.convertColorNameToRGBA(color);
-        let cursorColor = `rgba(${colorRGBA[0]},${colorRGBA[1]},${colorRGBA[2]},0.8)`;
+        const colorRGBA = this.convertColorNameToRGBA(color);
+        const cursorColor = `rgba(${colorRGBA[0]},${colorRGBA[1]},${colorRGBA[2]},0.8)`;
         this.view.style.setProperty(CURSOR_COLOR_PROPERTY, cursorColor);
-        let styleTabSize = viewStyle['tabSize'];
+        const styleTabSize = viewStyle['tabSize'];
         if (styleTabSize === '') {
             this.view.style['tabSize'] = '8';
             this.tabSize = 8;
@@ -902,10 +902,10 @@ class GrvAbstractText extends HTMLElement {
         this.foregroundColor = viewStyle['color'];
         this.backgroundColor = viewStyle['backgroundColor'];
 
-        let dummyDiv = document.createElement('div');
+        const dummyDiv = document.createElement('div');
         dummyDiv.innerText = 'M';
         this.view.appendChild(dummyDiv);
-        let charRect = dummyDiv.getBoundingClientRect();
+        const charRect = dummyDiv.getBoundingClientRect();
         this.lineHeight = charRect.height;
         this.characterWidth = charRect.width;
         this.view.removeChild(dummyDiv);
@@ -925,7 +925,7 @@ class GrvAbstractText extends HTMLElement {
         if (style instanceof CSSStyleDeclaration) {
             styleJson = {};
             for (let i = 0; i < style.length; ++i) {
-                let key = style.item(i);
+                const key = style.item(i);
                 styleJson[key] = style[key];
             }
         } else {
@@ -960,7 +960,7 @@ class GrvAbstractText extends HTMLElement {
     ///
 
     createInputArea() {
-        let inputArea = document.createElement('span');
+        const inputArea = document.createElement('span');
         inputArea.classList.add('input-area');
         inputArea.tabIndex = 0;
         inputArea.contentEditable = true;
@@ -983,15 +983,15 @@ class GrvAbstractText extends HTMLElement {
     }
 
     injectInputArea() {
-        let cursor = this.shadowRoot.getElementById(MAIN_CURSOR_ID);
+        const cursor = this.shadowRoot.getElementById(MAIN_CURSOR_ID);
         if (cursor) {
-            let parent = cursor.parentElement;
+            const parent = cursor.parentElement;
             parent.insertBefore(this.inputArea, cursor);
         }
     }
 
     removeInputArea() {
-        let currentInputAreaLine = this.inputArea.parentElement;
+        const currentInputAreaLine = this.inputArea.parentElement;
         if (!currentInputAreaLine) {
             return;
         }
@@ -1021,10 +1021,10 @@ class GrvAbstractText extends HTMLElement {
     ///
 
     findLineDivAt(clientY) {
-        let lineDivList = this.view.childNodes;
+        const lineDivList = this.view.childNodes;
         for (let row = 0; row < lineDivList.length; ++row) {
-            let lineDiv = lineDivList[row];
-            let rect = lineDiv.getBoundingClientRect();
+            const lineDiv = lineDivList[row];
+            const rect = lineDiv.getBoundingClientRect();
             if (rect.top <= clientY && clientY <= rect.bottom) {
                 return [row, lineDiv];
             }
@@ -1035,7 +1035,7 @@ class GrvAbstractText extends HTMLElement {
     computeColumn(row, lineDiv, clientX, clientY) {
         let span = null;
         let offset = 0;
-        let childNodes = lineDiv.childNodes;
+        const childNodes = lineDiv.childNodes;
         for (let i = 0; i < childNodes.length; ++i) {
             let node = childNodes[i];
             if (node instanceof HTMLSpanElement && !node.isContentEditable) {
@@ -1049,8 +1049,8 @@ class GrvAbstractText extends HTMLElement {
         }
 
         if (span) {
-            let range = new Range();
-            let text = span.firstChild;
+            const range = new Range();
+            const text = span.firstChild;
             let charIndex = 0;
             let i = 0;
             while (i < text.length) {
@@ -1070,7 +1070,7 @@ class GrvAbstractText extends HTMLElement {
             }
         }
 
-        let line = this.attrCharsList[row];
+        const line = this.attrCharsList[row];
         if (line) {
             return line.length;
         } else {
@@ -1080,9 +1080,9 @@ class GrvAbstractText extends HTMLElement {
 
     computeTextPosition(clientX, clientY) {
         this.refresh();
-        let [row, lineDiv] = this.findLineDivAt(clientY);
+        const [row, lineDiv] = this.findLineDivAt(clientY);
         if (lineDiv) {
-            let col = this.computeColumn(row, lineDiv, clientX, clientY);
+            const col = this.computeColumn(row, lineDiv, clientX, clientY);
             if (col !== void 0) {
                 return [col, row];
             }
@@ -1119,12 +1119,12 @@ class GrvAbstractText extends HTMLElement {
         }
 
         if (this.rows <= row) {
-            let numAdditionalRows = row - this.rows + 1;
+            const numAdditionalRows = row - this.rows + 1;
             for (let i = 0; i < numAdditionalRows; ++i) {
                 this.appendEmptyLine();
             }
         }
-        let line = this.line(row);
+        const line = this.line(row);
         if (line.length < col) {
             let filler = new Array(col - line.length).fill(DEFAULT_ATTRIBUTE.withCharacter(' '));
             line.splice(line.length, 0, ...filler);
@@ -1134,9 +1134,9 @@ class GrvAbstractText extends HTMLElement {
     }
 
     splitLine() {
-        let column = this.cursor.column;
-        let row = this.cursor.row;
-        let line = this.line();
+        const column = this.cursor.column;
+        const row = this.cursor.row;
+        const line = this.line();
         this.attrCharsList.splice(row, 1, line.slice(0, column), line.slice(column));
         for (let i = row; i < this.rows; ++i) {
             this.requestUpdateRow(i);
@@ -1145,7 +1145,7 @@ class GrvAbstractText extends HTMLElement {
     }
 
     concatLine(row = this.cursor.row) {
-        let line = this.line(row);
+        const line = this.line(row);
         line.splice(line.length, 0, ...this.attrCharsList[row + 1]);
         this.removeLine(row + 1);
     }
@@ -1178,8 +1178,8 @@ class GrvAbstractText extends HTMLElement {
     }
 
     copyToClipboard(str) {
-        let activeElement = document.activeElement;
-        let textArea = document.createElement('textarea');
+        const activeElement = document.activeElement;
+        const textArea = document.createElement('textarea');
         textArea.value = str;
         document.body.appendChild(textArea);
         textArea.select();
@@ -1194,15 +1194,15 @@ class GrvAbstractText extends HTMLElement {
         }
 
         let str = '';
-        let [startCol, startRow, endCol, endRow] = this.mark.region();
+        const [startCol, startRow, endCol, endRow] = this.mark.region();
         if (startRow === endRow) {
-            let line = this.line(startRow);
+            const line = this.line(startRow);
             str = this.attrChars2String(line.slice(startCol, endCol));
             if (remove) {
                 line.splice(startCol, endCol - startCol);
             }
         } else {
-            let lastLine = this.line(endRow);
+            const lastLine = this.line(endRow);
             str = this.attrChars2String(lastLine.slice(0, endCol));
             if (remove) {
                 lastLine.splice(0, endCol);
@@ -1213,7 +1213,7 @@ class GrvAbstractText extends HTMLElement {
                     this.removeLine(row);
                 }
             }
-            let firstLine = this.line(startRow);
+            const firstLine = this.line(startRow);
             str = this.attrChars2String(firstLine.slice(startCol)) + '\n' + str;
             if (remove) {
                 firstLine.splice(startCol, firstLine.length - startCol);
@@ -1226,7 +1226,7 @@ class GrvAbstractText extends HTMLElement {
             this.cursor.row = startRow;
         }
         if (copyToClipboard) {
-            let cb = navigator.clipboard || window.clipboard;
+            const cb = navigator.clipboard || window.clipboard;
             if (cb) {
                 cb.writeText(str);
             }
@@ -1249,14 +1249,14 @@ class GrvAbstractText extends HTMLElement {
             this.processMarkRegion(true, false);
         }
 
-        let attr = this.currentAttribute;
+        const attr = this.currentAttribute;
         switch (c) {
             case '\n':
                 this.moveCursorFreely(this.newlineMode ? 0 : this.cursor.column, this.cursor.row + 1);
                 break;
             case '\t':
                 if (this.isSoftTab) {
-                    let spaceLen = this.computeTabSpaceWidthAt(this.cursor.column);
+                    const spaceLen = this.computeTabSpaceWidthAt(this.cursor.column);
                     this.line().splice(this.cursor.column, 0, ...attr.withCharacters(new Array(spaceLen).fill(' ')));
                     this.cursor.column += spaceLen;
                 } else {
@@ -1281,11 +1281,11 @@ class GrvAbstractText extends HTMLElement {
     }
 
     insertText(text) {
-        let interpreter = new ANSIEscapeSequenceInterpreter(this, (c) => { this.insertCharacter(c); });
-        let strLines = text.split('\n');
+        const interpreter = new ANSIEscapeSequenceInterpreter(this, (c) => { this.insertCharacter(c); });
+        const strLines = text.split('\n');
         for (let i = 0; i < strLines.length; ++i) {
             let str = strLines[i];
-            let isLastStr = i === strLines.length - 1;
+            const isLastStr = i === strLines.length - 1;
             if (!isLastStr && str[str.length - 1] === '\r') {
                 str = str.substring(0, str.length - 1);
             }
@@ -1311,14 +1311,14 @@ class GrvAbstractText extends HTMLElement {
             this.processMarkRegion(true, false);
         }
 
-        let attr = this.currentAttribute;
+        const attr = this.currentAttribute;
         switch (c) {
             case '\n':
                 this.moveCursorFreely(this.newlineMode ? 0 : this.cursor.column, this.cursor.row + 1);
                 break;
             case '\t':
                 if (this.isSoftTab) {
-                    let spaceLen = this.computeTabSpaceWidthAt(this.cursor.column);
+                    const spaceLen = this.computeTabSpaceWidthAt(this.cursor.column);
                     this.line().splice(this.cursor.column, spaceLen, ...attr.withCharacters(new Array(spaceLen).fill(' ')));
                     this.cursor.column += spaceLen;
                 } else {
@@ -1342,7 +1342,7 @@ class GrvAbstractText extends HTMLElement {
     }
 
     printText(text) {
-        let interpreter = new ANSIEscapeSequenceInterpreter(this, (c) => { this.printCharacter(c); });
+        const interpreter = new ANSIEscapeSequenceInterpreter(this, (c) => { this.printCharacter(c); });
         interpreter.processString(text);
     }
 
@@ -1443,7 +1443,7 @@ class GrvAbstractText extends HTMLElement {
     }
 
     computeTabAwareLengthFromColumn(column, row) {
-        let attrChars = this.attrCharsList[row];
+        const attrChars = this.attrCharsList[row];
         let taLen = 0;
         let i;
         for (i = 0; i < attrChars.length; ++i) {
@@ -1460,7 +1460,7 @@ class GrvAbstractText extends HTMLElement {
     }
 
     computeColumnFromTabAwareLength(taLen, row) {
-        let attrChars = this.attrCharsList[row];
+        const attrChars = this.attrCharsList[row];
         let l = 0;
         let i;
         for (i = 0; i < attrChars.length; ++i) {
@@ -1479,8 +1479,8 @@ class GrvAbstractText extends HTMLElement {
     nextLine(n = 1) {
         this.updateMarkBeforeCursorMovementIfNeeded();
 
-        let curRow = this.cursor.row;
-        let taLen = this.computeTabAwareLengthFromColumn(this.cursor.rawColumn, curRow);
+        const curRow = this.cursor.row;
+        const taLen = this.computeTabAwareLengthFromColumn(this.cursor.rawColumn, curRow);
         let newRow = this.cursor.row + n;
         if (this.rows <= newRow) {
             newRow = this.rows - 1;
@@ -1496,8 +1496,8 @@ class GrvAbstractText extends HTMLElement {
     previousLine(n = 1) {
         this.updateMarkBeforeCursorMovementIfNeeded();
 
-        let curRow = this.cursor.row;
-        let taLen = this.computeTabAwareLengthFromColumn(this.cursor.rawColumn, curRow);
+        const curRow = this.cursor.row;
+        const taLen = this.computeTabAwareLengthFromColumn(this.cursor.rawColumn, curRow);
         let newRow = this.cursor.row - n;
         if (newRow < 0) {
             newRow = 0;
@@ -1552,7 +1552,7 @@ class GrvAbstractText extends HTMLElement {
             return;
         }
 
-        let [, startRow, , endRow] = this.mark.region();
+        const [, startRow, , endRow] = this.mark.region();
         for (let row = startRow; row <= endRow; ++row) {
             this.requestUpdateRow(row);
         }
@@ -1661,13 +1661,13 @@ class GrvAbstractText extends HTMLElement {
             return;
         }
 
-        let hasFocus = document.activeElement === this;
+        const hasFocus = document.activeElement === this;
         this.removeInputArea();
 
-        let context = new UpdateContext(this.cursor, this.mark);
-        let lineDivNodes = this.view.childNodes;
+        const context = new UpdateContext(this.cursor, this.mark);
+        const lineDivNodes = this.view.childNodes;
         this.updatedRowSet.forEach((row) => {
-            let attrChars = this.attrCharsList[row];
+            const attrChars = this.attrCharsList[row];
             if (!attrChars) {
                 Array.from(this.view.childNodes).slice(row).forEach((lineDiv) => {
                     this.view.removeChild(lineDiv);
@@ -1676,12 +1676,12 @@ class GrvAbstractText extends HTMLElement {
             }
 
             for (let i = 0; i < row - lineDivNodes.length + 1; ++i) {
-                let newLineDiv = document.createElement('div');
+                const newLineDiv = document.createElement('div');
                 newLineDiv.appendChild(document.createElement('br'));
                 this.view.appendChild(newLineDiv);
             }
-            let spanIter = new SpanIterator(lineDivNodes[row]);
-            let updater = new LineUpdater(context, row, attrChars, spanIter);
+            const spanIter = new SpanIterator(lineDivNodes[row]);
+            const updater = new LineUpdater(context, row, attrChars, spanIter);
             updater.update();
         });
         this.updatedRowSet.clear();
@@ -1744,7 +1744,7 @@ class GrvAbstractText extends HTMLElement {
         if (keyboardEvent.shiftKey && keyboardEvent.key !== 'Shift') {
             str += 'S-';
         }
-        let key = keyboardEvent.key === ' ' ? 'Space' : keyboardEvent.key;
+        const key = keyboardEvent.key === ' ' ? 'Space' : keyboardEvent.key;
         return str + key;
     }
 
@@ -1881,7 +1881,7 @@ export class GrvText extends GrvAbstractText {
 
     pushEditHandler(handler) {
         if (this.pendingEditHandlers.length < this._pendingEditHandlerMaxLength) {
-            let currentContext = this.inputContext;
+            const currentContext = this.inputContext;
             this.pendingEditHandlers.push(() => {
                 this.callClosureWithInputContext(currentContext, handler);
             });
@@ -2010,7 +2010,7 @@ export class GrvText extends GrvAbstractText {
         }
 
         setTimeout(() => {
-            let handler = this.pendingEditHandlers.shift();
+            const handler = this.pendingEditHandlers.shift();
             if (handler) {
                 handler();
                 this.processPendingEditHandlers();
@@ -2115,9 +2115,9 @@ class ANSIEscapeSequenceInterpreter {
     }
 
     processString(string) {
-        let chars = Array.from(string);
+        const chars = Array.from(string);
         while (chars.length > 0) {
-            let c = chars.shift();
+            const c = chars.shift();
             switch (c) {
                 case '\u001b': {
                     this.processEscapeSequence(chars);
@@ -2132,7 +2132,7 @@ class ANSIEscapeSequenceInterpreter {
     }
 
     processEscapeSequence(chars) {
-        let c = chars.shift();
+        const c = chars.shift();
         switch (c) {
             case '[':
                 this.processCSISequence(chars);
@@ -2143,9 +2143,9 @@ class ANSIEscapeSequenceInterpreter {
     }
 
     processCSISequence(chars) {
-        let stack = [];
+        const stack = [];
         this.parseCSIParams(chars, stack);
-        let c = chars.shift();
+        const c = chars.shift();
         switch (c) {
             case ' ':
                 if (chars.shift() === 'q') {
@@ -2218,7 +2218,7 @@ class ANSIEscapeSequenceInterpreter {
             // Restore Saved Cursor Position
             case 'u':
                 if (this.cursorSaveStack.length > 0) {
-                    let [col, row] = this.cursorSaveStack.pop();
+                    const [col, row] = this.cursorSaveStack.pop();
                     this.textEdit.cursor.column = col;
                     this.textEdit.cursor.row = row;
                 }
@@ -2235,9 +2235,9 @@ class ANSIEscapeSequenceInterpreter {
     }
 
     processCSIQuestionSequence(chars) {
-        let stack = [];
+        const stack = [];
         this.parseCSIParams(chars, stack);
-        let c = chars.shift();
+        const c = chars.shift();
         switch (c) {
             // DECSET
             case 'h':
@@ -2252,9 +2252,9 @@ class ANSIEscapeSequenceInterpreter {
     }
 
     processCSIGTSequence(chars) {
-        let stack = [];
+        const stack = [];
         this.parseCSIParams(chars, stack);
-        let c = chars.shift();
+        const c = chars.shift();
         switch (c) {
             // DECSET
             case 'h':
@@ -2390,7 +2390,7 @@ class ANSIEscapeSequenceInterpreter {
         }
         let n = 0;
         while (chars.length > 0) {
-            let c = chars[0];
+            const c = chars[0];
             if ('0' <= c && c <= '9') {
                 n = 10 * n + (c.charCodeAt(0) - 0x30);
                 chars.shift();
@@ -2402,22 +2402,22 @@ class ANSIEscapeSequenceInterpreter {
     }
 
     clearLineAfterCursor() {
-        let line = this.textEdit.line();
-        let col = this.textEdit.cursor.column;
+        const line = this.textEdit.line();
+        const col = this.textEdit.cursor.column;
         line.splice(col, line.length - col);
     }
 
     clearLineBeforeCursor() {
-        let line = this.textEdit.line();
-        let col = this.textEdit.cursor.column;
-        let len = Math.min(col + 1, line.length);
-        let filler = new Array(len).fill(DEFAULT_ATTRIBUTE.withCharacter(' '));
+        const line = this.textEdit.line();
+        const col = this.textEdit.cursor.column;
+        const len = Math.min(col + 1, line.length);
+        const filler = new Array(len).fill(DEFAULT_ATTRIBUTE.withCharacter(' '));
         line.splice(0, len, ...filler);
     }
 
     clearScreenAfterCursor() {
         this.clearLineAfterCursor();
-        let numRows = this.textEdit.rows;
+        const numRows = this.textEdit.rows;
         for (let i = numRows - 1; i > this.textEdit.cursor.row; --i) {
             this.removeLine(i);
         }
@@ -2426,7 +2426,7 @@ class ANSIEscapeSequenceInterpreter {
     clearScreenBeforeCursor() {
         this.clearLineBeforeCursor();
         for (let i = 0; i < this.textEdit.cursor.row; ++i) {
-            let line = this.textEdit.line(i);
+            const line = this.textEdit.line(i);
             line.splice(0, line.length);
         }
     }
@@ -2481,7 +2481,7 @@ class ANSIEscapeSequenceInterpreter {
         let reverse = false;
 
         while (stack.length > 0) {
-            let code = stack.shift();
+            const code = stack.shift();
             switch (code) {
                 // Reset/Normal
                 case 0:
@@ -2573,7 +2573,7 @@ class ANSIEscapeSequenceInterpreter {
             }
         }
 
-        let style = {};
+        const style = {};
         if (reverse) {
             style['color'] = backgroundColor || this.textEdit.backgroundColor;
             style['background-color'] = foregroundColor || this.textEdit.foregroundColor;
@@ -2597,7 +2597,7 @@ class ANSIEscapeSequenceInterpreter {
 
     // TODO: Make the color customizable
     color2rgb(name) {
-        let table = {
+        const table = {
             'black': 'rgb(0,0,0)',
             'red': 'rgb(170,0,0)',
             'green': 'rgb(0,170,0)',
@@ -2619,7 +2619,7 @@ class ANSIEscapeSequenceInterpreter {
     }
 
     parseBasicColor(n) {
-        let colorTable = [
+        const colorTable = [
             'black',
             'red',
             'green',
@@ -2641,21 +2641,21 @@ class ANSIEscapeSequenceInterpreter {
     }
 
     parseColor(stack) {
-        let mode = stack.shift();
+        const mode = stack.shift();
         switch (mode) {
             // 8 bit
             case 5: {
-                let n = stack.shift();
+                const n = stack.shift();
                 if (0 <= n && n <= 15) {
                     return this.parseBasicColor(n);
                 } else if (16 <= n && n <= 231) {
-                    let v = n - 16;
-                    let b = v % 6;
-                    let g = ((v - b) / 6) % 6;
-                    let r = ((v - b - 6 * g) / 36);
+                    const v = n - 16;
+                    const b = v % 6;
+                    const g = ((v - b) / 6) % 6;
+                    const r = ((v - b - 6 * g) / 36);
                     return `rgb(${Math.ceil((255 / 6) * (r + 1))},${Math.ceil((255 / 6) * (g + 1))},${Math.ceil((255 / 6) * (b + 1))})`;
                 } else if (232 <= n && n <= 255) {
-                    let v = Math.ceil((255 / 24) * (n - 231));
+                    const v = Math.ceil((255 / 24) * (n - 231));
                     return `rgb(${v},${v},${v})`;
                 } else {
                     return '';
@@ -2663,9 +2663,9 @@ class ANSIEscapeSequenceInterpreter {
             }
             // 24 bit
             case 2: {
-                let r = Math.min(stack.shift() || 0, 255);
-                let g = Math.min(stack.shift() || 0, 255);
-                let b = Math.min(stack.shift() || 0, 255);
+                const r = Math.min(stack.shift() || 0, 255);
+                const g = Math.min(stack.shift() || 0, 255);
+                const b = Math.min(stack.shift() || 0, 255);
                 return `rgb(${r},${g},${b})`;
             }
             default:
