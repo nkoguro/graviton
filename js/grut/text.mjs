@@ -699,7 +699,7 @@ class InputContext {
 }
 
 class GrvAbstractText extends HTMLElement {
-    constructor(baseKeyMap) {
+    constructor(baseKeyMap, interpreterGenerator) {
         super();
 
         this.attrCharsList = [[]];
@@ -713,6 +713,7 @@ class GrvAbstractText extends HTMLElement {
         this.insertMode = true;
         this.isCompositionStarted = false;
         this.inputContext = InputContext.defaultInstance();
+        this.interpreterGenerator = interpreterGenerator;
 
         this.cursor = new TextCursor(this);
 
@@ -1281,7 +1282,7 @@ class GrvAbstractText extends HTMLElement {
     }
 
     insertText(text) {
-        const interpreter = new ANSIEscapeSequenceInterpreter(this, (c) => { this.insertCharacter(c); });
+        const interpreter = this.interpreterGenerator(this, (c) => { this.insertCharacter(c); });
         const strLines = text.split('\n');
         for (let i = 0; i < strLines.length; ++i) {
             let str = strLines[i];
@@ -1342,7 +1343,7 @@ class GrvAbstractText extends HTMLElement {
     }
 
     printText(text) {
-        const interpreter = new ANSIEscapeSequenceInterpreter(this, (c) => { this.printCharacter(c); });
+        const interpreter = this.interpreterGenerator(this, (c) => { this.printCharacter(c); });
         interpreter.processString(text);
     }
 
@@ -1807,7 +1808,7 @@ class GrvAbstractText extends HTMLElement {
 
 export class GrvTextEdit extends GrvAbstractText {
     constructor() {
-        super(SCREEN_KEYMAP);
+        super(SCREEN_KEYMAP, (grvText, writeChar) => new TransparentInterpreter(grvText, writeChar));
     }
 
     handleInputText(text) {
@@ -1836,7 +1837,7 @@ export class GrvTextEdit extends GrvAbstractText {
 
 export class GrvText extends GrvAbstractText {
     constructor() {
-        super(TERMINAL_KEYMAP);
+        super(TERMINAL_KEYMAP, (grvText, writeChar) => new ANSIEscapeSequenceInterpreter(grvText, writeChar));
 
         this.cursor.hide();
         this.editable = false;
@@ -2106,6 +2107,18 @@ export class GrvText extends GrvAbstractText {
 
 customElements.define('grv-text-edit', GrvTextEdit);
 customElements.define('grv-text', GrvText);
+
+class TransparentInterpreter {
+    constructor(textEdit, writeChar) {
+        this.writeChar = writeChar;
+    }
+
+    processString(string) {
+        Array.from(string).forEach((c) => {
+            this.writeChar(c);
+        });
+    }
+}
 
 class ANSIEscapeSequenceInterpreter {
     constructor(textEdit, writeChar) {
