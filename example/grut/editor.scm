@@ -13,10 +13,11 @@
 
 (define-document-content
   (html:body
-   (html:div :id "win-0" :class "window"
-             (html:grv-text-edit :id "text-buffer" :class "text-buffer")
-             (html:grv-text :id "mode-line" :class "mode-line"))
-   (html:grv-text :id "mini-buffer")))
+   (html:div :id "container"
+             (html:div :id "win-0" :class "window"
+                       (html:grv-text-edit :id "text-buffer" :class "text-buffer")
+                       (html:grv-text :id "mode-line" :class "mode-line"))
+             (html:grv-text :id "mini-buffer"))))
 
 (define-global-jsobject text-buffer (document'get-element-by-id "text-buffer"))
 (define-global-jsobject mode-line (document'get-element-by-id "mode-line"))
