@@ -1165,7 +1165,7 @@ class GrvAbstractText extends HTMLElement {
     }
 
     removeLine(row = this.cursor.row) {
-        this.attrCharsList.splice(row);
+        this.attrCharsList.splice(row, 1);
         if (this.attrCharsList.length === 0) {
             this.attrCharsList = [[]];
         }
