@@ -198,12 +198,12 @@
             ;; TODO: Save the current content
             (set! (~ win'name) (generate-new-window-name (sys-basename filename)))
             (set! (~ win'filename) filename)
-            ((~ win'text-edit)'clear-text-content)
             (cond
               ((file-exists? filename)
-               ((~ win'text-edit)'insert-text (call-with-input-file filename port->string))
+               (set! (~ win'text-edit'text-content) (call-with-input-file filename port->string))
                (set! (~ win'last-update-timestamp) (~ win'text-edit'last-update-timestamp)))
               (else
+               (set! (~ win'text-edit'text-content) "")
                (message "New file")
                (sit-for)
                (minibuffer-clear))))))))

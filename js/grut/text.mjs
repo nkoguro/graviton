@@ -1164,8 +1164,8 @@ class GrvAbstractText extends HTMLElement {
         this.lastUpdateTimestamp = Date.now();
     }
 
-    removeLine(row = this.cursor.row, numLines = 1) {
-        this.attrCharsList.splice(row, numLines);
+    removeLine(row = this.cursor.row) {
+        this.attrCharsList.splice(row);
         if (this.attrCharsList.length === 0) {
             this.attrCharsList = [[]];
         }
@@ -1173,6 +1173,13 @@ class GrvAbstractText extends HTMLElement {
         for (let i = row; i < this.rows + 1; ++i) {
             this.requestUpdateRow(i);
         }
+    }
+
+    removeAllLines() {
+        this.requestAllUpdate();
+        this.attrCharsList = [[]];
+        this.cursor.column = 0;
+        this.cursor.row = 0;
     }
 
     attrChars2String(attrChars) {
@@ -1831,14 +1838,8 @@ export class GrvTextEdit extends GrvAbstractText {
     }
 
     set textContent(text) {
-        this.clearTextContent();
+        this.removeAllLines();
         this.insertText(text);
-    }
-
-    clearTextContent() {
-        this.removeLine(0, this.rows);
-        this.cursor.column = 0;
-        this.cursor.row = 0;
     }
 }
 
