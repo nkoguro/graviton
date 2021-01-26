@@ -123,7 +123,8 @@
       (result (make Text.EventMap null)))))
 
 (define-automatic-jsobject-methods <event-map>
-  "bind")
+  "bind"
+  "bindFallback")
 
 (define-class <grv-abstract-text> (<html-element>)
   ((last-update-timestamp :jsproperty "lastUpdateTimestamp"
@@ -145,7 +146,6 @@
   :jsclass "GrvTextEdit")
 
 (define-automatic-jsobject-methods <grv-abstract-text>
-  "bindKey"
   "callCommand"
   "insertText"
   "printText")

@@ -358,6 +358,7 @@ export class EventMap {
     constructor(parent) {
         this.parent = parent;
         this.map = {};
+        this.fallback = undefined;
     }
 
     static create(map = {}) {
@@ -368,10 +369,12 @@ export class EventMap {
 
     get(event) {
         const val = this.map[event];
-        if (val === false) {
-            return undefined;
-        } else if (val) {
+        if (val) {
             return val;
+        }
+
+        if (this.fallback) {
+            return this.fallback;
         }
 
         if (this.parent) {
@@ -383,6 +386,10 @@ export class EventMap {
 
     bind(event, val) {
         this.map[event] = val;
+    }
+
+    bindFallback(val) {
+        this.fallback = val;
     }
 
     setAll(map) {

@@ -164,14 +164,9 @@
                                     " ")
                                   ))))
 
-(define message-wait? (make-parameter #t))
-
 (define (message fmt :rest args)
   (minibuffer-clear)
-  (mini-buffer'print-text (apply format fmt args))
-  (when (message-wait?)
-    (sit-for)
-    (minibuffer-clear)))
+  (mini-buffer'print-text (apply format fmt args)))
 
 (define (sit-for :optional (sec #f))
   (jsevent-wait window "keydown" :jsproperties '() :timeout sec :use-capture? #t))
@@ -209,7 +204,9 @@
                ((~ win'text-edit)'insert-text (call-with-input-file filename port->string))
                (set! (~ win'last-update-timestamp) (~ win'text-edit'last-update-timestamp)))
               (else
-               (message "New file"))))))))
+               (message "New file")
+               (sit-for)
+               (minibuffer-clear))))))))
 
 (define (save-window)
   (let* ((win (selected-window))
@@ -248,6 +245,7 @@
       (c-x-map'bind "C-f" find-file)
       (c-x-map'bind "C-s" save-window)
       (c-x-map'bind "C-w" write-file)
+      (c-x-map'bind-fallback minibuffer-clear)
       (grv-text-edit-key-map'bind "C-x" (vector c-x-map (lambda ()
                                                           (message "C-x")))))
 
