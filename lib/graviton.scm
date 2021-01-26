@@ -477,4 +477,5 @@
      (grv-start (lambda () expr ...)))))
 
 (define (grv-exit :optional (code 0))
+  (flush-client-request)
   (app-exit code))

@@ -241,7 +241,9 @@
     (select-window (init-first-window))
 
     (let1 c-x-map (make-key-map)
-      (c-x-map'bind "C-c" (^() (grv-exit)))
+      (c-x-map'bind "C-c" (^()
+                            (set! (~ document'body'inner-html) "")
+                            (grv-exit)))
       (c-x-map'bind "C-f" find-file)
       (c-x-map'bind "C-s" save-window)
       (c-x-map'bind "C-w" write-file)
