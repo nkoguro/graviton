@@ -4,6 +4,7 @@
 (use graviton)
 (use graviton.grut)
 (use srfi-1)
+(use srfi-13)
 (use text.html-lite)
 (use text.tree)
 
@@ -189,24 +190,36 @@
          (loop str (mini-buffer'cursor-column)))))))
 
 (define (find-file :optional (filename #f))
-  (let1 filename (or filename
-                     (read-from-minibuffer "Find file: "))
-    (guard (e (else (message (condition-message e "find-file error!!"))
-                    #f))
-      (or (get-file-window filename)
-          (rlet1 win (selected-window)
-            ;; TODO: Save the current content
-            (set! (~ win'name) (generate-new-window-name (sys-basename filename)))
-            (set! (~ win'filename) filename)
-            (cond
-              ((file-exists? filename)
-               (set! (~ win'text-edit'text-content) (call-with-input-file filename port->string))
-               (set! (~ win'last-update-timestamp) (~ win'text-edit'last-update-timestamp)))
-              (else
-               (set! (~ win'text-edit'text-content) "")
-               (message "New file")
-               (sit-for)
-               (minibuffer-clear))))))))
+  (and (let1 win (selected-window)
+         (cond
+           ((and (~ win'filename)
+                 (window-modified? win))
+            (let1 ans (read-from-minibuffer "Save file? [y/N]: ")
+              (cond
+                ((equal? (string-downcase ans) "y")
+                 (save-window)
+                 #t)
+                (else
+                 #f))))
+           (else
+            #t)))
+       (let1 filename (or filename
+                          (read-from-minibuffer "Find file: "))
+         (guard (e (else (message (condition-message e "find-file error!!"))
+                         #f))
+           (or (get-file-window filename)
+               (rlet1 win (selected-window)
+                 (set! (~ win'name) (generate-new-window-name (sys-basename filename)))
+                 (set! (~ win'filename) filename)
+                 (cond
+                   ((file-exists? filename)
+                    (set! (~ win'text-edit'text-content) (call-with-input-file filename port->string))
+                    (set! (~ win'last-update-timestamp) (~ win'text-edit'last-update-timestamp)))
+                   (else
+                    (set! (~ win'text-edit'text-content) "")
+                    (message "New file")
+                    (sit-for)
+                    (minibuffer-clear)))))))))
 
 (define (save-window)
   (let* ((win (selected-window))
