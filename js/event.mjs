@@ -5,7 +5,7 @@ const eventHandlerTable = new Map();
 function extractEventValues(event, props) {
     const vals = [];
     props.forEach((propSpec) => {
-        var v = event;
+        let v = event;
         propSpec.forEach((key) => {
             v = v[key];
         });
