@@ -925,6 +925,16 @@ class GrvAbstractText extends HTMLElement {
         return this.attrCharsList.length;
     }
 
+
+    get textContent() {
+        return this.attrCharsList.map(this.attrChars2String).join('\n');
+    }
+
+    set textContent(text) {
+        this.removeAllLines();
+        this.insertText(text);
+    }
+
     /**
      * @param {any} style
      */

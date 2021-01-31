@@ -127,7 +127,8 @@
   "bindFallback")
 
 (define-class <grv-abstract-text> (<html-element>)
-  ((last-update-timestamp :jsproperty "lastUpdateTimestamp"
+  ((text-content :jsproperty "textContent")
+   (last-update-timestamp :jsproperty "lastUpdateTimestamp"
                           :read-only? #t))
   :jsclass "GrvAbstractText")
 
@@ -142,7 +143,7 @@
   :jsclass "GrvText")
 
 (define-class <grv-text-edit> (<grv-abstract-text>)
-  ((text-content :jsproperty "textContent"))
+  ()
   :jsclass "GrvTextEdit")
 
 (define-automatic-jsobject-methods <grv-abstract-text>
