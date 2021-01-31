@@ -1842,15 +1842,6 @@ export class GrvTextEdit extends GrvAbstractText {
             this.printText(text);
         }
     }
-
-    get textContent() {
-        return this.attrCharsList.map(this.attrChars2String).join('\n');
-    }
-
-    set textContent(text) {
-        this.removeAllLines();
-        this.insertText(text);
-    }
 }
 
 export class GrvText extends GrvAbstractText {
