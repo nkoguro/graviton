@@ -400,6 +400,7 @@ export class EventMap {
 }
 
 export const SCREEN_KEYMAP = EventMap.create({
+    '*InputText*': 'self-insert-text',
     'Backspace': 'backward-delete-char',
     'Delete': 'delete-char',
     'ArrowLeft': 'previous-char',
@@ -431,6 +432,7 @@ export const SCREEN_KEYMAP = EventMap.create({
 });
 
 export const TERMINAL_KEYMAP = EventMap.create({
+    '*InputText*': 'self-insert-text',
     'Backspace': 'backward-delete-char',
     'Delete': 'delete-char',
     'ArrowLeft': 'previous-char',
@@ -668,6 +670,7 @@ class InputContext {
         this.isMeta = false;
         this.selfCharacter = undefined;
         this.event = undefined;
+        this.selfText = undefined;
     }
 
     static defaultInstance() {
@@ -701,6 +704,13 @@ class InputContext {
             }
         }
 
+        return ctx;
+    }
+
+    static fromText(eventName, text) {
+        const ctx = new InputContext();
+        ctx.eventName = eventName;
+        ctx.selfText = text;
         return ctx;
     }
 }
@@ -823,6 +833,9 @@ class GrvAbstractText extends HTMLElement {
         };
         this.commandTable['self-insert-command'] = () => {
             this.selfInsert();
+        };
+        this.commandTable['self-insert-text'] = () => {
+            this.selfInsertText();
         };
         this.commandTable['toggle-mark'] = () => {
             this.toggleMark();
@@ -1388,6 +1401,16 @@ class GrvAbstractText extends HTMLElement {
         }
     }
 
+    selfInsertText() {
+        if (this.inputContext && this.inputContext.selfText) {
+            if (this.insertMode) {
+                this.insertText(this.inputContext.selfText);
+            } else {
+                this.printText(this.inputContext.selfText);
+            }
+        }
+    }
+
     backwardDeleteChar(n = 1) {
         if (this.mark) {
             this.processMarkRegion(true, false);
@@ -1721,6 +1744,12 @@ class GrvAbstractText extends HTMLElement {
     // Keyboard event
 
     handleInputText(text) {
+        const inputEvent = "*InputText*";
+        const command = this.currentKeyMap.get(inputEvent);
+        if (command) {
+            const proc = this.getCommandHandler(command);
+            this.callClosureWithInputContext(InputContext.fromText(inputEvent, text), proc);
+        }
     }
 
     handleInput(event) {
@@ -1834,14 +1863,6 @@ export class GrvTextEdit extends GrvAbstractText {
     constructor() {
         super(SCREEN_KEYMAP, (grvText, writeChar) => new TransparentInterpreter(grvText, writeChar));
     }
-
-    handleInputText(text) {
-        if (this.insertMode) {
-            this.insertText(text);
-        } else {
-            this.printText(text);
-        }
-    }
 }
 
 export class GrvText extends GrvAbstractText {
@@ -1878,6 +1899,9 @@ export class GrvText extends GrvAbstractText {
         this.commandTable['complete-line-edit'] = () => {
             this.completeLineEdit();
         };
+        this.commandTable['self-insert-text'] = () => {
+            this.selfInsertLineText();
+        }
     }
 
     get pendingEditHandlerMaxLength() {
@@ -2045,10 +2069,16 @@ export class GrvText extends GrvAbstractText {
         this.editable = false;
     }
 
-    insertInputText(text) {
+    selfInsertLineText() {
+        if (this.inputContext && this.inputContext.selfText) {
+            this.insertLineText(this.inputContext.selfText);
+        }
+    }
+
+    insertLineText(text) {
         if (!this.editable) {
             this.pushEditHandler(() => {
-                this.insertInputText(text);
+                this.insertLineText(text);
             });
             return;
         }
@@ -2086,12 +2116,8 @@ export class GrvText extends GrvAbstractText {
         }
 
         if (restText) {
-            this.insertInputText(restText);
+            this.insertLineText(restText);
         }
-    }
-
-    handleInputText(text) {
-        this.insertInputText(text);
     }
 
     // Mouse selection
