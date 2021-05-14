@@ -4,6 +4,7 @@
 
 (use graviton)
 (use graviton.grut)
+(use text.html-lite)
 (use util.combinations)
 (use util.match)
 
@@ -36,46 +37,50 @@
               (push! pixels (list x y (n->color n *max-n*)))))))
       (worker-fire-event (main-worker) 'draw-tile pixels))))
 
-(define-grut-window
-  (canvas :context-2d ctx :width *width* :height *height*)
-  :background-color "black")
+(grv-window
+  :path "/"
+  :body
+  (html:body
+   :style "background-color: black"
+   (html:canvas :id "canvas" :class "grut-contain" :width *width* :height *height*))
+
+  (let-elements (canvas)
+    (let1 ctx (canvas'get-context "2d")
+      (on-jsevent window "keyup" (key)
+        (when (equal? key "Escape")
+          (grv-exit)))
+
+      (on-event ('draw-tile :priority 'low) (pixels)
+        (fold (lambda (pixel prev-color)
+                (match-let1 (x y color) pixel
+                  (unless (equal? prev-color color)
+                    (set! (~ ctx'fill-style) color))
+                  (ctx'fill-rect x y 1 1)
+                  color))
+              #f
+              pixels))
+
+      (let* ((worker (run-worker-thread compute-worker-main :name "mandelbrot compute worker" :size 4))
+             (delta-x (/. 3 *width*))
+             (delta-y (/. 3 *height*))
+             (mesh-x 16)
+             (mesh-y 16)
+             (mesh-w (round->exact (/. *width* mesh-x)))
+             (mesh-h (round->exact (/. *height* mesh-y))))
+        (for-each (match-lambda
+                    ((i j)
+                     (worker-fire-event worker
+                                        'compute
+                                        mesh-w
+                                        mesh-h
+                                        (* mesh-w i)
+                                        (* mesh-h j)
+                                        -2
+                                        -1.5
+                                        delta-x
+                                        delta-y
+                                        *max-n*)))
+                  (cartesian-product (list (iota mesh-x) (iota mesh-y))))))))
 
 (define (main args)
-  (grv-player)
-
-  (grv-begin
-    (on-jsevent window "keyup" (key)
-      (when (equal? key "Escape")
-        (grv-exit)))
-
-    (on-event ('draw-tile :priority 'low) (pixels)
-      (fold (lambda (pixel prev-color)
-              (match-let1 (x y color) pixel
-                (unless (equal? prev-color color)
-                  (set! (~ ctx'fill-style) color))
-                (ctx'fill-rect x y 1 1)
-                color))
-            #f
-            pixels))
-
-    (let* ((worker (run-worker-thread compute-worker-main :name "mandelbrot compute worker" :size 4))
-           (delta-x (/. 3 *width*))
-           (delta-y (/. 3 *height*))
-           (mesh-x 16)
-           (mesh-y 16)
-           (mesh-w (round->exact (/. *width* mesh-x)))
-           (mesh-h (round->exact (/. *height* mesh-y))))
-      (for-each (match-lambda
-                  ((i j)
-                   (worker-fire-event worker
-                                      'compute
-                                      mesh-w
-                                      mesh-h
-                                      (* mesh-w i)
-                                      (* mesh-h j)
-                                      -2
-                                      -1.5
-                                      delta-x
-                                      delta-y
-                                      *max-n*)))
-                (cartesian-product (list (iota mesh-x) (iota mesh-y)))))))
+  (grv-start-player))

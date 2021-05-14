@@ -180,6 +180,15 @@
         (_
          (errorf "malformed on-jsevent: ~s" form))))))
 
+;; (define-syntax with-jsevents
+;;   (er-macro-transformer
+;;     (lambda (form rename id=?)
+;;       (match form
+;;         ((_ 
+;; (with-jsevents ((window "keyup" (key) #=key)
+;;                (window "keydown" (key) #?=key))
+;;    aaa)
+
 (define-application-context-slot animation-frame-callback #f)
 
 (define-method request-animation-frame-callback! ((callback <worker-callback>))

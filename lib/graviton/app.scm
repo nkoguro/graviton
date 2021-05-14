@@ -49,6 +49,13 @@
           application-context-slot-ref
           application-context-slot-set!
           define-application-context-slot
+          <session-parameter>
+          make-session-parameter
+          make-session-parameter*
+          session-parameter-atomic-ref
+          session-parameter-atomic-update!
+
+          user-agent
 
           app-exit))
 
@@ -113,10 +120,35 @@
 
 (define *application-context-table-atom* (atom (make-hash-table 'equal?)))
 
+(define (register-application-context-slot! name init-proc)
+  (push! *application-context-slot-initial-forms* (cons name init-proc)))
+
+(define-class <session-parameter> ()
+  ((key :init-form (gensym))))
+
+(define (make-session-parameter* init-proc)
+  (rlet1 sparam (make <session-parameter>)
+    (register-application-context-slot! (slot-ref sparam 'key) init-proc)))
+
+(define (make-session-parameter :rest vals)
+  (make-session-parameter* (^() vals)))
+
+(define (session-parameter-atomic-ref sparam proc)
+  (application-context-slot-atomic-ref (slot-ref sparam 'key) proc))
+
+(define (session-parameter-atomic-update! sparam proc)
+  (application-context-slot-atomic-update! (slot-ref sparam 'key) proc))
+
+(define-method object-apply ((sparam <session-parameter>) :rest args)
+  (if (null? args)
+    (session-parameter-atomic-ref sparam values)
+    (session-parameter-atomic-update! sparam (^_ (apply values args)))))
+
+
 (define-syntax define-application-context-slot
   (syntax-rules ()
     ((_ name vals ...)
-     (push! *application-context-slot-initial-forms* (cons 'name (lambda () (list vals ...)))))))
+     (register-application-context-slot! 'name (lambda () (list vals ...))))))
 
 (define-class <application-context> ()
   ((id :init-keyword :id)
@@ -181,6 +213,10 @@
 
 (define (application-context-slot-set! name :rest vals)
   (application-context-slot-atomic-update! name (lambda _ (apply values vals))))
+
+;;;
+
+(define user-agent (make-session-parameter #f))
 
 ;;;
 

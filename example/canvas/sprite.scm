@@ -15,6 +15,7 @@
 (define *canvas-height* 768)
 
 (define *num-samples* #f)
+(define *num-sprites* #f)
 
 (define-record-type ball
   #t #t
@@ -74,40 +75,43 @@
   (update-balls! balls tick)
   (draw-balls canvas sprite balls))
 
-(define-grut-window
-  (canvas :id canvas :width *canvas-width* :height *canvas-height*)
-  :theme 'dark :margin 0)
+(grv-window
+  :path "/"
+  :body
+  (html:body :style "background-color: black; margin: 0"
+             (html:canvas :id "canvas" :class "grut-contain" :width *canvas-width* :height *canvas-height*))
+
+  (let-elements (canvas)
+    (on-jsevent window "keyup" (key)
+      (when (equal? key "Escape")
+        (grv-exit 0)))
+
+    (let ((sprite (document'create-element "canvas"))
+          (balls (list-ec (: i *num-sprites*)
+                          (make-ball (modulo i *num-patterns*)
+                                     (random-integer *canvas-width*)
+                                     (random-integer *canvas-height*)
+                                     (- (* (random-real) 400) 200)
+                                     (- (* (random-real) 400) 200)))))
+      (set! (~ sprite'width) (* *sprite-width* *num-patterns*))
+      (set! (~ sprite'height) *sprite-height*)
+      (prepare-ball-images sprite *sprite-width* *sprite-height* *num-patterns*)
+
+      (on-repaint (sec-per-frame)
+        (stat (:description "frame per second" :unit "fps" :format-spec "~,2f" :order-by :desc)
+              *num-samples*
+              (/. 1 sec-per-frame))
+        (stat-time "repaint"
+                   *num-samples*
+                   (update-frame canvas sprite balls sec-per-frame))))))
 
 (define (main args)
   (let-args (cdr args) ((num-sprites "s|sprites=i" 100)
                         (use-browser? "b|browser" #f)
                         (num-samples "num-samples=i" #f))
     (set! *num-samples* num-samples)
+    (set! *num-sprites* num-sprites)
 
     (if use-browser?
-      (grv-browser)
-      (grv-player))
-
-    (grv-begin
-      (on-jsevent window "keyup" (key)
-        (when (equal? key "Escape")
-          (grv-exit 0)))
-
-      (let ((sprite (document'create-element "canvas"))
-            (balls (list-ec (: i num-sprites)
-                            (make-ball (modulo i *num-patterns*)
-                                       (random-integer *canvas-width*)
-                                       (random-integer *canvas-height*)
-                                       (- (* (random-real) 400) 200)
-                                       (- (* (random-real) 400) 200)))))
-        (set! (~ sprite'width) (* *sprite-width* *num-patterns*))
-        (set! (~ sprite'height) *sprite-height*)
-        (prepare-ball-images sprite *sprite-width* *sprite-height* *num-patterns*)
-
-        (on-repaint (sec-per-frame)
-          (stat (:description "frame per second" :unit "fps" :format-spec "~,2f" :order-by :desc)
-                *num-samples*
-                (/. 1 sec-per-frame))
-          (stat-time "repaint"
-                     *num-samples*
-                     (update-frame canvas sprite balls sec-per-frame)))))))
+      (grv-start-server)
+      (grv-start-player))))

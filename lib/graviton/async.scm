@@ -69,12 +69,12 @@
           <event-callback>
           worker-callback
           worker-callback?
+          invoke-worker-callback
           worker-shift
           shift-callback
           scheduler-add!
           scheduler-delete!
           worker-sleep!
-          main-worker-thunk-set!
           main-worker
           ))
 
@@ -118,7 +118,7 @@
            #f)
           (#f
            (and-let1 thunk (~ worker'idle-handler)
-             (log-framework-debug "Invoke idle handler")
+             (log-framework-debug "Invoke idle handler in worker: ~s" worker)
              (invoke-thunk 'low thunk))
            #t)
           (((? real? timestamp) (? symbol? event-name) args ...)
@@ -126,7 +126,7 @@
                                      (errorf "Event: ~a not found: ~s" event-name args)))
                   (proc (car proc+priority))
                   (priority (cdr proc+priority)))
-             (log-framework-debug "Process event: ~a" event-name)
+             (log-framework-debug "Process event: ~a in worker: ~s" event-name worker)
              (if (eq? priority 'high)
                (invoke-thunk priority (cut apply proc args))
                (enqueue-task! worker
@@ -135,7 +135,7 @@
                               :timestamp timestamp)))
            #t)
           (((? symbol? priority) . (? procedure? thunk))
-           (log-framework-debug "Invoke thunk: ~s" thunk)
+           (log-framework-debug "Invoke thunk: ~s in worker: ~s" thunk worker)
            (invoke-thunk priority thunk)
            #t)
           (v
@@ -397,6 +397,12 @@
 (define (worker-callback? obj)
   (is-a? obj <worker-callback>))
 
+(define-method invoke-worker-callback ((callback <procedure-callback>) arg-creator)
+  (with-slots (worker procedure priority) callback
+    (worker-submit-task worker (lambda ()
+                                 (apply callback (arg-creator)))
+                        :priority priority)))
+
 (define-method object-apply ((callback <procedure-callback>) :rest args)
   (with-slots (worker procedure priority) callback
     (worker-submit-task worker (cut apply procedure args) :priority priority)))
@@ -509,16 +515,7 @@
               (errorf "<time> or <real> required, but got ~s" time-or-sec))))))
 
 ;;;
-
-(define *main-worker-thunk* #f)
-
-(define (main-worker-thunk-set! thunk)
-  (set! *main-worker-thunk* thunk))
-
-(define-application-context-slot main-worker (rlet1 wt (make-worker-thread (or *main-worker-thunk*
-                                                                               (lambda () (grv-exit 70)))
-                                                                           :name "main")
-                                               (worker-run wt)))
+(define-application-context-slot main-worker #f)
 
 (define (main-worker)
   (application-context-slot-ref 'main-worker))

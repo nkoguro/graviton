@@ -11,14 +11,7 @@ body {
     font-weight: normal;
 }
 
-.window {
-    flex: 1 1;
-    height: 0;
-    display: flex;
-    flex-direction: column;
-}
-
-.text-buffer {
+#buffer {
     flex: 1 1;
     height: 0;
     overflow-y: scroll;
@@ -27,16 +20,9 @@ body {
     padding: 2px 2px 2px 5px;
 }
 
-.mode-line {
+#status {
     height: 1em;
     background-color:white;
     color: black;
-    padding: 2px 0 2px 5px;
-}
-
-#mini-buffer {
-    min-height: 1em;
-    background-color: black;
-    color: white;
     padding: 2px 0 2px 5px;
 }

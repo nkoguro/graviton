@@ -1003,9 +1003,9 @@
                   (slot-ref js-proc 'types)
                   (cons future-id args))
     (flush-client-request)
-    (let1 vals (dequeue/wait! mq)
+    (let1 arg-creator (dequeue/wait! mq)
       (free-future-id future-id)
-      (apply values vals))))
+      (apply values (arg-creator)))))
 
 (define (jscall/result-async js-proc args)
   (let1 future-id #f
@@ -1430,21 +1430,22 @@
 
 (define-application-context-slot global-jsobject-table (make-hash-table 'eq?))
 
-(define (make-global-jsobject-provider provider)
+(define (make-global-jsobject-provider provider :optional (name #f))
   (make <jsobject-provider>
     :provider  (let1 key (gensym)
                  (lambda ()
                    (application-context-slot-atomic-ref 'global-jsobject-table
                      (lambda (tbl)
                        (or (hash-table-get tbl key #f)
-                           (rlet1 jsobj (parameterize ((use-jscall/result-sync? #t))
+                           (rlet1 jsobj (parameterize ((use-jscall/result-sync? #f))
+                                          (log-framework-debug "Try to resolve jsobject ~s, provider: ~s" name provider)
                                           (with-client-request provider))
                              (hash-table-put! tbl key jsobj)))))))))
 
 (define-syntax define-global-jsobject
   (syntax-rules ()
     ((_ name body ...)
-     (define name (make-global-jsobject-provider (lambda () body ...))))))
+     (define name (make-global-jsobject-provider (lambda () body ...) (symbol->string 'name))))))
 
 ;;;
 
@@ -1548,9 +1549,9 @@
 (define (decode-received-binary-data data)
   (call-with-input-string (u8vector->string data)
     (lambda (in)
-      (let* ((future-id (read-u32 in 'little-endian))
-             (vals (decode-value-list in)))
-        (notify-values future-id vals)))))
+      (let1 future-id (read-u32 in 'little-endian)
+        (notify-values future-id (lambda ()
+                                   (decode-value-list in)))))))
 
 (register-binary-handler! decode-received-binary-data)
 
@@ -1581,17 +1582,17 @@
       (hash-table-delete! tbl id)
       (log-framework-debug "Freed future ID: ~8,'0x" id))))
 
-(define (notify-values future-id vals)
+(define (notify-values future-id arg-creator)
   (with-future-table
     (lambda (tbl future-next-id)
       (let1 receiver (hash-table-get tbl future-id #f)
         (match receiver
           ((? mtqueue? mq)
-           (log-framework-debug "future ID: #x~8,'0x received (args: ~s). Enqueued the result" future-id vals)
-           (enqueue! mq vals))
+           (log-framework-debug "future ID: #x~8,'0x received. Enqueued the procedure which makes the result" future-id)
+           (enqueue! mq arg-creator))
           ((? worker-callback? callback)
-           (log-framework-debug "future ID: #x~8,'0x received (args: ~s). Invoke callback: ~s" future-id vals callback)
-           (apply callback vals))
+           (log-framework-debug "future ID: #x~8,'0x received. Invoke callback: ~s" future-id callback)
+           (invoke-worker-callback callback arg-creator))
           (else
            (errorf "[BUG] Invalid receiver for future ID: ~a" future-id)))))))
 

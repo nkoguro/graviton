@@ -6,7 +6,7 @@ const objectFitContainerDataTable = new Map();
 const objectFitDataTable = new Map();
 let objectFitContainerNextId = 0;
 let objectFitNextId = 0;
-const grutSpecialClassList = ['grut-object-fit-contain', 'grut-object-fit-cover', 'grut-object-fit-fill'];
+const grutSpecialClassList = ['grut-contain', 'grut-cover', 'grut-fill', 'grut-none'];
 
 const resizeObserver = new ResizeObserver(entries => {
     for (let entry of entries) {
@@ -42,17 +42,7 @@ function processGrutSpecialClassInner(element) {
         return;
     }
 
-    let containerElement = undefined;
-    for (let e = element.parentElement; e; e = e.parentElement) {
-        const computedStyle = window.getComputedStyle(e);
-        if (computedStyle.position !== 'static') {
-            containerElement = e;
-            break;
-        }
-    }
-    if (!containerElement) {
-        containerElement = document.body;
-    }
+    const containerElement = element.parentElement || document.body;
     let containerData = objectFitContainerDataTable.get(containerElement.dataset.grutObjectFitContainerId);
     if (!containerData) {
         const containerId = `container${objectFitContainerNextId++}`;
@@ -97,24 +87,24 @@ function processGrutSpecialClassInner(element) {
     element.dataset.grutObjectFitId = objectFitId;
     objectFitDataTable.set(objectFitId, objectData);
     switch (grutSpecialClass) {
-        case 'grut-object-fit-contain':
+        case 'grut-contain':
             element.style.left = `var(${containerData['center-x-var']})`;
             element.style.top = `var(${containerData['center-y-var']})`;
             element.style.transform = `translate(-50%, -50%) scale(min(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar})))`;
             break;
-        case 'grut-object-fit-cover':
-            element.style.left = `var(${containerCenterXVar})`;
-            element.style.top = `var(${containerCenterYVar})`;
-            element.style.transform = `scale(max(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar})))`;
+        case 'grut-cover':
+            element.style.left = `var(${containerData['center-x-var']})`;
+            element.style.top = `var(${containerData['center-y-var']})`;
+            element.style.transform = `translate(-50%, -50%) scale(max(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar})))`;
             break;
-        case 'grut-object-fit-fill':
-            element.style.left = `var(${containerCenterXVar})`;
-            element.style.top = `var(${containerCenterYVar})`;
-            element.style.transform = `scale(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar}))`;
+        case 'grut-fill':
+            element.style.left = `var(${containerData['center-x-var']})`;
+            element.style.top = `var(${containerData['center-y-var']})`;
+            element.style.transform = `translate(-50%, -50%) scale(calc(var(${containerData['width-var']}) / var(${objectWidthVar})), calc(var(${containerData['height-var']}) / var(${objectHeightVar})))`;
             break;
-        case 'grut-object-fit-none':
-            element.style.left = `var(${containerCenterXVar})`;
-            element.style.top = `var(${containerCenterYVar})`;
+        case 'grut-none':
+            element.style.left = `var(${containerData['center-x-var']})`;
+            element.style.top = `var(${containerData['center-y-var']})`;
             break;
     }
     handler();
@@ -122,30 +112,21 @@ function processGrutSpecialClassInner(element) {
 }
 
 /**
- * Update grv-text/grv-text-edit width/height
+ * Update grv-text width/height
  */
-
 function adjustGrvTextGeometry(grvText) {
     const dataWidth = Number(grvText.dataset.width);
     if (dataWidth) {
         grvText.style.width = grvText.characterWidth * dataWidth;
-    } else {
-        grvText.style.width = '100%';
     }
     const dataHeight = Number(grvText.dataset.height);
     if (dataHeight) {
         grvText.style.height = grvText.lineHeight * dataHeight;
-    } else {
-        grvText.style.height = '100%';
     }
 }
 
 function grutInit() {
-    if (!document.body.dataset.grutWindow) {
-        return;
-    }
-
-    document.querySelectorAll("grv-text, grv-text-edit").forEach(adjustGrvTextGeometry);
+    document.querySelectorAll("grv-text").forEach(adjustGrvTextGeometry);
     processGrutSpecialClass(document.body);
 }
 

@@ -1,5 +1,5 @@
 .grut-body {
-    position: relative;
+    position: static;
     overflow-x: hidden;
     overflow-y: hidden;
 }
@@ -27,22 +27,22 @@
     background-color: transparent;
 }
 
-.grut-object-fit-contain {
+.grut-contain {
     position: absolute;
     transform-origin: center
 }
 
-.grut-object-fit-cover {
+.grut-cover {
     position: absolute;
     transform-origin: center
 }
 
-.grut-object-fit-fill {
+.grut-fill {
     position: absolute;
     transform-origin: center
 }
 
-.grut-object-fit-none {
+.grut-none {
     position: absolute;
     transform-origin: center
 }

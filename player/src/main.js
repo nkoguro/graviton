@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { BrowserWindow, Menu, app, ipcMain, session } = require('electron');
+const { BrowserWindow, Menu, app, ipcMain } = require('electron');
 
 let config = null;
 
@@ -54,22 +54,12 @@ function createWindow() {
             win.show();
         }
     });
-    
+
     if (config['open-dev-tools']) {
         win.openDevTools();
     }
     Menu.setApplicationMenu(null);
-    let cookie = {
-        url: config['url'],
-        name: 'id',
-        value: config['id']
-    };
-    session.defaultSession.cookies.set(cookie).then(() => {
-        win.loadURL(config['url'])
-        .catch((err) => {
-            app.exit(70);
-        });
-    }).catch((err) => {
+    win.loadURL(config['url']).catch((err) => {
         app.exit(70);
     });
 }

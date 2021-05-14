@@ -1,14 +1,17 @@
 (use graviton)
-(use graviton.grut)
+(use text.html-lite)
 
-(define-grut-window
-  (canvas :context-2d ctx :width 300 :height 150))
+(grv-window
+  :path "/"
+  :body
+  (html:body
+   (html:canvas :id "canvas" :width 300 :height 150))
+
+  (let-elements (canvas)
+    (let ((ctx (canvas'get-context "2d"))
+          (text "Hello world"))
+      (format #t "The text width of '~a' is ~a px" text (~ (ctx'measure-text text) 'width))
+      (grv-exit))))
 
 (define (main args)
-  (grv-player :show? #f)
-
-  (grv-begin
-    (let1 text "Hello world"
-      (format #t "The text width of '~a' is ~a px" text (~ (ctx'measure-text text) 'width)))
-
-    (grv-exit)))
+  (grv-start-player :show? #f))

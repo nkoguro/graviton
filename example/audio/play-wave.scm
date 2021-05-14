@@ -21,11 +21,12 @@
           (~ audio-context'current-time)
           nodes)))
 
+(grv-window
+  :path "/"
+
+  (play-wave '((2000 0.1) (1000 0.1)))
+  (worker-sleep! 1.0)
+  (grv-exit))
+
 (define (main args)
-  (grv-player :show? #f)
-
-  (grv-begin
-    (play-wave '((2000 0.1) (1000 0.1)))
-
-    (worker-sleep! 1.0)
-    (grv-exit)))
+  (grv-start-player :show? #f))

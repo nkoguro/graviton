@@ -269,13 +269,14 @@
 
 (define-application-context-slot websocket-output-port #f)
 
-(define (websocket-main-loop ctx in out)
+(define (websocket-main-loop ctx in out req-user-agent thunk)
   (let1 exit-code 0
 
     (json-special-handler handle-json-special)
     (application-context ctx)
 
     (application-context-slot-set! 'websocket-output-port out)
+    (user-agent req-user-agent)
 
     (receive (ctrl-in ctrl-out) (sys-pipe)
       (application-context-slot-set! 'control-out ctrl-out)
@@ -302,7 +303,9 @@
                        '(r))
 
         ;; Invoke main worker thread
-        (main-worker)
+        (let1 wt (make-worker-thread thunk :name "main")
+          (worker-run wt)
+          (application-context-slot-set! 'main-worker wt))
 
         (while run-loop?
           (selector-select sel))
