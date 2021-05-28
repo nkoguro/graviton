@@ -669,6 +669,15 @@ class GrvText extends HTMLElement {
         this.lineHeight = charRect.height;
         this.characterWidth = charRect.width;
         this.view.removeChild(dummyDiv);
+
+        const dataColumn = Number(this.dataset.column);
+        if (dataColumn) {
+            this.style.width = this.characterWidth * dataColumn;
+        }
+        const dataRow = Number(this.dataset.row);
+        if (dataRow) {
+            this.style.height = this.lineHeight * dataRow;
+        }
     }
 
     ///

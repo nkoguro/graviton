@@ -8,7 +8,7 @@
   :body
   (html:body
    :style "background-color: black; color: white"
-   (html:grv-text :id "text" :class "grut-monospace-font grut-contain" :data-width 42 :data-height 15))
+   (html:grv-text :id "text" :class "grut-monospace-font grut-contain" :data-column 42 :data-row 15))
 
   (let-elements (text)
     (on-jsevent window "keyup" (key)

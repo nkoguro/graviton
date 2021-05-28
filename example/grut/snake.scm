@@ -18,7 +18,7 @@
   :body
   (html:body
    :style "background-color: black; color: white"
-   (html:grv-text :id "text" :data-width *text-width* :data-height *text-height* :class "grut-monospace-font grut-fill"))
+   (html:grv-text :id "text" :data-column *text-width* :data-row *text-height* :class "grut-monospace-font grut-fill"))
 
   (let ((field (make <field>))
         (snake '())

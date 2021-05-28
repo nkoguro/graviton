@@ -111,22 +111,7 @@ function processGrutSpecialClassInner(element) {
     resizeObserver.observe(element);
 }
 
-/**
- * Update grv-text width/height
- */
-function adjustGrvTextGeometry(grvText) {
-    const dataWidth = Number(grvText.dataset.width);
-    if (dataWidth) {
-        grvText.style.width = grvText.characterWidth * dataWidth;
-    }
-    const dataHeight = Number(grvText.dataset.height);
-    if (dataHeight) {
-        grvText.style.height = grvText.lineHeight * dataHeight;
-    }
-}
-
 function grutInit() {
-    document.querySelectorAll("grv-text").forEach(adjustGrvTextGeometry);
     processGrutSpecialClass(document.body);
 }
 
