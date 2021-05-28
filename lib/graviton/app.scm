@@ -128,10 +128,11 @@
 
 (define (make-session-parameter* init-proc)
   (rlet1 sparam (make <session-parameter>)
-    (register-application-context-slot! (slot-ref sparam 'key) init-proc)))
+    (register-application-context-slot! (slot-ref sparam 'key) (lambda ()
+                                                                 (values->list (init-proc))))))
 
 (define (make-session-parameter :rest vals)
-  (make-session-parameter* (^() vals)))
+  (make-session-parameter* (^() (apply values vals))))
 
 (define (session-parameter-atomic-ref sparam proc)
   (application-context-slot-atomic-ref (slot-ref sparam 'key) proc))

@@ -15,7 +15,7 @@
       (when (equal? key "Escape")
         (grv-exit)))
 
-    (with-output-to-grv-text text
+    (with-output-to-port text
       (lambda ()
         (display "System colors:\n")
         (do-ec (: color 8)

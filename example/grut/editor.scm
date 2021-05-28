@@ -49,46 +49,61 @@
              (html:grv-text :id "status")))
 
   (let-elements (buffer status)
-    (enable-screen-edit buffer)
     (let ((filename #f)
-          (content-version (~ buffer'content-version)))
-
-      (buffer'bind-key "C-/ f" (lambda ()
-                                 (status'show-cursor)
-                                 (clear-input-buffer! status)
-                                 (let1 str (read-string-from-grv-text status :prompt "File: ")
-                                   (status'hide-cursor)
-                                   (status'remove-all-lines)
-                                   (when str
-                                     (set! filename str)
-                                     (buffer'remove-all-lines)
-                                     (cond
-                                       ((file-exists? filename)
-                                        (buffer'insert-text (file->string filename))
-                                        (status'print-text (format "Read file - ~a" filename)))
-                                       (else
-                                        (status'print-text (format "New file - ~a" filename))))
-                                     (set! content-version (~ buffer'content-version))))
-                                 (buffer'focus)))
-      (add-hook! (~ buffer'pre-key-handler-hook) (lambda (key)
-                                                   (status'remove-all-lines)
-                                                   (cond
-                                                     ((equal? key "C-/")
-                                                      (status'print-text "C-/"))
-                                                     (else
-                                                      #t))))
-      (add-hook! (~ buffer'pre-input-handler-hook) (lambda (str)
-                                                     (status'remove-all-lines)))
-      (buffer'focus)
-
-      (on-idle ()
+          (status-keymap (make-keymap (global-keymap))))
+      (define (update-title! modified?)
         (set! (~ document'title) (format "~a~a - Editor"
-                                         (if (= content-version (~ buffer'content-version))
-                                           ""
-                                           "*")
-                                         (or filename "Untitled")))))
+                                         (if modified? "*" "")
+                                         (or filename "Untitled"))))
+      (define (update-status! ctx type str)
+        (status'remove-all-lines)
+        (cond
+          ((and (eq? type 'key)
+                (equal? str "C-/"))
+           (display "C-/" status))
+          (else
+           #t)))
+      (define (start-editor content-filename)
+        (set! filename content-filename)
+        (let1 content (cond
+                        ((not filename)
+                         "")
+                        ((file-exists? filename)
+                         (begin0
+                             (file->string filename)
+                           (format status "Read file - ~a" filename)))
+                        (else
+                         (begin0
+                             ""
+                           (format status "New file - ~a" filename))))
+          (update-title! #f)
+          (buffer'remove-all-lines)
+          (read-text/edit buffer
+                          :input-continues #t
+                          :initial-text content
+                          :cursor-column 0
+                          :cursor-row 0
+                          :on-input update-status!
+                          :on-change (lambda (ctx)
+                                       (update-title! #t)))))
 
-    (worker-thread-idle-timeout 0.1)))
+      (bind-key status-keymap "Escape" edit:cancel-edit)
+
+      (bind-key (global-keymap) "C-/ f" (lambda (input-context)
+                                          (let1 str (read-text/edit status :prompt "File: " :keymap status-keymap :initial-text "")
+                                            (status'remove-all-lines)
+                                            (when str
+                                              (edit:cancel-edit input-context)
+                                              (start-editor str)))))
+      (add-hook! (~ buffer'pre-input-hook) (lambda (type str)
+                                             (status'remove-all-lines)
+                                             (when (eq? type 'key)
+                                               (cond
+                                                 ((equal? str "C-/")
+                                                  (display "C-/" status))
+                                                 (else
+                                                  #t)))))
+      (start-editor #f))))
 
 (define (main args)
   (let-args (cdr args)

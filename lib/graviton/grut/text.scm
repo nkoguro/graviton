@@ -34,6 +34,7 @@
   (use data.queue)
   (use gauche.generator)
   (use gauche.hook)
+  (use gauche.record)
   (use gauche.threads)
   (use gauche.uvector)
   (use gauche.vport)
@@ -43,17 +44,36 @@
   (use graviton.jsffi)
   (use graviton.misc)
   (use srfi-1)
+  (use srfi-42)
+  (use srfi-130)
   (use text.html-lite)
   (use util.match)
 
   (export html:grv-text
           clipboard-text
+          <input-context>
           <grv-text>
-          clear-input-buffer!
-          call-with-output-grv-text
-          with-output-to-grv-text
-          enable-screen-edit
-          read-string-from-grv-text))
+
+          make-keymap
+          global-keymap
+          bind-key
+
+          edit:backward-delete-char
+          edit:beginning-of-edit-area
+          edit:beginning-of-line
+          edit:cancel-edit
+          edit:delete-char
+          edit:end-of-edit-area
+          edit:end-of-line
+          edit:forward-char
+          edit:insert-string
+          edit:newline-or-commit
+          edit:next-line
+          edit:page-up
+          edit:page-down
+          edit:previous-char
+          edit:previous-line
+          read-text/edit))
 
 (select-module graviton.grut.text)
 
@@ -117,30 +137,155 @@
 
 ;;;
 
-(define-class <grv-text> (<html-element>)
-  ((text-content :jsproperty "textContent")
-   (content-version :jsproperty "contentVersion")
-   (%text-input-handler :init-value #f)
-   (text-input-handler :allocation :virtual
-                       :slot-ref (lambda (obj)
-                                   (slot-ref obj '%text-input-handler))
-                       :slot-set! (lambda (obj handler)
-                                    (obj'enable-input-event (if handler #t #f))
-                                    (slot-set! obj '%text-input-handler handler)))
-   (keymap :init-form (make-hash-table 'equal?))
-   (processor-state :init-value #f)
-   (pre-key-handler-hook :init-form (make-hook 1))
-   (post-key-handler-hook :init-form (make-hook 1))
-   (pre-input-handler-hook :init-form (make-hook 1))
-   (post-input-handler-hook :init-form (make-hook 1))
-   (input-queue :init-form (make-mtqueue))
-
-   ;; for line editing
-   (line-edit-cont :init-value #f)
-   (start-column-table :init-form (make-hash-table 'eqv?))
-   (input-line-table :init-form (make-hash-table 'eqv?))
+(define-class <input-context> ()
+  ((text-element :init-keyword :text-element)
+   (edit-cont :init-value #f)
+   (lines :init-form (make-vector 1 ""))
+   (version :init-value 0)
+   (offset :init-value 0)
    (start-row :init-value #f)
-   (end-row :init-value #f))
+   (end-row :init-value #f)
+   (%cursor-column :init-value 0)
+   (cursor-column :allocation :virtual
+                  :slot-ref (lambda (obj)
+                              (min (slot-ref obj '%cursor-column)
+                                   (+ (slot-ref obj 'offset)
+                                      (string-length (get-input-line obj (slot-ref obj 'cursor-row))))))
+                  :slot-set! (lambda (obj col)
+                               (slot-set! obj '%cursor-column col)))
+   (cursor-row :init-keyword :row)
+   (input-continues :init-keyword :input-continues)
+   (prompter :init-keyword :prompter)
+   (force-mark? :init-value #f)
+   (keymap :init-keyword :keymap)
+   (this-key :init-value #f)))
+
+(define-method initialize ((ctx <input-context>) initargs)
+  (next-method)
+
+  (let1 row (slot-ref ctx 'cursor-row)
+    (slot-set! ctx 'start-row row)
+    (slot-set! ctx 'end-row row)))
+
+(define (modifier-key-pressed? input-context modifier)
+  (with-slots (this-key) input-context
+    (cond
+      (this-key
+       (let1 mods (drop-right (string-split this-key "-") 1)
+         (not (not (member modifier mods)))))
+      (else
+       #f))))
+
+(define shift-pressed? (cut modifier-key-pressed? <> "S"))
+(define meta-pressed? (cut modifier-key-pressed? <> "M"))
+(define alt-pressed? (cut modifier-key-pressed? <> "A"))
+(define control-pressed? (cut modifier-key-pressed? <> "C"))
+
+(define-class <keymap> ()
+  ((parent :init-keyword :parent)
+   (key-table :init-form (make-hash-table 'equal?))
+   (text-element-list :init-value '())))
+
+(define (make-keymap :optional (parent #f))
+  (make <keymap> :parent parent))
+
+(define (bind-key map key action :key (use-clipboard-text? #f))
+  (with-slots (key-table text-element-list) map
+    (cond
+      (action
+       (let ((proc (cond
+                     ((procedure? action)
+                      action)
+                     ((string? action)
+                      (lambda (input-context)
+                        (edit:insert-string input-context action)))
+                     (else
+                      (errorf "<procedure> or <string> required, but got ~s" action))))
+             (arg (logior (if use-clipboard-text? CALL-WITH-CLIPBOARD-TEXT 0))))
+         (hash-table-put! key-table key (list proc arg))
+         (for-each (lambda (text-element)
+                     (text-element'set-key-event-availability key arg))
+                   text-element-list)))
+      (else
+       (hash-table-delete! key-table key)
+       (for-each (lambda (text-element)
+                   (text-element'set-key-event-availability key #f))
+                 text-element-list)))))
+
+(define (switch-keymap input-context keymap)
+  (with-slots (text-element) input-context
+    (define (%bind-keys keymap)
+      (with-slots (parent key-table) keymap
+        (when parent
+          (%bind-keys parent))
+        (hash-table-for-each key-table (lambda (key proc+arg)
+                                         (match-let1 (proc arg) proc+arg
+                                           (text-element'set-key-event-availability key arg))))))
+
+    (text-element'clear-key-event-availability)
+    (cond
+      (keymap
+       (with-slots (text-element-list) keymap
+         (%bind-keys keymap)
+         (push! text-element-list text-element)))
+      (else
+       (with-slots (keymap) input-context
+         (with-slots (text-element-list) keymap
+           (set! text-element-list (delete text-element text-element-list))
+           (set! keymap #f)))))))
+
+(define (find-key-proc keymap key)
+  (with-slots (parent key-table) keymap
+    (or (car (hash-table-get key-table key '(#f #f)))
+        (and parent (find-key-proc parent key)))))
+
+(define global-keymap (make-session-parameter*
+                        (lambda ()
+                          (rlet1 keymap (make-keymap)
+                            ;; TODO: Check user-agent here
+                            (for-each (match-lambda
+                                        ((key proc . args)
+                                         (apply bind-key keymap key proc args)))
+                                      `(("ArrowLeft" ,edit:previous-char)
+                                        ("S-ArrowLeft" ,edit:previous-char)
+                                        ("ArrowRight" ,edit:forward-char)
+                                        ("S-ArrowRight" ,edit:forward-char)
+                                        ("ArrowUp" ,edit:previous-line)
+                                        ("S-ArrowUp" ,edit:previous-line)
+                                        ("ArrowDown" ,edit:next-line)
+                                        ("S-ArrowDown" ,edit:next-line)
+                                        ("PageUp" ,edit:page-up)
+                                        ("S-PageUp" ,edit:page-up)
+                                        ("PageDown" ,edit:page-down)
+                                        ("S-PageDown" ,edit:page-down)
+                                        ("Backspace" ,edit:backward-delete-char)
+                                        ("Delete" ,edit:delete-char)
+                                        ("Tab" "\t")
+                                        ("Home" ,edit:beginning-of-line)
+                                        ("S-Home" ,edit:beginning-of-line)
+                                        ("End" ,edit:end-of-line)
+                                        ("S-End" ,edit:end-of-line)
+                                        ("Enter" ,edit:newline-or-commit)))))))
+
+(define-record-type <text-mark>
+  make-text-mark text-mark?
+  (start-column text-mark-start-column text-mark-start-column-set!)
+  (start-row text-mark-start-row text-mark-start-row-set!)
+  (end-column text-mark-end-column text-mark-end-column-set!)
+  (end-row text-mark-end-row text-mark-end-row-set!))
+
+(define-class <grv-text> (<html-element> <virtual-output-port>)
+  ((text-content :jsproperty "textContent")
+   (page-size :jsproperty "pageSize")
+   (key-event-handler :init-value #f)
+   (processor-state :init-value #f)
+   (pre-input-hook :init-form (make-hook 2))
+   (post-input-hook :init-form (make-hook 2))
+   (clipboard-hook :init-form (make-hook 1))
+   (mouse-hook :init-form (make-hook 3))
+   (input-queue :init-value #f)
+   (input-context :init-value #f)
+   (text-mark :init-value #f))
   :jsclass "GrvText")
 
 (define clipboard-text (make-parameter #f))
@@ -148,18 +293,66 @@
 (define-method initialize ((self <grv-text>) initargs)
   (next-method)
   (self'set-callbacks
+   ;; text-input
    (lambda (str)
-     (and-let1 proc (slot-ref self 'text-input-handler)
-       (run-hook (~ self'pre-input-handler-hook) str)
-       (proc str)
-       (run-hook (~ self'post-input-handler-hook) str)))
+     (with-slots (input-queue) self
+       (when input-queue
+         (run-hook (~ self'pre-input-hook) 'text str))
+       (enqueue-input self str)
+       (when input-queue
+         (run-hook (~ self'post-input-hook) 'text str))))
+   ;; key
    (lambda (key clipboard)
-     (parameterize ((clipboard-text clipboard))
-       (run-hook (~ self'pre-key-handler-hook) key)
-       (and-let1 thunk (hash-table-get (~ self'keymap) key #f)
-         (thunk))
-       (run-hook (~ self'post-key-handler-hook) key))))
-  (slot-set! self 'processor-state (make-text-processor self)))
+     (and-let1 proc (slot-ref self 'key-event-handler)
+       (parameterize ((clipboard-text clipboard))
+         (run-hook (~ self'pre-input-hook) 'key key)
+         (proc key)
+         (run-hook (~ self'post-input-hook) 'key key))))
+   ;; clipboard
+   (lambda (code)
+     (run-hook (~ self'clipboard-hook) (assoc-ref '((1 . cut) (2 . copy) (3 . paste)) code)))
+   ;; mouse
+   (let ((down-col #f)
+         (down-row #f))
+     (lambda (event-name col row)
+       (with-slots (text-mark) self
+         (cond
+           ((equal? event-name "Mouse-Down-0")
+            (set! down-col col)
+            (set! down-row row)
+            (clear-mark! self))
+           ((equal? event-name "S-Mouse-Down-0")
+            (set! down-col col)
+            (set! down-row row)
+            (cond
+              (text-mark
+               (set-mark! self col row))
+              (else
+               (set-mark! self col row col row))))
+           ((and (equal? event-name "Mouse-Drag-0")
+                 down-col
+                 down-row)
+            (cond
+              (text-mark
+               (set-mark! self col row))
+              (else
+               (set-mark! self down-col down-row col row))))))
+       (run-hook (~ self'mouse-hook) event-name col row))))
+  (slot-set! self 'processor-state (make-text-processor self))
+
+  ;; slots of <virtual-output-port>
+  (let1 ctx (application-context)
+    (slot-set! self 'putb (cut process-byte self <>))
+    (slot-set! self 'putc (cut process-char self <>))
+    (slot-set! self 'puts (cut process-text self <>))
+    (slot-set! self 'flush (lambda ()
+                             ;; flush can be called in the different application-context (e.g. it can be called by GC).
+                             (when (eq? (application-context) ctx)
+                               (process-byte self (eof-object)))))
+    (slot-set! self 'close (lambda ()
+                             ;; close can be called in the different application-context (e.g. it can be called by GC).
+                             (when (eq? (application-context) ctx)
+                               (process-byte self (eof-object)))))))
 
 (define-automatic-jsobject-methods <grv-text>
   "setCallbacks"
@@ -179,15 +372,14 @@
   "invertTextColor"
   "updateLineAttribute"
 
-  ("getText" :result #t)
-  ("getLine" :result #t)
-
   "writeLine"
+  "updateLineString"
   "eraseDisplay"
   "eraseLine"
-  "splitLine"
-  "concatLine"
+  "insertLine"
+  "removeLine"
   "removeAllLines"
+  "setStartColumn"
 
   "moveCursor"
   "moveCursorUp"
@@ -198,31 +390,15 @@
   "moveCursorPreviousLine"
   "moveCursorHorizontalAbsolute"
 
-  "forwardChar"
-  ;; "previousChar"
-  "nextLine"
-  "previousLine"
-  ;; "beginningOfLine"
-  "endOfLine"
-  "beginningOfBuffer"
-  "endOfBuffer"
-  "pageUp"
-  "pageDown"
-
   "scrollUp"
   "scrollDown"
 
-  ;; "backwardDeleteChar"
-  "deleteChar"
-
   ("extractMarkRegionText" :result #t)
-  "deleteMarkRegion"
-  "copyMarkRegion"
-  "cutMarkRegion"
+  ;; TODO: Move this method to otherwise.
+  "copyToClipboard"
 
   "setMark"
   "clearMark"
-  "toggleMark"
   )
 
 (define-jsobject-method <grv-text> cursor-column ()
@@ -232,6 +408,17 @@
 (define-jsobject-method <grv-text> cursor-row ()
   (jslet/result ((self::object))
     (result self.cursor.row)))
+
+(define-jsobject-method <grv-text> cursor-position ()
+  (jslet/result ((self::object))
+    (result self.cursor.column self.cursor.row)))
+
+(define-jsobject-method <grv-text> set-cursor-position! (col row)
+  (jslet ((self::object)
+          (col)
+          (row))
+    (set! self.cursor.column col)
+    (set! self.cursor.row row)))
 
 (define-jsobject-method <grv-text> show-cursor ()
   (jslet ((self::object))
@@ -245,50 +432,33 @@
   (jslet/result ((self::object))
     (result self.cursor.visible)))
 
-(define (get-start-column grv-text :optional (row #f))
-  (let1 tbl (~ grv-text'start-column-table)
-    (hash-table-get tbl (or row (grv-text'cursor-row)) #f)))
-
-(define (set-start-column! grv-text row v)
-  (let1 tbl (~ grv-text'start-column-table)
-    (if v
-      (hash-table-put! tbl row v)
-      (hash-table-delete! tbl row))))
-
 (define (at-start-column? grv-text)
-  (let1 start-col (get-start-column grv-text)
+  (let1 start-col (~ grv-text'input-context'offset)
     (and start-col
          (<= (grv-text'cursor-column) start-col))))
 
-(define-jsobject-method <grv-text> previous-char (n :optional (shift-mark #f))
-  (unless (at-start-column? self)
-    (jslet ((self::object)
-            (n)
-            (shift-mark))
-      (self.previousChar n shift-mark))))
-
-(define-jsobject-method <grv-text> beginning-of-line (:optional (shift-mark #f))
-  (jslet ((self::object)
-          (shift-mark)
-          (start-column (or (get-start-column self) 0)))
-    (self.beginningOfLine shift-mark start-column)))
-
-(define-jsobject-method <grv-text> backward-delete-char (:optional (n 1))
-  (unless (at-start-column? self)
-    (jslet ((self::object)
-            (n))
-      (self.backwardDeleteChar n))))
+(define (enable-input-queue grv-text)
+  (grv-text'enable-input-event #t)
+  (with-slots (input-queue) grv-text
+    (unless input-queue
+      (set! input-queue (make-mtqueue)))))
 
 (define (enqueue-input grv-text str)
-  (enqueue! (~ grv-text'input-queue) str))
+  (with-slots (input-queue) grv-text
+    (when input-queue
+      (for-each (cut enqueue! input-queue <>) (intersperse "\n" (string-split str "\n"))))))
 
 (define (dequeue-input grv-text :optional (wait? #f))
-  (if wait?
-    (dequeue/wait! (~ grv-text'input-queue))
-    (dequeue! (~ grv-text'input-queue) #f)))
+  (with-slots (input-queue) grv-text
+    (when input-queue
+      (if wait?
+        (dequeue/wait! input-queue)
+        (dequeue! input-queue #f)))))
 
 (define (clear-input-buffer! grv-text)
-  (dequeue-all! (~ grv-text'input-queue))
+  (with-slots (input-queue) grv-text
+    (when input-queue
+      (dequeue-all! input-queue)))
   (undefined))
 
 ;;;
@@ -340,8 +510,7 @@
      (values #f params))))
 
 (define (make-text-processor grv-text)
-  (let ((overwrite? #f)
-        (string-port #f)
+  (let ((string-port #f)
         (data '())
         (params '())
         (intensity? #f)
@@ -354,7 +523,7 @@
 
     (define (flush-string)
       (when string-port
-        (grv-text'write-line (get-output-string string-port) overwrite?))
+        (grv-text'write-line (get-output-string string-port)))
       (set! string-port #f))
 
     (define (hold-param-data b)
@@ -446,8 +615,7 @@
               (loop (cdr params))))))))
 
     (define (make-state proc)
-      (lambda (b flag)
-        (set! overwrite? flag)
+      (lambda (b)
         (slot-set! grv-text 'processor-state (cond
                                                ((eof-object? b)
                                                 (flush-string)
@@ -460,13 +628,12 @@
                     (case b
                       ((#x08)           ; BS
                        (flush-string)
-                       (grv-text'backward-delete-char)
+                       (grv-text'move-cursor-back 1)
+                       (grv-text'write-line " " #t)
                        char-state)
                       ((#x0a)           ; LF
                        (flush-string)
-                       (if overwrite?
-                         (grv-text'move-cursor-next-line 1)
-                         (grv-text'split-line))
+                       (grv-text'move-cursor-next-line 1)
                        char-state)
                       ((#x0d)           ; CR
                        (flush-string)
@@ -542,60 +709,23 @@
                        char-state)))))
     char-state))
 
-(define (process-byte grv-text b overwrite?)
+(define (process-byte grv-text b)
   (with-slots (processor-state) grv-text
-    (processor-state b overwrite?)))
+    (processor-state b)))
 
 
-(define (process-text grv-text text overwrite?)
+(define (process-text grv-text text)
   (let ((gen (port->byte-generator (open-input-string text))))
     (let loop ((b (gen)))
-      (process-byte grv-text b overwrite?)
+      (process-byte grv-text b)
       (unless (eof-object? b)
         (loop (gen))))))
 
-(define (process-char grv-text c overwrite?)
-  (process-text grv-text (string c) overwrite?))
-
-(define (get-output-grv-text grv-text :optional (overwrite? #t))
-  (let1 ctx (application-context)
-    (make <virtual-output-port>
-      :putb (cut process-byte grv-text <> overwrite?)
-      :putc (cut process-char grv-text <> overwrite?)
-      :puts (cut process-text grv-text <> overwrite?)
-      :flush (lambda ()
-               ;; flush can be called in the different application-context (e.g. it can be called by GC).
-               (when (eq? (application-context) ctx)
-                 (process-byte grv-text (eof-object) overwrite?)))
-      :close (lambda ()
-               ;; close can be called in the different application-context (e.g. it can be called by GC).
-               (when (eq? (application-context) ctx)
-                 (process-byte grv-text (eof-object) overwrite?))))))
-
-(define (call-with-output-grv-text grv-text proc :key (overwrite? #t))
-  (let1 out (get-output-grv-text grv-text overwrite?)
-    (unwind-protect
-        (proc out)
-      (close-port out))))
-
-(define (with-output-to-grv-text grv-text thunk :key (overwrite? #t))
-  (let1 out (get-output-grv-text grv-text overwrite?)
-    (unwind-protect
-        (with-output-to-port (get-output-grv-text grv-text overwrite?) thunk)
-      (close-port out))))
-
-(define-jsobject-method <grv-text> insert-text (text)
-  (process-text self text #f))
+(define (process-char grv-text c)
+  (process-text grv-text (string c)))
 
 (define-jsobject-method <grv-text> print-text (text)
-  (process-text self text #t))
-
-(define-jsobject-method <grv-text> enable-key-input ()
-  (set! (~ self'text-input-handler) (lambda (str)
-                                      (self'insert-text str))))
-
-(define-jsobject-method <grv-text> disable-key-input ()
-  (set! (~ self'text-input-handler) #f))
+  (process-text self text))
 
 (define-constant CALL-WITH-CLIPBOARD-TEXT 2)
 
@@ -611,283 +741,536 @@
       (else
        (errorf "<procedure> or #f required, but got ~s" thunk)))))
 
-(define-jsobject-method <grv-text> has-mark? ()
-  (jslet/result ((self::object))
-    (self.hasMark)))
+;;;
+
+(define-method set-mark! ((grv-text <grv-text>) start-col start-row end-col end-row)
+  (with-slots (text-mark) grv-text
+    (let1 mark (make-text-mark start-col start-row end-col end-row)
+      (set! text-mark mark)
+      (grv-text'set-mark start-col start-row end-col end-row))))
+
+(define-method set-mark! ((grv-text <grv-text>) col row)
+  (with-slots (text-mark) grv-text
+    (cond
+      (text-mark
+       (text-mark-end-column-set! text-mark col)
+       (text-mark-end-row-set! text-mark row))
+      (else
+       (set! text-mark (make-text-mark col row col row))))
+    (grv-text'set-mark (text-mark-start-column text-mark)
+                       (text-mark-start-row text-mark)
+                       (text-mark-end-column text-mark)
+                       (text-mark-end-row text-mark))))
+
+(define-method set-mark! ((input-context <input-context>) col row)
+  (with-slots (text-element) input-context
+    (set-mark! text-element col row)))
+
+(define-method set-mark! ((input-context <input-context>))
+  (with-slots (cursor-column cursor-row) input-context
+    (set-mark! input-context cursor-column cursor-row)))
+
+(define-method clear-mark! ((grv-text <grv-text>))
+  (with-slots (text-mark) grv-text
+    (set! text-mark #f)
+    (grv-text'clear-mark)))
+
+(define-method clear-mark! ((input-context <input-context>))
+  (with-slots (text-element) input-context
+    (clear-mark! text-element)))
+
+(define (edit:toggle-mark! input-context)
+  (with-slots (text-element cursor-column cursor-row force-mark?) input-context
+    (with-slots (text-mark) text-element
+      (cond
+        (text-mark
+         (clear-mark! text-element)
+         (set! force-mark? #f))
+        (else
+         (set-mark! text-element cursor-column cursor-row cursor-column cursor-row)
+         (set! force-mark? #t))))))
 
 ;;;
 
-(define (enable-screen-edit grv-text)
-  (grv-text'show-cursor)
-  (grv-text'clear-key-event-availability)
-  (grv-text'set-move-cursor-by-mouse-click #t)
+(define (finish-edit input-context reason)
+  (with-slots (edit-cont) input-context
+    (edit-cont (get-input-content input-context) reason)))
 
-  (grv-text'bind-key "ArrowLeft" (lambda ()
-                                   (grv-text'previous-char)))
-  (grv-text'bind-key "S-ArrowLeft" (lambda ()
-                                     (grv-text'previous-char 1 #t)))
-  (grv-text'bind-key "ArrowRight" (lambda ()
-                                    (grv-text'forward-char)))
-  (grv-text'bind-key "S-ArrowRight" (lambda ()
-                                      (grv-text'forward-char 1 #t)))
-  (grv-text'bind-key "ArrowUp" (lambda ()
-                                 (grv-text'previous-line)))
-  (grv-text'bind-key "S-ArrowUp" (lambda ()
-                                   (grv-text'previous-line 1 #t)))
-  (grv-text'bind-key "ArrowDown" (lambda ()
-                                   (grv-text'next-line)))
-  (grv-text'bind-key "S-ArrowDown" (lambda ()
-                                     (grv-text'next-line 1 #t)))
-  (grv-text'bind-key "Backspace" (lambda ()
-                                   (grv-text'backward-delete-char)))
-  (grv-text'bind-key "Delete" (lambda ()
-                                (grv-text'delete-char)))
-  (grv-text'bind-key "Tab" (lambda ()
-                             (grv-text'insert-text "\t")))
-  (grv-text'bind-key "Home" (lambda ()
-                              (grv-text'beginning-of-line)))
-  (grv-text'bind-key "S-Home" (lambda ()
-                                (grv-text'beginning-of-line #t)))
-  (grv-text'bind-key "End" (lambda ()
-                             (grv-text'end-of-line)))
-  (grv-text'bind-key "S-End" (lambda ()
-                               (grv-text'end-of-line #t)))
-  (grv-text'bind-key "PageUp" (lambda ()
-                                (grv-text'page-up)))
-  (grv-text'bind-key "S-PageUp" (lambda ()
-                                  (grv-text'page-up 1 #t)))
-  (grv-text'bind-key "PageDown" (lambda ()
-                                  (grv-text'page-down)))
-  (grv-text'bind-key "S-PageDown" (lambda ()
-                                    (grv-text'page-down 1 #t)))
-  (set! (~ grv-text'text-input-handler) (lambda (str)
-                                          (grv-text'insert-text str))))
-
-(define (finish-line-edit grv-text reason)
-  (let1 cont (~ grv-text'line-edit-cont)
-    (unless cont
-      (errorf "~s isn't in line editing" grv-text))
-    (set! (~ grv-text'line-edit-cont) #f)
-    (cont reason)))
-
-(define (setup-default-line-edit-key-binding grv-text)
-  (grv-text'push-key-event-availability)
-  (grv-text'clear-key-event-availability)
-  (grv-text'bind-key "ArrowLeft" (lambda ()
-                                   (grv-text'previous-char)))
-  (grv-text'bind-key "S-ArrowLeft" (lambda ()
-                                     (grv-text'previous-char 1 #t)))
-  (grv-text'bind-key "ArrowRight" (lambda ()
-                                    (grv-text'forward-char)))
-  (grv-text'bind-key "S-ArrowRight" (lambda ()
-                                      (grv-text'forward-char 1 #t)))
-  (grv-text'bind-key "Backspace" (lambda ()
-                                   (grv-text'backward-delete-char)))
-  (grv-text'bind-key "Delete" (lambda ()
-                                (grv-text'delete-char)))
-  (grv-text'bind-key "Tab" (lambda ()
-                             (grv-text'insert-text "\t")))
-  (grv-text'bind-key "Home" (lambda ()
-                              (grv-text'beginning-of-line)))
-  (grv-text'bind-key "S-Home" (lambda ()
-                                (grv-text'beginning-of-line #t)))
-  (grv-text'bind-key "End" (lambda ()
-                             (grv-text'end-of-line)))
-  (grv-text'bind-key "S-End" (lambda ()
-                               (grv-text'end-of-line #t)))
-  (grv-text'bind-key "Enter" (lambda ()
-                               (newline-or-commit grv-text)))
-  (grv-text'bind-key "Escape" (lambda ()
-                                (cancel-edit grv-text))))
-
-(define (start-line-edit grv-text prompt)
-  (define (%process-queued-input)
-    (let1 str (dequeue-input grv-text)
+(define (process-queued-input input-context)
+  (with-slots (text-element cursor-column cursor-row offset) input-context
+    (let1 str (dequeue-input text-element)
       (cond
         ((not str)
-         (%start-line-edit))
+         #f)
         ((equal? str "\n")
-         (set! (~ grv-text'line-edit-cont) values)
-         (newline-or-commit grv-text))
+         (edit:newline-or-commit input-context)
+         (process-queued-input input-context))
         (else
-         (%grv-text'insert-text str)
-         (process-queued-input)))))
+         (delete-mark-region input-context)
+         (let* ((line (get-input-line input-context cursor-row))
+                (cur (- cursor-column offset))
+                (head (string-take line cur))
+                (tail (string-drop line cur))
+                (updated-line (string-append head str tail)))
+           (set-input-line! input-context cursor-row updated-line)
+           (text-element'update-line-string cursor-row offset -1 updated-line)
+           (inc! cursor-column (string-length str))
+           (text-element'move-cursor cursor-column cursor-row))
+         (process-queued-input input-context))))))
 
-  (define (%start-line-edit)
-    (shift-callback callback
-      (set! (~ grv-text'line-edit-cont) callback)))
+(define (get-input-line input-context row)
+  (with-slots (lines start-row) input-context
+    (vector-ref lines (- row start-row))))
 
-  (grv-text'print-text prompt)
-  (set-start-column! grv-text (grv-text'cursor-row) (grv-text'cursor-column))
-  (%process-queued-input))
+(define (set-input-line! input-context row line)
+  (with-slots (lines start-row version) input-context
+    (vector-set! lines (- row start-row) line)
+    (inc! version)))
 
-;; (define (%read-line/edit grv-text :key (prompt "") (setup #f))
-;;   (define (get-line)
-;;     (let* ((row (grv-text'cursor-row))
-;;            (line (grv-text'get-line row)))
-;;       (begin0
-;;           (substring line (get-start-column grv-text row) (string-length line))
-;;         (set-start-column! grv-text row #f))))
+(define (insert-input-line! input-context row line)
+  (with-slots (text-element lines start-row end-row version) input-context
+    (let* ((len (vector-length lines))
+           (new-lines (make-vector (+ len 1)))
+           (i (- row start-row)))
+      (vector-copy! new-lines 0 lines 0 i)
+      (vector-set! new-lines i line)
+      (vector-copy! new-lines (+ i 1) lines i len)
+      (set! lines new-lines)
+      (inc! end-row)
+      (text-element'insert-line row))
+    (inc! version)))
 
-;;   (define (process-queued-input)
-;;     (let1 str (dequeue-input grv-text)
-;;       (cond
-;;         ((not str)
-;;          (start-line-edit))
-;;         ((equal? str "\n")
-;;          (values (get-line) 'commit))
-;;         (else
-;;          (grv-text'insert-text str)
-;;          (process-queued-input)))))
+(define (delete-input-line! input-context row)
+  (with-slots (text-element lines start-row end-row version) input-context
+    (let* ((len (vector-length lines))
+           (new-lines (make-vector (- len 1)))
+           (i (- row start-row)))
+      (vector-copy! new-lines 0 lines 0 i)
+      (when (< (+ i 1) len)
+        (vector-copy! new-lines i lines (+ i 1) len))
+      (set! lines new-lines)
+      (dec! end-row)
+      (text-element'remove-line row))
+    (inc! version)))
 
-;;   (define (start-line-edit)
-;;     (setup-default-line-edit-key-binding grv-text)
-;;     (when setup
-;;       (setup))
-;;     (set! (~ grv-text'text-input-handler) (lambda (input-str)
-;;                                             (match-let1 (str rest ...) (string-split input-str "\n")
-;;                                               (grv-text'insert-text str)
-;;                                               (unless (null? rest)
-;;                                                 (for-each (cut enqueue-input grv-text <>) (intersperse "\n" rest))
-;;                                                 (finish-line-edit grv-text 'commit)))))
-;;     (let* ((reason (shift-callback callback
-;;                      (set! (~ grv-text'line-edit-cont) callback)))
-;;            (line (get-line)))
-;;       (grv-text'pop-key-event-availability)
-;;       (values line reason)))
+(define (split-input-line! input-context row column)
+  (with-slots (lines offset) input-context
+    (let* ((line (get-input-line input-context row))
+           (i (- column offset))
+           (head (string-take line i))
+           (tail (string-drop line i)))
+      (insert-input-line! input-context row head)
+      (set-input-line! input-context (+ row 1) tail))))
 
-;;   (grv-text'set-move-cursor-by-mouse-click #f)
-;;   (grv-text'print-text prompt)
-;;   (set-start-column! grv-text (grv-text'cursor-row) (grv-text'cursor-column))
-;;   (grv-text'focus)
-;;   (process-queued-input))
+(define (concat-input-line! input-context row)
+  (with-slots (lines) input-context
+    (let* ((line1 (get-input-line input-context row))
+           (line2 (get-input-line input-context (+ row 1)))
+           (concat-line (string-append line1 line2)))
+      (set-input-line! input-context row concat-line)
+      (delete-input-line! input-context (+ row 1)))))
 
-(define (get-input-line grv-text row)
-  (hash-table-get (~ grv-text'input-line-table) row ""))
+(define (end-of-line-column input-context row)
+  (with-slots (offset) input-context
+    (+ offset (string-length (get-input-line input-context row)))))
 
-(define (get-input-text grv-text)
-  (apply string-append
-    (intersperse "\n"
-                 (map (lambda (row)
-                        (get-input-line grv-text row))
-                      (iota (+ (- (~ grv-text'end-row) (~ grv-text'start-row)) 1) (~ grv-text'start-row))))))
+(define (get-prompt input-context row)
+  (with-slots (prompter start-row) input-context
+    (prompter (- row start-row))))
 
-(define (newline-or-commit grv-text)
-  (finish-line-edit grv-text 'newline-or-commit))
+(define (get-input-content input-context)
+  (with-slots (lines) input-context
+    (apply string-append (intersperse "\n" (vector->list lines)))))
 
-(define (cancel-edit grv-text)
-  (finish-line-edit grv-text 'cancel))
+(define (draw-input-area input-context :optional (from-row #f) (to-row #f))
+  (with-slots (text-element start-row end-row offset cursor-column cursor-row) input-context
+    (let ((from-row (or from-row start-row))
+          (to-row (or to-row end-row)))
+      (do-ec
+        (: row from-row (+ to-row 1))
+        (begin
+          (text-element'move-cursor 0 row)
+          (text-element'erase-line 0)
+          (text-element'print-text (get-prompt input-context row))
+          (text-element'set-start-column)
+          (text-element'move-cursor-horizontal-absolute offset)
+          (text-element'print-text (get-input-line input-context row))))
+      (text-element'move-cursor cursor-column cursor-row))))
 
-;; (define (previous-line grv-text :optional (shift-mark? #f))
-;;   (let ((col (grv-text'cursor-column))
-;;         (row (grv-text'cursor-row)))
-;;     (cond
-;;       ((<= (~ grv-text'start-row) (- row 1) (~ grv-text'end-row))
-;;        (grv-text'previous-line 1 shift-mark?)
-;;        (let1 start-col (get-start-column grv-text (- row 1))
-;;          (when (< col start-col)
-;;            (grv-text'move-cursor-horizontal-absolute start-col))))
-;;       ((< (- row 1) (~ grv-text'start-row))
-;;        ;; TODO: Implement history
-;;        #f)
-;;       (else
-;;        #f))))
+(define (delete-mark-region input-context)
+  (define (clip offset start-row end-row text-mark)
+    (let-values (((from-col to-col) (min&max (text-mark-start-column text-mark) (text-mark-end-column text-mark)))
+                 ((from-row to-row) (min&max (text-mark-start-row text-mark) (text-mark-end-row text-mark))))
+      (cond
+        ((< from-row to-row)
+         (let ((from-row-pos (cond
+                               ((< from-row start-row)
+                                'above)
+                               ((<= start-row from-row end-row)
+                                'in)
+                               (else
+                                'below)))
+               (to-row-pos (cond
+                             ((< to-row start-row)
+                              'above)
+                             ((<= start-row to-row end-row)
+                              'in)
+                             (else
+                              'below))))
+           (match (list from-row-pos to-row-pos)
+             ((or ('above 'above)
+                  ('below 'below))
+              (values #f #f #f #f))
+             (('above 'in)
+              (values offset start-row (max offset to-col) to-row))
+             (('above 'below)
+              (values offset start-row (end-of-line-column input-context end-row) end-row))
+             (('in 'in)
+              (values (max offset from-col) from-row (max offset to-col) to-row))
+             (('in below)
+              (values (max offset from-col) from-row (end-of-line-column input-context end-row) end-row)))))
+        ((and (= from-row to-row)
+              (<= offset to-col))
+         (values (max offset from-col) from-row to-col to-row))
+        (else
+         (values #f #f #f #f)))))
 
-;; (define (next-line grv-text :optional (shift-mark? #f))
-;;   (let ((col (grv-text'cursor-column))
-;;         (row (grv-text'cursor-row)))
-;;     (when (<= (~ grv-text'start-row) (+ row 1) (~ grv-text'end-row))
-;;       (grv-text'next-line 1 shift-mark?)
-;;       (let1 start-col (get-start-column grv-text (+ row 1))
-;;         (when (< col start-col)
-;;           (grv-text'move-cursor-horizontal-absolute start-col))))))
+  (with-slots (text-element start-row end-row cursor-column cursor-row offset) input-context
+    (with-slots (text-mark) text-element
+      (when text-mark
+        (let-values (((from-col from-row to-col to-row) (clip offset start-row end-row text-mark)))
+          (when (and from-col from-row to-col to-row)
+            (cond
+              ((= from-row to-row)
+               (let* ((line (get-input-line input-context from-row))
+                      (head (string-take line (- from-col offset)))
+                      (tail (string-drop line (- to-col offset))))
+                 (set-input-line! input-context from-row (string-append head tail))))
+              (else
+               (let* ((line (get-input-line input-context to-row))
+                      (tail (string-drop line (max 0 (- to-col offset)))))
+                 (set-input-line! input-context to-row tail))
+               (do ((row (- to-row 1) (- row 1)))
+                   ((<= row (+ from-row 1)) #f)
+                 (delete-input-line! input-context row))
+               (let* ((line (get-input-line input-context from-row))
+                      (head (string-take line (max 0 (- from-col offset)))))
+                 (set-input-line! input-context from-row head)
+                 (concat-input-line! input-context from-row))))
+            (set! cursor-column (max offset from-col))
+            (set! cursor-row from-row)
+            (clear-mark! input-context)
+            (draw-input-area input-context from-row)))))))
 
-;; (define (previous-char grv-text :optional (shift-mark? #f))
-;;   (let ((col (grv-text'cursor-column))
-;;         (row (grv-text'cursor-row)))
-;;     (cond
-;;       ((< (get-start-column grv-text row) col)
-;;        (grv-text'previous-char 1 shift-mark?))
-;;       ((< (~ grv-text'start-row) row)
-;;        (grv-text'previous-line 1 shift-mark?)
-;;        (grv-text'end-of-line shift-mark?))
-;;       (else
-;;        #f))))
+(define (edit:insert-string input-context str)
+  (with-slots (text-element) input-context
+    (enqueue-input text-element str)
+    (process-queued-input input-context)))
 
-;; (define (forward-char grv-text :optional (shift-mark? #f))
-;;   (let ((col (grv-text'cursor-column))
-;;         (row (grv-text'cursor-row)))
-;;     (cond
-;;       ((< col (string-length (grv-text'get-line row)))
-;;        (grv-text'previous-char 1 shift-mark?))
-;;       ((< (~ grv-text'start-row) row)
-;;        (grv-text'previous-line 1 shift-mark?)
-;;        (grv-text'end-of-line shift-mark?))
-;;       (else
-;;        #f))))
+(define (edit:newline-or-commit input-context)
+  (delete-mark-region input-context)
+  (with-slots (text-element input-continues offset cursor-column cursor-row) input-context
+    (let1 text (get-input-content input-context)
+      (cond
+        ((or (and (procedure? input-continues)
+                  (input-continues text))
+             input-continues)
+         ;; newline
+         (split-input-line! input-context cursor-row cursor-column)
+         (set! cursor-row (+ cursor-row 1))
+         (set! cursor-column offset)
+         (draw-input-area input-context (- cursor-row 1)))
+        (else
+         ;; commit
+         (finish-edit input-context 'commit))))))
 
-(define (read-string-from-grv-text grv-text :key (prompt "") (setup #f) (input-continues #f))
-  (define (get-line row)
-    (let1 line (grv-text'get-line row)
-      (substring line (get-start-column grv-text row) (string-length line))))
+(define (edit:cancel-edit input-context)
+  (finish-edit input-context 'cancel))
 
-  (define (get-prompt)
+(define (edit:previous-line input-context)
+  (with-slots (text-element cursor-column cursor-row start-row end-row offset force-mark?) input-context
     (cond
-      ((string? prompt)
-       prompt)
-      ((procedure? prompt)
-       (prompt (- (grv-text'cursor-row) (~ grv-text'start-row))))))
+      ((< start-row cursor-row)
+       (if (or force-mark? (shift-pressed? input-context))
+         (set-mark! input-context)
+         (clear-mark! input-context))
+       (set! cursor-row (- cursor-row 1))
+       (text-element'move-cursor cursor-column cursor-row)
+       (when (or force-mark? (shift-pressed? input-context))
+         (set-mark! input-context)))
+      (else
+       #f))))
 
-  (define (line-edit-loop)
-    (case (start-line-edit grv-text (get-prompt))
-      ((newline-or-commit)
-       (let* ((row (grv-text'cursor-row))
-              (line (get-line row)))
-         (hash-table-put! (~ grv-text'input-line-table) row line))
-       (let1 text (get-input-text grv-text)
-         (cond
-           ((and (procedure? input-continues)
-                 (input-continues text))
-            ;; newline
-            (grv-text'print-text "\n")
-            (set! (~ grv-text'end-row) (max (~ grv-text'end-row) (grv-text'cursor-row)))
-            (line-edit-loop))
-           (else
-            ;; commit
-            text))))
-      ((cancel)
-       #f)))
+(define (edit:next-line input-context)
+  (with-slots (text-element cursor-column cursor-row start-row end-row offset force-mark?) input-context
+    (cond
+      ((< cursor-row end-row)
+       (if (or force-mark? (shift-pressed? input-context))
+         (set-mark! input-context)
+         (clear-mark! input-context))
+       (set! cursor-row (+ cursor-row 1))
+       (text-element'move-cursor cursor-column cursor-row)
+       (when (or force-mark? (shift-pressed? input-context))
+         (set-mark! input-context)))
+      (else
+       #f))))
 
-  (unless (or (eq? input-continues #f)
-              (procedure? input-continues))
-    (errorf "<procedure> or #f required, but got ~s" input-continues))
-  (unless (or (string? prompt)
-              (procedure? prompt))
-    (errorf "<string> or <procedure> required, but got ~s" prompt))
+(define (edit:previous-char input-context)
+  (with-slots (text-element cursor-column cursor-row start-row end-row offset force-mark?) input-context
+    (if (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context)
+      (clear-mark! input-context))
+    (cond
+      ((< offset cursor-column)
+       (set! cursor-column (- cursor-column 1))
+       (text-element'move-cursor cursor-column cursor-row))
+      ((< start-row cursor-row)
+       (set! cursor-row (- cursor-row 1))
+       (set! cursor-column (end-of-line-column input-context cursor-row))
+       (text-element'move-cursor cursor-column cursor-row))
+      (else
+       #f))
+    (when (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context))))
 
-  ;; TODO: Implement input-continues for multi-line edit.
-  (let1 row (grv-text'cursor-row)
-    (set! (~ grv-text'start-row) row)
-    (set! (~ grv-text'end-row) row))
-  (hash-table-clear! (~ grv-text'input-line-table))
-  (hash-table-clear! (~ grv-text'start-column-table))
-  (set! (~ grv-text'text-input-handler) (lambda (input-str)
-                                          (match-let1 (str rest ...) (string-split input-str "\n")
-                                            (grv-text'insert-text str)
-                                            (unless (null? rest)
-                                              (for-each (cut enqueue-input grv-text <>) (intersperse "\n" rest))
-                                              (newline-or-commit grv-text)))))
+(define (edit:forward-char input-context)
+  (with-slots (text-element cursor-column cursor-row start-row end-row offset force-mark?) input-context
+    (if (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context)
+      (clear-mark! input-context))
+    (cond
+      ((< cursor-column (end-of-line-column input-context cursor-row))
+       (set! cursor-column (+ cursor-column 1))
+       (text-element'move-cursor cursor-column cursor-row))
+      ((< cursor-row end-row)
+       (set! cursor-row (+ cursor-row 1))
+       (set! cursor-column offset)
+       (text-element'move-cursor cursor-column cursor-row))
+      (else
+       #f))
+    (when (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context))))
 
-  (setup-default-line-edit-key-binding grv-text)
-  (when setup
-    (setup))
+(define (edit:beginning-of-line input-context)
+  (with-slots (text-element cursor-column cursor-row start-row end-row offset force-mark?) input-context
+    (if (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context)
+      (clear-mark! input-context))
+    (set! cursor-column offset)
+    (text-element'move-cursor cursor-column cursor-row)
+    (when (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context))))
 
-  (grv-text'focus)
+(define (edit:end-of-line input-context)
+  (with-slots (text-element cursor-column cursor-row start-row end-row offset force-mark?) input-context
+    (if (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context)
+      (clear-mark! input-context))
+    (set! cursor-column (end-of-line-column input-context cursor-row))
+    (text-element'move-cursor cursor-column cursor-row)
+    (when (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context))))
 
-  (unwind-protect
-      (line-edit-loop)
-    (hash-table-clear! (~ grv-text'input-line-table))
-    (hash-table-clear! (~ grv-text'start-column-table))
-    (set! (~ grv-text'start-row) #f)
-    (set! (~ grv-text'end-row) #f)))
+(define (edit:beginning-of-edit-area input-context)
+  (with-slots (text-element cursor-column cursor-row start-row end-row offset force-mark?) input-context
+    (if (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context)
+      (clear-mark! input-context))
+    (set! cursor-column offset)
+    (set! cursor-row start-row)
+    (text-element'move-cursor cursor-column cursor-row)
+    (when (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context))))
 
+(define (edit:end-of-edit-area input-context)
+  (with-slots (text-element cursor-column cursor-row start-row end-row offset force-mark?) input-context
+    (if (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context)
+      (clear-mark! input-context))
+    (set! cursor-row end-row)
+    (set! cursor-column (end-of-line-column input-context cursor-row))
+    (text-element'move-cursor cursor-column cursor-row)
+    (when (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context))))
+
+(define (edit:page-up input-context)
+  (with-slots (text-element cursor-column cursor-row start-row end-row offset force-mark?) input-context
+    (if (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context)
+      (clear-mark! input-context))
+    (set! cursor-row (max start-row (- cursor-row (~ text-element'page-size))))
+    (text-element'move-cursor cursor-column cursor-row)
+    (when (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context))))
+
+(define (edit:page-down input-context)
+  (with-slots (text-element cursor-column cursor-row start-row end-row offset force-mark?) input-context
+    (if (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context)
+      (clear-mark! input-context))
+    (set! cursor-row (min end-row (+ cursor-row (~ text-element'page-size))))
+    (text-element'move-cursor cursor-column cursor-row)
+    (when (or force-mark? (shift-pressed? input-context))
+      (set-mark! input-context))))
+
+(define (edit:backward-delete-char input-context)
+  (with-slots (text-element cursor-column cursor-row start-row end-row offset) input-context
+    (with-slots (text-mark) text-element
+      (cond
+        (text-mark
+         (delete-mark-region input-context))
+        ((< offset cursor-column)
+         (let* ((line (get-input-line input-context cursor-row))
+                (i (- cursor-column offset))
+                (head (string-take line (- i 1)))
+                (tail (string-drop line i)))
+           ;; Need to update cursor-column before set-input-line!.
+           ;; Referencing cursor-column returns the length of the input line if the actual value exceeds the length.
+           (dec! cursor-column)
+           (set-input-line! input-context cursor-row (string-append head tail))
+           (draw-input-area input-context cursor-row cursor-row)))
+        ((< start-row cursor-row)
+         (set! cursor-row (- cursor-row 1))
+         (set! cursor-column (+ offset (string-length (get-input-line input-context cursor-row))))
+         (concat-input-line! input-context cursor-row)
+         (draw-input-area input-context cursor-row))
+        (else
+         #f)))))
+
+(define (edit:delete-char input-context)
+  (with-slots (text-element cursor-column cursor-row start-row end-row offset) input-context
+    (with-slots (text-mark) text-element
+      (cond
+        (text-mark
+         (delete-mark-region input-context))
+        ((< cursor-column (end-of-line-column input-context cursor-row))
+         (let* ((line (get-input-line input-context cursor-row))
+                (i (- cursor-column offset))
+                (head (string-take line i))
+                (tail (string-drop line (+ i 1))))
+           (set-input-line! input-context cursor-row (string-append head tail))
+           (draw-input-area input-context cursor-row cursor-row)))
+        ((< cursor-row end-row)
+         (concat-input-line! input-context cursor-row)
+         (draw-input-area input-context cursor-row))
+        (else
+         #f)))))
+
+(define (read-text/edit grv-text
+                        :key
+                        (prompt "")
+                        (keymap #f)
+                        (input-continues #f)
+                        (initial-text #f)
+                        ((:cursor-column initial-cursor-column) #f)
+                        ((:cursor-row initial-cursor-row) #f)
+                        (on-change #f)
+                        (on-input #f))
+  (let* ((row (grv-text'cursor-row))
+         (cursor-visibility (grv-text'cursor-visible?))
+         (keymap (or keymap (global-keymap)))
+         (input-context (make <input-context>
+                          :text-element grv-text
+                          :row row
+                          :input-continues input-continues
+                          :keymap keymap
+                          :prompter (cond
+                                      ((string? prompt)
+                                       (lambda _ prompt))
+                                      ((list? prompt)
+                                       (lambda (row)
+                                         (list-ref prompt (min row (length prompt)))))
+                                      ((procedure? prompt)
+                                       prompt)
+                                      (else
+                                       (errorf "<string>, <list> or <procedure> required, but got ~s" prompt))))))
+    (define post-input-proc
+      (let1 previous-version (~ input-context'version)
+        (lambda (type str)
+          (when (eq? type 'text)
+            (process-queued-input input-context))
+          (when on-input
+            (on-input input-context type str))
+          (let1 ver (~ input-context'version)
+            (when (and (not (equal? previous-version ver))
+                       on-change)
+              (on-change input-context))
+            (set! previous-version ver)))))
+    (define (clipboard-proc type)
+      (when (eq? type 'cut)
+        (delete-mark-region input-context)))
+    (define (mouse-proc event-name col row)
+      (with-slots (start-row end-row cursor-column cursor-row offset) input-context
+        (when (and (<= start-row row end-row)
+                   (<= offset col))
+          (cond
+            ((equal? event-name "S-Mouse-Click-0")
+             (set! cursor-column col)
+             (set! cursor-row row)
+             (set-mark! input-context col row)
+             (draw-input-area input-context row row))
+            ((or (equal? event-name "Mouse-Click-0")
+                 (equal? event-name "Mouse-Drag-0"))
+             (set! cursor-column col)
+             (set! cursor-row row)
+             (draw-input-area input-context row row))
+            (else
+             #f)))))
+
+    (with-slots (key-event-handler post-input-hook clipboard-hook mouse-hook) grv-text
+      (unwind-protect
+          (with-slots (offset cursor-column cursor-row edit-cont keymap this-key start-row end-row) input-context
+            (set! key-event-handler
+                  (lambda (key)
+                    (and-let1 proc (find-key-proc keymap key)
+                      (dynamic-wind
+                          (lambda ()
+                            (set! this-key key))
+                          (lambda ()
+                            (proc input-context))
+                          (lambda ()
+                            (set! this-key #f))))))
+            (add-hook! post-input-hook post-input-proc)
+            (add-hook! clipboard-hook clipboard-proc)
+            (add-hook! mouse-hook mouse-proc)
+            (enable-input-queue grv-text)
+
+            (switch-keymap input-context keymap)
+
+            (grv-text'move-cursor-horizontal-absolute 0)
+            (grv-text'erase-line 0)
+            (grv-text'print-text (get-prompt input-context row))
+            (grv-text'set-start-column)
+            (set! offset (grv-text'cursor-column))
+            (set! cursor-column offset)
+
+            (when initial-text
+              (clear-input-buffer! grv-text)
+              (enqueue-input grv-text initial-text)
+              (process-queued-input input-context)
+              ;; Reset the content version.
+              (set! (~ input-context'version) 0))
+
+            (when initial-cursor-row
+              (set! cursor-row (min (+ start-row initial-cursor-row) end-row)))
+            (when initial-cursor-column
+              (set! cursor-column initial-cursor-column))
+
+            (draw-input-area input-context)
+
+            (grv-text'focus)
+            (grv-text'show-cursor)
+            (let-values (((text reason) (shift-callback callback
+                                          (set! edit-cont callback))))
+              (case reason
+                ((commit)
+                 text)
+                (else
+                 #f))))
+        (switch-keymap input-context #f)
+        (delete-hook! post-input-hook post-input-proc)
+        (delete-hook! clipboard-hook clipboard-proc)
+        (delete-hook! mouse-hook mouse-proc)
+        (unless cursor-visibility
+          (grv-text'hide-cursor))
+        (set! key-event-handler #f)))))
