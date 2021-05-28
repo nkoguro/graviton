@@ -50,7 +50,7 @@
           wait-track
           wait-all-tracks
 
-          beep))
+          play-beep))
 
 (select-module graviton.grut.audio)
 
@@ -385,6 +385,6 @@
   (apply enqueue-mml args)
   (apply resume-track (filter keyword? args)))
 
-(define (beep freq len :key (wave-form 'sine) (volume 1))
+(define (play-beep freq len :key (wave-form 'sine) (volume 1))
   (play-mml :beep `((oscillator ,freq ,wave-form 0 ,len 0 0 ,volume 0))))
 
