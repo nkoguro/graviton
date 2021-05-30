@@ -56,7 +56,7 @@
                                          (if modified? "*" "")
                                          (or filename "Untitled"))))
       (define (update-status! ctx type str)
-        (status'remove-all-lines)
+        (clear-screen status)
         (cond
           ((and (eq? type 'key)
                 (equal? str "C-/"))
@@ -77,7 +77,7 @@
                              ""
                            (format status "New file - ~a" filename))))
           (update-title! #f)
-          (buffer'remove-all-lines)
+          (clear-screen buffer)
           (read-text/edit buffer
                           :input-continues #t
                           :initial-text content
@@ -91,18 +91,11 @@
 
       (bind-key (global-keymap) "C-/ f" (lambda (input-context)
                                           (let1 str (read-text/edit status :prompt "File: " :keymap status-keymap :initial-text "")
-                                            (status'remove-all-lines)
+                                            (clear-screen status)
                                             (when str
                                               (edit:cancel-edit input-context)
                                               (start-editor str)))))
-      (add-hook! (~ buffer'pre-input-hook) (lambda (type str)
-                                             (status'remove-all-lines)
-                                             (when (eq? type 'key)
-                                               (cond
-                                                 ((equal? str "C-/")
-                                                  (display "C-/" status))
-                                                 (else
-                                                  #t)))))
+
       (start-editor #f))))
 
 (define (main args)

@@ -1,5 +1,5 @@
-import { logDebugMessage } from "../graviton.mjs";
-import { registerAnimationFrameCallback } from "/_g/graviton.mjs";
+import { registerAnimationFrameCallback, logDebugMessage } from "/_g/graviton.mjs";
+import { copyTextToClipboard } from "/_g/grut/clipboard.mjs";
 
 const MAIN_CURSOR_ID = 'grv-main-cursor-id';
 //foo
@@ -505,6 +505,21 @@ const TEXT_CONSOLE_STYLE = `
     color: black;
     background-color: white;
 }
+
+@keyframes visual-bell-animation {
+    100% {
+        filter: invert(100);
+        background: var(--grv-text-edit-background-color);
+    }
+}
+
+.visual-bell {
+    animation-name: visual-bell-animation;
+    animation-duration: 0.1s;
+    animation-timing-function: step-start;
+    animation-delay: 0s;
+    animation-iteration-count: 1;
+}
 `
 
 const BACKGROUND_COLOR_PROPERTY = '--grv-text-edit-background-color';
@@ -526,6 +541,7 @@ class GrvText extends HTMLElement {
         this.startColumnList = [0];
         this.updatedRowSet = new Set([0]);
         this.currentAttribute = DEFAULT_ATTRIBUTE;
+        this.savedAttributes = [];
         this.mark = null;
         this.autoScrollHandler = undefined;
         this.isCompositionStarted = false;
@@ -572,9 +588,13 @@ class GrvText extends HTMLElement {
         this.view.addEventListener('paste', (e) => {
             this.clipboardCallback(CLIPBOARD_PASTE);
         });
+        this.view.addEventListener('animationend', (e) => {
+            if (e.animationName === 'visual-bell-animation') {
+                this.view.classList.remove('visual-bell');
+            }
+        });
 
         this.inputEventCallback = undefined;
-        this.inputEventEnabled = false;
         this.keyEventCallback = undefined;
         this.keyEventAvailabilityTable = {};
         this.keyEventAvailabilityTableStack = [];
@@ -604,10 +624,6 @@ class GrvText extends HTMLElement {
         this.mouseEventCallback = mouseEventCallback;
     }
 
-    enableInputEvent(flag) {
-        this.inputEventEnabled = flag;
-    }
-
     // availability := false | Integer
     setKeyEventAvailability(keyEvent, availability) {
         keyEvent.split(' ').slice(0, -1).reduce((prefix, evt) => {
@@ -622,12 +638,12 @@ class GrvText extends HTMLElement {
         this.keyEventAvailabilityTable = {};
     }
 
-    pushKeyEventAvailability() {
+    saveKeyEventAvailability() {
         this.keyEventAvailabilityTableStack.push(this.keyEventAvailabilityTable);
         this.keyEventAvailabilityTable = Object.assign({}, this.keyEventAvailabilityTable);
     }
 
-    popKeyEventAvailability() {
+    restoreKeyEventAvailability() {
         const tbl = this.keyEventAvailabilityTableStack.pop();
         if (tbl) {
             this.keyEventAvailabilityTable = tbl;
@@ -664,23 +680,38 @@ class GrvText extends HTMLElement {
 
         const dummyDiv = document.createElement('div');
         dummyDiv.innerText = 'M';
+        dummyDiv.style.display = 'inline-block';
         this.view.appendChild(dummyDiv);
         const charRect = dummyDiv.getBoundingClientRect();
         this.lineHeight = charRect.height;
         this.characterWidth = charRect.width;
         this.view.removeChild(dummyDiv);
 
-        const dataColumn = Number(this.dataset.column);
-        if (dataColumn) {
-            this.style.width = this.characterWidth * dataColumn;
+        const widthColumn = parseInt(this.getAttribute('column'));
+        if (widthColumn) {
+            this.style.width = this.characterWidth * widthColumn;
+            this.widthCharacter = widthColumn;
+        } else {
+            this.widthCharacter = undefined;
         }
-        const dataRow = Number(this.dataset.row);
-        if (dataRow) {
-            this.style.height = this.lineHeight * dataRow;
+        const heightRow = parseInt(this.getAttribute('row'));
+        if (heightRow) {
+            this.style.height = this.lineHeight * heightRow;
+            this.heightCharacter = heightRow;
+        } else {
+            this.heightCharacter = undefined;
         }
     }
 
     ///
+
+    get bellStyle() {
+        return this.getAttribute('bellstyle') || 'audible';
+    }
+
+    set bellStyle(style) {
+        this.setAttribute('bellstyle', style);
+    }
 
     get rows() {
         return this.attrCharsList.length;
@@ -705,6 +736,14 @@ class GrvText extends HTMLElement {
 
     line(row = this.cursor.row) {
         return new TextLine(this, row, this.attrCharsList[row]);
+    }
+
+    queryScreenSize() {
+        const viewRect = this.view.getBoundingClientRect();
+        return [
+            Math.floor(this.widthCharacter || viewRect.width / this.characterWidth),
+            Math.floor(this.heightCharacter || viewRect.height / this.lineHeight)
+        ];
     }
 
     ///
@@ -908,6 +947,10 @@ class GrvText extends HTMLElement {
         }
     }
 
+    visualBell() {
+        this.view.classList.add('visual-bell');
+    }
+
     appendEmptyLine(n = 1) {
         for (let i = 0; i < n; ++i) {
             this.attrCharsList.push([]);
@@ -985,25 +1028,7 @@ class GrvText extends HTMLElement {
 
     copyMarkRegionToClipboard() {
         const text = this.extractMarkRegionText();
-        this.copyToClipboard(text);
-    }
-
-    copyToClipboard(str) {
-        const cb = navigator.clipboard || window.clipboard;
-        if (cb) {
-            cb.writeText(str);
-        } else {
-            const activeElement = document.activeElement;
-            const textArea = document.createElement('textarea');
-            textArea.textContent = str;
-            document.body.appendChild(textArea);
-            textArea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textArea);
-            if (activeElement) {
-                activeElement.focus();
-            }
-        }
+        copyTextToClipboard(text);
     }
 
     processMarkRegion(remove) {
@@ -1060,69 +1085,21 @@ class GrvText extends HTMLElement {
         this.currentAttribute = new TextAttribute(cssClasses || [], styleJson || {});
     }
 
-    setColor(fgColor, bgColor) {
-        const newStyle = Object.assign({}, this.currentAttribute.styleJson);
-        if (fgColor) {
-            newStyle['color'] = fgColor;
-        }
-        if (bgColor) {
-            newStyle['background-color'] = bgColor;
-        }
-        this.currentAttribute = new TextAttribute(this.currentAttribute.cssClasses, newStyle);
+    saveTextAttribute() {
+        this.savedAttributes.push(this.currentAttribute);
     }
 
-    setForegroundColor(color) {
+    restoreTextAttribute() {
+        this.currentAttribute = this.savedAttributes.pop() || this.currentAttribute;
+    }
+
+    updateTextAttribute(key, value) {
         const newStyle = Object.assign({}, this.currentAttribute.styleJson);
-        if (color) {
-            newStyle['color'] = color;
+        if (value) {
+            newStyle[key] = value;
         } else {
-            delete newStyle['color'];
+            delete newStyle[key];
         }
-        this.currentAttribute = new TextAttribute(this.currentAttribute.cssClasses, newStyle);
-    }
-
-    setBackgroundColor(color) {
-        const newStyle = Object.assign({}, this.currentAttribute.styleJson);
-        if (color) {
-            newStyle['background-color'] = color;
-        } else {
-            delete newStyle['background-color'];
-        }
-        this.currentAttribute = new TextAttribute(this.currentAttribute.cssClasses, newStyle);
-    }
-
-    setFontStyle(fontStyle) {
-        const newStyle = Object.assign({}, this.currentAttribute.styleJson);
-        if (fontStyle) {
-            newStyle['font-style'] = fontStyle;
-        } else {
-            delete newStyle['font-style'];
-        }
-        this.currentAttribute = new TextAttribute(this.currentAttribute.cssClasses, newStyle);
-    }
-
-    setTextDecoration(decoration) {
-        const newStyle = Object.assign({}, this.currentAttribute.styleJson);
-        if (decoration) {
-            newStyle['text-decoration'] = decoration;
-        } else {
-            delete newStyle['text-decoration'];
-        }
-        this.currentAttribute = new TextAttribute(this.currentAttribute.cssClasses, newStyle);
-    }
-
-    invertTextColor() {
-        const span = document.createElement('span');
-        this.currentAttribute.updateSpan(span);
-        this.view.appendChild(span);
-        const spanStyle = window.getComputedStyle(span);
-        const fgColor = spanStyle['color'];
-        const bgColor = spanStyle['background-color'];
-
-        const newStyle = Object.assign({}, this.currentAttribute.styleJson);
-        newStyle['color'] = bgColor;
-        newStyle['background-color'] = fgColor;
-
         this.currentAttribute = new TextAttribute(this.currentAttribute.cssClasses, newStyle);
     }
 
@@ -1290,7 +1267,7 @@ class GrvText extends HTMLElement {
     // Keyboard event
 
     handleInputText(text) {
-        if (this.inputEventCallback && this.inputEventEnabled) {
+        if (this.inputEventCallback) {
             this.inputEventCallback(text);
         }
     }
@@ -1338,7 +1315,7 @@ class GrvText extends HTMLElement {
         if (keyboardEvent.ctrlKey && keyboardEvent.key !== 'Control') {
             str += 'C-';
         }
-        if (keyboardEvent.shiftKey && keyboardEvent.key !== 'Shift') {
+        if (keyboardEvent.shiftKey && keyboardEvent.key !== 'Shift' && keyboardEvent.key.length > 1) {
             str += 'S-';
         }
         const key = keyboardEvent.key === ' ' ? 'Space' : keyboardEvent.key;

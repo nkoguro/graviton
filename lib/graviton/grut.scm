@@ -39,10 +39,14 @@
   (use util.list)
   (use util.match)
 
-  (extend graviton.grut.audio graviton.grut.text)
+  (extend graviton.grut.audio
+          graviton.grut.clipboard
+          graviton.grut.text)
 
   (export load-image
-          load-audio))
+          load-audio
+
+          copy-text-to-clipboard))
 
 (select-module graviton.grut)
 
@@ -86,4 +90,5 @@
           ((:error) (errorf "Failed to load audio: ~a (~a)" url err))
           (else
            (errorf "bad value for :on-error argument; must be #f or :error, but got ~s" on-error))))))
+
 
