@@ -62,6 +62,7 @@
           worker-submit-task
           worker-yield!
           worker-fire-event
+          worker-call-event
           on-event
           on-idle
           <worker-callback>
@@ -121,7 +122,7 @@
              (log-framework-debug "Invoke idle handler in worker: ~s" worker)
              (invoke-thunk 'low thunk))
            #t)
-          (((? real? timestamp) (? symbol? event-name) args ...)
+          (((? real? timestamp) (? symbol? event-name) result-callback args ...)
            (and-let* ((proc+priority (hash-table-get (~ worker'event-table) event-name #f))
                       (proc (car proc+priority))
                       (priority (cdr proc+priority)))
@@ -130,7 +131,7 @@
                (invoke-thunk priority (cut apply proc args))
                (enqueue-task! worker
                               (task-priority->value priority)
-                              (cons priority (^() (apply proc args)))
+                              (cons priority (^() (apply (or result-callback values) (values->list (apply proc args)))))
                               :timestamp timestamp)))
            #t)
           (((? symbol? priority) . (? procedure? thunk))
@@ -347,7 +348,7 @@
   (hash-table-delete! (~ (current-worker)'event-table) event))
 
 (define (worker-fire-event worker event :rest args)
-  (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event args)))
+  (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event #f args)))
 
 (define-syntax on-event
   (syntax-rules (:priority)
@@ -432,6 +433,10 @@
      (worker-shift cont
        (let1 callback (worker-callback cont)
          expr ...)))))
+
+(define (worker-call-event worker event :rest args)
+  (shift-callback callback
+    (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event callback args))))
 
 ;;;
 

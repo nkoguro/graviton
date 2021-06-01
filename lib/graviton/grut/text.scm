@@ -41,6 +41,7 @@
   (use graviton.app)
   (use graviton.async)
   (use graviton.browser-objects)
+  (use graviton.comm)
   (use graviton.grut.audio)
   (use graviton.grut.clipboard)
   (use graviton.jsffi)
@@ -58,6 +59,8 @@
           clipboard-text
           <input-context>
           <grv-text>
+
+          get-text-input-port
 
           call-with-console
           putch
@@ -482,6 +485,35 @@
   (with-slots (input-queue) grv-text
     (dequeue-all! input-queue))
   (undefined))
+
+(define (get-text-input-port grv-text :key (echo? #t))
+  (with-slots (input-queue) grv-text
+    (let1 in #f
+      (make <virtual-input-port>
+        :getb (lambda ()
+                (let loop ((b (if in
+                                (read-byte in)
+                                (eof-object))))
+                  (cond
+                    ((eof-object? b)
+                     (set! in (open-input-string
+                                (rlet1 str (match (dequeue/wait! input-queue)
+                                            (('text str)
+                                             str)
+                                            (('key key clipboard)
+                                             (if (#/C-[a-zA-Z]/ key)
+                                               (string (ucs->char (- (char->ucs (first
+                                                                                  (string->list
+                                                                                    (string-downcase
+                                                                                      (string-take-right key 1)))))
+                                                                     #x60)))
+                                               "")))
+                                  (when echo?
+                                    (putstr grv-text str)
+                                    (flush-client-request)))))
+                     (loop (read-byte in)))
+                    (else
+                     b))))))))
 
 ;;;
 
@@ -1277,7 +1309,8 @@
       (cond
         ((or (and (procedure? input-continues)
                   (input-continues text))
-             input-continues)
+             (and (not (procedure? input-continues))
+                  input-continues))
          ;; newline
          (split-input-line! input-context cursor-row cursor-column)
          (set! cursor-row (+ cursor-row 1))
@@ -1497,7 +1530,7 @@
                                        (lambda _ prompt))
                                       ((list? prompt)
                                        (lambda (row)
-                                         (list-ref prompt (min row (length prompt)))))
+                                         (list-ref prompt (min row (- (length prompt) 1)))))
                                       ((procedure? prompt)
                                        prompt)
                                       (else
