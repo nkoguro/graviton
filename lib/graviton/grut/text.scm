@@ -274,7 +274,7 @@
     (or (car (hash-table-get key-table key '(#f #f)))
         (and parent (find-key-proc parent key)))))
 
-(define global-keymap (make-session-parameter*
+(define global-keymap (make-window-parameter*
                         (lambda ()
                           (rlet1 keymap (make-keymap)
                             ;; TODO: Check user-agent here

@@ -92,11 +92,11 @@
           grv-window
           let-elements
 
-          <session-parameter>
-          make-session-parameter
-          make-session-parameter*
-          session-parameter-atomic-ref
-          session-parameter-atomic-update!
+          <window-parameter>
+          make-window-parameter
+          make-window-parameter*
+          window-parameter-atomic-ref
+          window-parameter-atomic-update!
 
           query-parameters
 
@@ -400,7 +400,7 @@
               (terminate-server-loop *control-channel* exit-code)))))
       (format "websocket-main-loop: ~s" ctx))))
 
-(define query-parameters (make-session-parameter '()))
+(define query-parameters (make-window-parameter '()))
 
 (define-http-handler #/\/_s(\/.*)?/
   (lambda (req app)

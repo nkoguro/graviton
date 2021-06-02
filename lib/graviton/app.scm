@@ -49,11 +49,11 @@
           application-context-slot-ref
           application-context-slot-set!
           define-application-context-slot
-          <session-parameter>
-          make-session-parameter
-          make-session-parameter*
-          session-parameter-atomic-ref
-          session-parameter-atomic-update!
+          <window-parameter>
+          make-window-parameter
+          make-window-parameter*
+          window-parameter-atomic-ref
+          window-parameter-atomic-update!
 
           user-agent
 
@@ -123,27 +123,27 @@
 (define (register-application-context-slot! name init-proc)
   (push! *application-context-slot-initial-forms* (cons name init-proc)))
 
-(define-class <session-parameter> ()
+(define-class <window-parameter> ()
   ((key :init-form (gensym))))
 
-(define (make-session-parameter* init-proc)
-  (rlet1 sparam (make <session-parameter>)
-    (register-application-context-slot! (slot-ref sparam 'key) (lambda ()
+(define (make-window-parameter* init-proc)
+  (rlet1 wparam (make <window-parameter>)
+    (register-application-context-slot! (slot-ref wparam 'key) (lambda ()
                                                                  (values->list (init-proc))))))
 
-(define (make-session-parameter :rest vals)
-  (make-session-parameter* (^() (apply values vals))))
+(define (make-window-parameter :rest vals)
+  (make-window-parameter* (^() (apply values vals))))
 
-(define (session-parameter-atomic-ref sparam proc)
-  (application-context-slot-atomic-ref (slot-ref sparam 'key) proc))
+(define (window-parameter-atomic-ref wparam proc)
+  (application-context-slot-atomic-ref (slot-ref wparam 'key) proc))
 
-(define (session-parameter-atomic-update! sparam proc)
-  (application-context-slot-atomic-update! (slot-ref sparam 'key) proc))
+(define (window-parameter-atomic-update! wparam proc)
+  (application-context-slot-atomic-update! (slot-ref wparam 'key) proc))
 
-(define-method object-apply ((sparam <session-parameter>) :rest args)
+(define-method object-apply ((wparam <window-parameter>) :rest args)
   (if (null? args)
-    (session-parameter-atomic-ref sparam values)
-    (session-parameter-atomic-update! sparam (^_ (apply values args)))))
+    (window-parameter-atomic-ref wparam values)
+    (window-parameter-atomic-update! wparam (^_ (apply values args)))))
 
 
 (define-syntax define-application-context-slot
@@ -217,7 +217,7 @@
 
 ;;;
 
-(define user-agent (make-session-parameter #f))
+(define user-agent (make-window-parameter #f))
 
 ;;;
 
