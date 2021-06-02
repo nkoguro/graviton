@@ -207,8 +207,9 @@ class UpdateContext {
 }
 
 class LineUpdater {
-    constructor(context, row, attrChars, spanIter) {
+    constructor(context, offset, row, attrChars, spanIter) {
         this.context = context;
+        this.offset = offset;
         this.row = row;
         this.attrChars = attrChars;
         this.spanIter = spanIter;
@@ -219,7 +220,7 @@ class LineUpdater {
         if (this.context.hasFocus && this.context.cursor.existsAt(col, this.row)) {
             computedAttr = computedAttr.blend(this.context.cursor.attribute);
         }
-        if (this.context.mark && !endOfLine) {
+        if (this.offset <= col && this.context.mark && !endOfLine) {
             computedAttr = computedAttr.blend(this.context.mark.attrAt(col, this.row));
         }
         return computedAttr;
@@ -1252,7 +1253,7 @@ class GrvText extends HTMLElement {
                 this.view.appendChild(newLineDiv);
             }
             const spanIter = new SpanIterator(lineDivNodes[row]);
-            const updater = new LineUpdater(context, row, attrChars, spanIter);
+            const updater = new LineUpdater(context, this.startColumnList[row], row, attrChars, spanIter);
             updater.update();
         });
         this.updatedRowSet.clear();
