@@ -104,6 +104,7 @@
           edit:paste
           edit:previous-char
           edit:previous-line
+          edit:select-all
           read-text/edit))
 
 (select-module graviton.grut.text)
@@ -300,7 +301,8 @@
                                         ("S-Home" ,edit:beginning-of-line)
                                         ("End" ,edit:end-of-line)
                                         ("S-End" ,edit:end-of-line)
-                                        ("Enter" ,edit:newline-or-commit)))))))
+                                        ("Enter" ,edit:newline-or-commit)
+                                        ("C-a" ,edit:select-all)))))))
 
 (define-record-type <text-mark>
   make-text-mark text-mark?
@@ -1078,6 +1080,10 @@
                        (text-mark-end-column text-mark)
                        (text-mark-end-row text-mark))))
 
+(define-method set-mark! ((input-context <input-context>) start-col start-row end-col end-row)
+  (with-slots (text-element) input-context
+    (set-mark! text-element start-col start-row end-col end-row)))
+
 (define-method set-mark! ((input-context <input-context>) col row)
   (with-slots (text-element) input-context
     (set-mark! text-element col row)))
@@ -1499,6 +1505,12 @@
 (define (edit:paste input-context)
   (let1 text (clipboard-text input-context)
     (edit:insert-string input-context text)))
+
+(define (edit:select-all input-context)
+  (with-slots (start-row end-row offset) input-context
+    (set-mark! input-context offset start-row (end-of-line-column input-context end-row) end-row)))
+
+;;;
 
 (define (read-text/edit grv-text
                         :key
