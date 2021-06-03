@@ -421,8 +421,6 @@
   "scrollDown"
 
   ("extractMarkRegionText" :result #t)
-  ;; TODO: Move this method to otherwise.
-  "copyToClipboard"
 
   "setMark"
   "clearMark"
@@ -458,11 +456,6 @@
 (define-jsobject-method <grv-text> cursor-visible? ()
   (jslet/result ((self::object))
     (result self.cursor.visible)))
-
-(define (at-start-column? grv-text)
-  (let1 start-col (~ grv-text'input-context'offset)
-    (and start-col
-         (<= (grv-text'cursor-column) start-col))))
 
 (define (enqueue-input grv-text type :rest args)
   (with-slots (input-queue) grv-text
