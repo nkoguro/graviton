@@ -44,8 +44,10 @@
                       :column width
                       :row height
                       :class "grut-monospace-font"
-                      :style (string-join (cons "overflow-y: scroll"
-                                                (if font-size `(,#"font-size:~|font-size|") '())) ";")))
+                      :style (string-join (append '("overflow-y: scroll"
+                                                    "height: 100vh")
+                                                  (if font-size `(,#"font-size:~|font-size|") '()))
+                                          ";")))
 
       (let-elements (text)
         (show-cursor text)
