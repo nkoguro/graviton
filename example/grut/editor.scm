@@ -39,69 +39,67 @@
 
 (bind-url-path "/editor.css" (build-path (sys-dirname (current-load-path)) "editor.css"))
 
-(grv-window
-  :path "/"
-  :css "/editor.css"
-  :body
-  (html:body
-   (html:div :id "container"
-             (html:grv-text :id "buffer")
-             (html:grv-text :id "status")))
-
-  (let-elements (buffer status)
-    (let ((filename #f)
-          (status-keymap (make-keymap (global-keymap))))
-      (define (update-title! modified?)
-        (set! (~ document'title) (format "~a~a - Editor"
-                                         (if modified? "*" "")
-                                         (or filename "Untitled"))))
-      (define (update-status! ctx type str)
-        (clear-screen status)
-        (cond
-          ((and (eq? type 'key)
-                (equal? str "C-/"))
-           (display "C-/" status))
-          (else
-           #t)))
-      (define (start-editor content-filename)
-        (set! filename content-filename)
-        (let1 content (cond
-                        ((not filename)
-                         "")
-                        ((file-exists? filename)
-                         (begin0
-                             (file->string filename)
-                           (format status "Read file - ~a" filename)))
-                        (else
-                         (begin0
-                             ""
-                           (format status "New file - ~a" filename))))
-          (update-title! #f)
-          (clear-screen buffer)
-          (read-text/edit buffer
-                          :input-continues #t
-                          :initial-text content
-                          :cursor-column 0
-                          :cursor-row 0
-                          :on-input update-status!
-                          :on-change (lambda (ctx)
-                                       (update-title! #t)))))
-
-      (bind-key status-keymap "Escape" edit:cancel-edit)
-
-      (bind-key (global-keymap) "C-/ f" (lambda (input-context)
-                                          (let1 str (read-text/edit status :prompt "File: " :keymap status-keymap :initial-text "")
-                                            (clear-screen status)
-                                            (when str
-                                              (edit:cancel-edit input-context)
-                                              (start-editor str)))))
-
-      (start-editor #f))))
-
 (define (main args)
   (let-args (cdr args)
       ((browser? "browser" #f))
 
-    (if browser?
-      (grv-start-server)
-      (grv-start-player :resizable? #t))))
+    (grv-config :client (if browser?
+                          'browser
+                          'player))
+
+    (with-window (grv-window
+                   :css "/editor.css"
+                   :body
+                   (html:body
+                    (html:div :id "container"
+                              (html:grv-text :id "buffer")
+                              (html:grv-text :id "status"))))
+        (buffer status)
+      (let ((filename #f)
+            (status-keymap (make-keymap (global-keymap))))
+        (define (update-title! modified?)
+          (set! (~ document'title) (format "~a~a - Editor"
+                                           (if modified? "*" "")
+                                           (or filename "Untitled"))))
+        (define (update-status! ctx type str)
+          (clear-screen status)
+          (cond
+            ((and (eq? type 'key)
+                  (equal? str "C-/"))
+             (display "C-/" status))
+            (else
+             #t)))
+        (define (start-editor content-filename)
+          (set! filename content-filename)
+          (let1 content (cond
+                          ((not filename)
+                           "")
+                          ((file-exists? filename)
+                           (begin0
+                               (file->string filename)
+                             (format status "Read file - ~a" filename)))
+                          (else
+                           (begin0
+                               ""
+                             (format status "New file - ~a" filename))))
+            (update-title! #f)
+            (clear-screen buffer)
+            (read-text/edit buffer
+                            :input-continues #t
+                            :initial-text content
+                            :cursor-column 0
+                            :cursor-row 0
+                            :on-input update-status!
+                            :on-change (lambda (ctx)
+                                         (update-title! #t)))))
+
+        (bind-key status-keymap "Escape" edit:cancel-edit)
+
+        (bind-key (global-keymap) "C-/ f" (lambda (input-context)
+                                            (let1 str (read-text/edit status :prompt "File: " :keymap status-keymap :initial-text "")
+                                              (clear-screen status)
+                                              (when str
+                                                (edit:cancel-edit input-context)
+                                                (start-editor str)))))
+
+        (start-editor #f)))))

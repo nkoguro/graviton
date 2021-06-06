@@ -2,21 +2,16 @@
 (use graviton)
 (use graviton.grut)
 (use math.const)
-(use text.html-lite)
 
-(grv-window
-  :path "/"
-  :body
-  (html:body
-   (html:canvas :id "canvas" :class "grut-contain" :width 150 :height 200))
-
-  (let-elements (canvas)
+(define (main args)
+  (with-window (make-canvas-window 150 200)
+      (canvas)
     (let1 ctx (canvas'get-context "2d")
       (log-format "window width=~a, height=~a" (~ window'inner-width) (~ window'inner-height))
 
       (on-jsevent window "keyup" (key)
         (when (equal? key "Escape")
-          (grv-exit)))
+          (close-window)))
 
       (on-jsevent canvas "click" (offset-x offset-y)
         (log-format "mouse: x=~a, y=~a" offset-x offset-y))
@@ -34,6 +29,3 @@
             (if (< 1 i)
               (ctx'fill)
               (ctx'stroke))))))))
-
-(define (main args)
-  (grv-start-player))

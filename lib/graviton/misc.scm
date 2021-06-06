@@ -39,10 +39,6 @@
 
   (export make-id-generator
 
-          <client-config>
-          set-config-param!
-          config-with-params
-
           grv-log-config
           grv-access-log-drain
           grv-error-log-drain
@@ -77,9 +73,13 @@
 
 ;;;
 
-(define-class <client-config> ()
+(define-class <grv-config> ()
   ((port :init-value 0
-         :init-keyword :port)))
+         :init-keyword :port)
+   (type :init-value 'player)
+   (window-size :init-value '(800 600))
+   (show? :init-value #t)
+   (resizable? :init-value #f)))
 
 (define-syntax set-config-param!
   (syntax-rules ()

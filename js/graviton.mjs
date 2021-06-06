@@ -783,6 +783,17 @@ export function unregisterAnimationFrameCallback(callback) {
     animationFrameCallbacks.splice(i, 1);
 }
 
+export function openWindow(path, width, height, resizable) {
+    const opts = [`resizable=${resizable ? 'yes' : 'no'}`];
+    if (width) {
+        opts.push(`width=${width}`);
+    }
+    if (height) {
+        opts.push(`height=${height}`);
+    }
+    window.open(path, '_blank', opts.join(','));
+}
+
 window.addEventListener('load', () => {
     window.requestAnimationFrame(handleAnimationFrame);
 });

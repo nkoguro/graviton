@@ -1,19 +1,14 @@
 (use graviton)
 (use graviton.grut)
 (use math.const)
-(use text.html-lite)
 
-(grv-window
-  :path "/"
-  :body
-  (html:body
-   (html:canvas :id "canvas" :class "grut-contain" :width 300 :height 450))
-
-  (let-elements (canvas)
+(define (main args)
+  (with-window (make-canvas-window 300 450)
+      (canvas)
     (let1 ctx (canvas'get-context "2d")
       (on-jsevent window "keyup" (key)
         (when (equal? key "Escape")
-          (grv-exit)))
+          (close-window)))
 
       (ctx'begin-path)
       (ctx'ellipse 150 150 75 112 pi/4 0 (* 2 pi))
@@ -39,6 +34,3 @@
       (ctx'begin-path)
       (ctx'ellipse 240 375 50 30 (* pi 0.25) 0 pi #t)
       (ctx'fill))))
-
-(define (main args)
-  (grv-start-player))

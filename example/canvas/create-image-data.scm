@@ -1,19 +1,14 @@
 (use gauche.uvector)
 (use graviton)
 (use graviton.grut)
-(use text.html-lite)
 
-(grv-window
-  :path "/"
-  :body
-  (html:body
-   (html:canvas :id "canvas" :class "grut-contain" :width 300 :height 150))
-
-  (let-elements (canvas)
+(define (main args)
+  (with-window (make-canvas-window 300 150)
+      (canvas)
     (let1 ctx (canvas'get-context "2d")
       (on-jsevent window "keyup" (key)
         (when (equal? key "Escape")
-          (grv-exit)))
+          (close-window)))
 
       (let* ((image (ctx'create-image-data 100 100))
              (data (make-u8vector (* 100 100 4))))
@@ -26,6 +21,3 @@
           )
         (image-data-update! image data)
         (ctx'put-image-data image 20 20)))))
-
-(define (main args)
-  (grv-start-player))

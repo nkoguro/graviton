@@ -1235,66 +1235,63 @@
   (define (clip offset start-row end-row text-mark)
     (let-values (((from-col to-col) (min&max (text-mark-start-column text-mark) (text-mark-end-column text-mark)))
                  ((from-row to-row) (min&max (text-mark-start-row text-mark) (text-mark-end-row text-mark))))
-      (cond
-        ((< from-row to-row)
-         (let ((from-row-pos (cond
-                               ((< from-row start-row)
-                                'above)
-                               ((<= start-row from-row end-row)
-                                'in)
-                               (else
-                                'below)))
-               (to-row-pos (cond
-                             ((< to-row start-row)
-                              'above)
-                             ((<= start-row to-row end-row)
-                              'in)
-                             (else
-                              'below))))
-           (match (list from-row-pos to-row-pos)
-             ((or ('above 'above)
-                  ('below 'below))
-              (values #f #f #f #f))
-             (('above 'in)
-              (values offset start-row (max offset to-col) to-row))
-             (('above 'below)
-              (values offset start-row (end-of-line-column input-context end-row) end-row))
-             (('in 'in)
-              (values (max offset from-col) from-row (max offset to-col) to-row))
-             (('in below)
-              (values (max offset from-col) from-row (end-of-line-column input-context end-row) end-row)))))
-        ((and (= from-row to-row)
-              (<= offset to-col))
-         (values (max offset from-col) from-row to-col to-row))
-        (else
-         (values #f #f #f #f)))))
+      (let ((from-row-pos (cond
+                            ((< from-row start-row)
+                             'above)
+                            ((<= start-row from-row end-row)
+                             'in)
+                            (else
+                             'below)))
+            (to-row-pos (cond
+                          ((< to-row start-row)
+                           'above)
+                          ((<= start-row to-row end-row)
+                           'in)
+                          (else
+                           'below))))
+        (match (list from-row-pos to-row-pos)
+          ((or ('above 'above)
+               ('below 'below))
+           (values #f #f #f #f))
+          (('above 'in)
+           (values offset start-row (max offset to-col) to-row))
+          (('above 'below)
+           (values offset start-row (end-of-line-column input-context end-row) end-row))
+          (('in 'in)
+           (values (max offset from-col) from-row (max offset to-col) to-row))
+          (('in below)
+           (values (max offset from-col) from-row (end-of-line-column input-context end-row) end-row))))))
 
   (with-slots (text-element start-row end-row cursor-column cursor-row offset) input-context
     (with-slots (text-mark) text-element
       (when text-mark
         (let-values (((from-col from-row to-col to-row) (clip offset start-row end-row text-mark)))
-          (when (and from-col from-row to-col to-row)
-            (cond
-              ((= from-row to-row)
-               (let* ((line (get-input-line input-context from-row))
-                      (head (string-take line (- from-col offset)))
-                      (tail (string-drop line (- to-col offset))))
-                 (set-input-line! input-context from-row (string-append head tail))))
-              (else
-               (let* ((line (get-input-line input-context to-row))
-                      (tail (string-drop line (max 0 (- to-col offset)))))
-                 (set-input-line! input-context to-row tail))
-               (do ((row (- to-row 1) (- row 1)))
-                   ((<= row from-row) #f)
-                 (delete-input-line! input-context row))
-               (let* ((line (get-input-line input-context from-row))
-                      (head (string-take line (max 0 (- from-col offset)))))
-                 (set-input-line! input-context from-row head)
-                 (concat-input-line! input-context from-row))))
-            (set! cursor-column (max offset from-col))
-            (set! cursor-row from-row)
-            (clear-mark! input-context)
-            (draw-input-area input-context from-row)))))))
+          (cond
+            ((and from-col from-row to-col to-row)
+             (cond
+               ((= from-row to-row)
+                (let* ((line (get-input-line input-context from-row))
+                       (head (string-take line (- from-col offset)))
+                       (tail (string-drop line (- to-col offset))))
+                  (set-input-line! input-context from-row (string-append head tail))))
+               (else
+                (let* ((line (get-input-line input-context to-row))
+                       (tail (string-drop line (max 0 (- to-col offset)))))
+                  (set-input-line! input-context to-row tail))
+                (do ((row (- to-row 1) (- row 1)))
+                    ((<= row from-row) #f)
+                  (delete-input-line! input-context row))
+                (let* ((line (get-input-line input-context from-row))
+                       (head (string-take line (max 0 (- from-col offset)))))
+                  (set-input-line! input-context from-row head)
+                  (concat-input-line! input-context from-row))))
+             (set! cursor-column (max offset from-col))
+             (set! cursor-row from-row)
+             (clear-mark! input-context)
+             (draw-input-area input-context from-row)
+             #t)
+            (else
+             #f)))))))
 
 (define (edit:insert-string input-context str)
   (with-slots (text-element) input-context
@@ -1452,8 +1449,9 @@
   (with-slots (text-element cursor-column cursor-row start-row end-row offset) input-context
     (with-slots (text-mark) text-element
       (cond
-        (text-mark
-         (delete-mark-region input-context))
+        ((and text-mark
+              (delete-mark-region input-context))
+         #f)
         ((< offset cursor-column)
          (let* ((line (get-input-line input-context cursor-row))
                 (i (- cursor-column offset))
@@ -1476,8 +1474,9 @@
   (with-slots (text-element cursor-column cursor-row start-row end-row offset) input-context
     (with-slots (text-mark) text-element
       (cond
-        (text-mark
-         (delete-mark-region input-context))
+        ((and text-mark
+              (delete-mark-region input-context))
+         #f)
         ((< cursor-column (end-of-line-column input-context cursor-row))
          (let* ((line (get-input-line input-context cursor-row))
                 (i (- cursor-column offset))

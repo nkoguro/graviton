@@ -3,17 +3,16 @@
 (use srfi-42)
 (use text.html-lite)
 
-(grv-window
-  :path "/"
-  :body
-  (html:body
-   :style "background-color: black; color: white"
-   (html:grv-text :id "text" :class "grut-monospace-font grut-contain" :column 42 :row 15))
-
-  (let-elements (text)
+(define (main args)
+  (with-window (grv-window
+                 :body
+                 (html:body
+                  :style "background-color: black; color: white"
+                  (html:grv-text :id "text" :class "grut-monospace-font grut-contain" :column 42 :row 15)))
+      (text)
     (on-jsevent window "keyup" (key)
       (when (equal? key "Escape")
-        (grv-exit)))
+        (close-window)))
 
     (with-output-to-port text
       (lambda ()
@@ -38,6 +37,3 @@
         (do-ec (: color 232 256)
                (display #"\x1b[48;5;~|color|m "))
         (display "\x1b[0m\n")))))
-
-(define (main args)
-  (grv-start-player))

@@ -1,18 +1,13 @@
 (use graviton)
 (use graviton.grut)
-(use text.html-lite)
 
-(grv-window
-  :path "/"
-  :body
-  (html:body
-   (html:canvas :id "canvas" :class "grut-contain" :width 300 :height 150))
-
-  (let-elements (canvas)
+(define (main args)
+  (with-window (make-canvas-window 300 150)
+      (canvas)
     (let1 ctx (canvas'get-context "2d")
       (on-jsevent window "keyup" (key)
         (when (equal? key "Escape")
-          (grv-exit)))
+          (close-window)))
 
       (ctx'begin-path)
       (ctx'move-to 30 90)
@@ -24,6 +19,3 @@
       (ctx'close-path)
       (set! (~ ctx'fill-style) "green")
       (ctx'fill "evenodd"))))
-
-(define (main args)
-  (grv-start-player))

@@ -4,7 +4,6 @@
 
 (use graviton)
 (use graviton.grut)
-(use text.html-lite)
 (use util.combinations)
 (use util.match)
 
@@ -37,18 +36,13 @@
               (push! pixels (list x y (n->color n *max-n*)))))))
       (worker-fire-event (main-worker) 'draw-tile pixels))))
 
-(grv-window
-  :path "/"
-  :body
-  (html:body
-   :style "background-color: black"
-   (html:canvas :id "canvas" :class "grut-contain" :width *width* :height *height*))
-
-  (let-elements (canvas)
+(define (main args)
+  (with-window (make-canvas-window *width* *height* :background-color "black")
+      (canvas)
     (let1 ctx (canvas'get-context "2d")
       (on-jsevent window "keyup" (key)
         (when (equal? key "Escape")
-          (grv-exit)))
+          (close-window)))
 
       (on-event ('draw-tile :priority 'low) (pixels)
         (fold (lambda (pixel prev-color)
@@ -81,6 +75,3 @@
                                         delta-y
                                         *max-n*)))
                   (cartesian-product (list (iota mesh-x) (iota mesh-y))))))))
-
-(define (main args)
-  (grv-start-player))

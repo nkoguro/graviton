@@ -22,9 +22,7 @@ if (!config) {
 let win = null;
 
 function createWindow() {
-    win = new BrowserWindow({
-        width: config['width'],
-        height: config['height'],
+    const windowOption = {
         useContentSize: true,
         // BrowserWindow's actual height will be incorrect if resizable = false,
         // even though useContentSize = true. So set true here and set the
@@ -36,7 +34,14 @@ function createWindow() {
             enableRemoteModule: false,
             nodeIntegration: false
         }
-    });
+    };
+    if (config['width']) {
+        windowOption['width'] = config['width'];
+    }
+    if (config['height']) {
+        windowOption['height'] = config['height'];
+    }
+    win = new BrowserWindow(windowOption);
     const readyToShowPromise = new Promise(resolve => {
         win.once('ready-to-show', () => {
             resolve();

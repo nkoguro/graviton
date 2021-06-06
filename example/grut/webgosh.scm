@@ -31,43 +31,38 @@
 
 (define (main args)
   (let-args (cdr args) ((use-browser? "b|browser" #f)
-                        (font-size "font-size=s" #f)
-                        (width "w|width=i" #f)
-                        (height "h|height=i" #f))
-    (grv-window
-      :path "/"
-      :head (html:title "gosh on Web")
-      :body
-      (html:body
-       :style "color:white; background-color:black; margin: 0 0 0 5"
-       (html:grv-text :id "text"
-                      :column width
-                      :row height
-                      :class "grut-monospace-font"
-                      :style (string-join (append '("overflow-y: scroll"
-                                                    "height: 100vh")
-                                                  (if font-size `(,#"font-size:~|font-size|") '()))
-                                          ";")))
-
-      (let-elements (text)
-        (show-cursor text)
-        (let1 evaluator (run-worker-thread (cut eval-worker (get-text-input-port text) text))
-          (while #t
-            (match (worker-call-event evaluator 'eval (begin0
-                                                          (read-text/edit text
-                                                                          :prompt '("webgosh>" "........")
-                                                                          :input-continues input-continues?)
-                                                        (newline text)))
-              (('success vals)
-               (for-each (lambda (v)
-                           (write v text)
-                           (newline text))
-                         vals))
-              (('error e)
-               (report-error e text)))))))
-
+                        (font-size "font-size=s" #f))
     (grv-log-config :log-level 1)
 
     (if use-browser?
-      (grv-start-server)
-      (grv-start-player :resizable? #t))))
+      (grv-config :client 'browser)
+      (grv-config :client 'player))
+
+    (with-window
+        (grv-window
+          :title "gosh on Web"
+          :body
+          (html:body
+           :style "color:white; background-color:black; margin: 0 0 0 5"
+           (html:grv-text :id "text"
+                          :class "grut-monospace-font"
+                          :style (string-join (append '("overflow-y: scroll"
+                                                        "height: 100vh")
+                                                      (if font-size `(,#"font-size:~|font-size|") '()))
+                                              ";"))))
+        (text)
+      (show-cursor text)
+      (let1 evaluator (run-worker-thread (cut eval-worker (get-text-input-port text) text))
+        (while #t
+          (match (worker-call-event evaluator 'eval (begin0
+                                                        (read-text/edit text
+                                                                        :prompt '("webgosh>" "........")
+                                                                        :input-continues input-continues?)
+                                                      (newline text)))
+            (('success vals)
+             (for-each (lambda (v)
+                         (write v text)
+                         (newline text))
+                       vals))
+            (('error e)
+             (report-error e text))))))))

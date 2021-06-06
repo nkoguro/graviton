@@ -1,7 +1,6 @@
 (use graviton)
 (use graviton.grut)
 (use srfi-27)
-(use text.html-lite)
 (use util.match)
 
 (define *width* 200)
@@ -50,17 +49,15 @@
           (hash-table-put! new-field x+y #t)))))
     new-field))
 
-(grv-window
-  :path "/"
-  :body
-  (html:body :style "background-color: black"
-             (html:canvas :id "canvas" :class "grut-contain" :width *width* :height *height*))
+(define (main args)
+  (random-source-randomize! default-random-source)
 
-  (let-elements (canvas)
+  (with-window (make-canvas-window *width* *height* :background-color "black")
+      (canvas)
     (let1 ctx (canvas'get-context "2d")
       (on-jsevent window "keyup" (key)
         (when (equal? key "Escape")
-          (grv-exit)))
+          (close-window)))
 
       (let1 field (make-hash-table 'equal?)
         (dotimes (_ (round->exact (* (* *width* *height*) *init-density*)))
@@ -73,11 +70,3 @@
               (render-field ctx field)
               (set! field (compute-new-field field))
               (set! sec 0))))))))
-
-
-(define (main args)
-  (random-source-randomize! default-random-source)
-  (grv-start-player))
-
-
-

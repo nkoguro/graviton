@@ -1,4 +1,3 @@
-
 (use graviton)
 (use graviton.grut)
 (use srfi-1)
@@ -201,7 +200,7 @@
       (#f
        #f)
       (#\x1b
-       (grv-exit))
+       (close-window))
       (_
        (scene-change state 'game)))))
 
@@ -231,7 +230,7 @@
          (set! (~ state'dx) 1)
          (set! (~ state'dy) 0)))
       (#\x1b
-       (grv-exit))
+       (close-window))
       (_
        #f))
     (move-snake state)
@@ -245,7 +244,7 @@
       (#f
        #f)
       (#\x1b
-       (grv-exit))
+       (close-window))
       (_
        (scene-change state 'game)))))
 
@@ -260,14 +259,15 @@
 
 (define *interval-sec* 0.2)
 
-(grv-window
-  :path "/"
-  :body
-  (html:body
-   :style "background-color: black; color: white"
-   (html:grv-text :id "text" :column *text-width* :row *text-height* :class "grut-monospace-font grut-fill"))
-
-  (let-elements (text)
+(define (main args)
+  (with-window (grv-window
+                 :body
+                 (html:body
+                  :style "background-color: black; color: white"
+                  (html:grv-text :id "text" :column *text-width* :row *text-height* :class "grut-monospace-font grut-fill"))
+                 :width 600
+                 :height 600)
+      (text)
     (let1 state (make <game-state> :text text)
       (scene-change state 'title)
       (call-with-console text
@@ -275,7 +275,3 @@
           (while #t
             (scene-dispatch state)
             (worker-sleep! *interval-sec*)))))))
-
-(define (main args)
-  ;; (grv-browser)
-  (grv-start-player :window-size '(800 800)))

@@ -46,7 +46,10 @@
   (export load-image
           load-audio
 
-          copy-text-to-clipboard))
+          copy-text-to-clipboard
+
+          make-canvas-window
+          make-text-window))
 
 (select-module graviton.grut)
 
@@ -92,3 +95,78 @@
            (errorf "bad value for :on-error argument; must be #f or :error, but got ~s" on-error))))))
 
 
+;;;
+
+(define (alist->style alist)
+  (string-join (fold (lambda (pair lst)
+                       (if (cdr pair)
+                         (cons (format "~a:~a" (car pair) (cdr pair)) lst)
+                         lst))
+                     '()
+                     alist)
+               ";"))
+
+(define *min-default-window-width* 800)
+(define *min-default-window-height* 600)
+
+(define (make-canvas-window width height
+                            :key
+                            (id "canvas")
+                            (title #f)
+                            (color #f)
+                            (background-color #f)
+                            (margin #f)
+                            (window-width #f)
+                            (window-height #f)
+                            (resizable? #t))
+  (let* ((window-width (or window-width
+                           (and window-height
+                                (ceiling->exact (* window-height (/. width height))))
+                           (if (<= height width)
+                             (max width *min-default-window-width*)
+                             (ceiling->exact (* (max height *min-default-window-height*) (/. width height))))))
+         (window-height (or window-height
+                            (ceiling->exact (* window-width (/. height width))))))
+    (grv-window :body (html:body
+                       :style (alist->style `(("color" . ,color)
+                                              ("background-color" . ,background-color)
+                                              ("margin" . ,margin)))
+                       (html:canvas :id id :class "grut-contain" :width width :height height))
+                :title title
+                :width window-width
+                :height window-height
+                :resizable? resizable?)))
+
+
+(define (make-text-window :key
+                          (id "text")
+                          (title #f)
+                          (column #f)
+                          (row #f)
+                          (font-size #f)
+                          (color "white")
+                          (background-color "black")
+                          (margin #f)
+                          (window-width #f)
+                          (window-height #f)
+                          (resizable? #t))
+  (grv-window :body (html:body
+                     :style (alist->style `(("color" . ,color)
+                                            ("background-color" . ,background-color)
+                                            ("margin" . "0")
+                                            ("overflow-y" . "none")
+                                            ("margin" . ,margin)))
+                     (html:grv-text :id id
+                                    :class "grut-monospace-font grut-contain"
+                                    :column column
+                                    :row row
+                                    :style (alist->style `(("width" . "100%")
+                                                           ("height" . "100%")
+                                                           ("box-sizing" . "border-box")
+                                                           ("padding" . "5px")
+                                                           ("overflow-y" . "scroll")
+                                                           ("font-size" . ,font-size)))))
+              :title title
+              :width window-width
+              :height window-height
+              :resizable? resizable?))
