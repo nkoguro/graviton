@@ -161,14 +161,14 @@
 
 (define (grv-title)
   (cond
-    ((application-context)
+    ((window-context)
      (~ document'title))
     (else
      *grv-default-title*)))
 
 (define (grv-title-set! title)
   (cond
-    ((application-context)
+    ((window-context)
      (set! (~ document'title) title))
     (else
      (set! *grv-default-title* title))))
@@ -544,8 +544,8 @@
            (log-framework-debug "WebSocket connected")
            (when (~ win-controller'temporary?)
              (delete-window-controller path))
-           (let1 ctx (make-application-context)
-             (parameterize ((application-context ctx))
+           (let1 ctx (make-window-context)
+             (parameterize ((window-context ctx))
                (query-parameters (~ req'params)))
              (start-websocket-dispatcher! ctx (request-socket req) in out req-user-agent thunk))
            req)
@@ -710,8 +710,8 @@
 ;;;
 
 (define (open-client-window path width height resizable?)
-  (unless (application-context)
-    (error "application-context not found"))
+  (unless (window-context)
+    (error "window-context not found"))
   (jslet ((path::string)
           (width)
           (height)
@@ -751,24 +751,24 @@
            body ...))))))
 
 (define (open-window win)
-  (unless (application-context)
-    (error "application-context not found"))
+  (unless (window-context)
+    (error "window-context not found"))
   (let* ((queue (make-mtqueue))
          (win-controller (make-window-controller #f (~ win'page) (lambda ()
                                                                    (let1 proc (dequeue/wait! queue)
-                                                                     (proc (application-context)))))))
+                                                                     (proc (window-context)))))))
     (open-client-window (~ win-controller'path) (~ win'width) (~ win'height) (~ win'resizable?))
     (shift-callback callback
       (enqueue! queue callback))))
 
-(define (close-window :optional (window-context #f))
+(define (close-window :optional (ctx #f))
   (let1 thunk (lambda ()
                 (flush-client-request)
                 (app-exit 0))
-    (if window-context
-      (parameterize ((application-context window-context))
+    (if ctx
+      (parameterize ((window-context ctx))
         (thunk))
       (begin
-        (unless (application-context)
-          (error "application-context not found"))
+        (unless (window-context)
+          (error "window-context not found"))
         (thunk)))))

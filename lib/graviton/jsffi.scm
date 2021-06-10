@@ -785,7 +785,7 @@
       (,VAL-TYPE-OBJECT . ,(^(in)
                              (let* ((class-id (decode-value in))
                                     (jsobj-id (decode-value in)))
-                               (application-context-slot-atomic-ref 'jsobject-manager
+                               (window-context-slot-atomic-ref 'jsobject-manager
                                  (lambda (manager)
                                    (or (find-jsobject manager jsobj-id)
                                        (let1 jsobj (make (hash-table-get *id->class-table* class-id)
@@ -1224,7 +1224,7 @@
    (id->index-table :init-form (make-hash-table 'eqv?))
    (next-index :init-value 0)))
 
-(define-application-context-slot jsobject-manager (make <jsobject-manager>))
+(define-window-context-slot jsobject-manager (make <jsobject-manager>))
 
 (define (find-jsobject manager id)
   (with-slots (object-vector id->index-table) manager
@@ -1315,7 +1315,7 @@
 
 (define (jsobject-free! obj)
   (let1 id (~ obj'%id)
-    (application-context-slot-atomic-ref 'jsobject-manager
+    (window-context-slot-atomic-ref 'jsobject-manager
       (lambda (manager)
         (with-slots (id-vector object-vector id->index-table next-index) manager
           (jslet ((id))
@@ -1428,13 +1428,13 @@
       (slot-ref jsobj slot)
       (apply slot-set! jsobj slot value))))
 
-(define-application-context-slot global-jsobject-table (make-hash-table 'eq?))
+(define-window-context-slot global-jsobject-table (make-hash-table 'eq?))
 
 (define (make-global-jsobject-provider provider :optional (name #f))
   (make <jsobject-provider>
     :provider  (let1 key (gensym)
                  (lambda ()
-                   (application-context-slot-atomic-ref 'global-jsobject-table
+                   (window-context-slot-atomic-ref 'global-jsobject-table
                      (lambda (tbl)
                        (or (hash-table-get tbl key #f)
                            (rlet1 jsobj (parameterize ((use-jscall/result-sync? #f))
@@ -1557,10 +1557,10 @@
 
 ;;;
 
-(define-application-context-slot future-table (make-hash-table 'equal?) (make-id-generator #xffffffff))
+(define-window-context-slot future-table (make-hash-table 'equal?) (make-id-generator #xffffffff))
 
 (define (with-future-table proc)
-  (application-context-slot-atomic-ref 'future-table proc))
+  (window-context-slot-atomic-ref 'future-table proc))
 
 (define (allocate-future-id receiver)
   (with-future-table
@@ -1596,10 +1596,10 @@
           (else
            (errorf "[BUG] Invalid receiver for future ID: ~a" future-id)))))))
 
-(define-application-context-slot callback->id-table (make-hash-table 'equal?))
+(define-window-context-slot callback->id-table (make-hash-table 'equal?))
 
 (define (link-callback callback)
-  (application-context-slot-atomic-ref 'callback->id-table
+  (window-context-slot-atomic-ref 'callback->id-table
     (lambda (tbl)
       (or (hash-table-get tbl callback #f)
           (rlet1 id (allocate-future-id callback)
@@ -1607,7 +1607,7 @@
             (log-framework-debug "Linked callback: ~s (future ID: #x~8,'0x)" callback id))))))
 
 (define (unlink-callback callback)
-  (application-context-slot-atomic-ref 'callback->id-table
+  (window-context-slot-atomic-ref 'callback->id-table
     (lambda (tbl)
       (and-let1 id (hash-table-get tbl callback #f)
         (jslet ((id))
@@ -1618,7 +1618,7 @@
 
 (define (unlink-procedure proc)
   (for-each unlink-callback
-            (application-context-slot-atomic-ref 'callback->id-table
+            (window-context-slot-atomic-ref 'callback->id-table
               (lambda (tbl)
                 (rlet1 result '()
                   (hash-table-for-each tbl (lambda (callback id)

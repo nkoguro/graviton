@@ -86,7 +86,7 @@
 (define current-worker (make-parameter #f))
 (define current-priority (make-parameter #f))
 (define worker-thread-idle-timeout (make-parameter #f))
-(define-application-context-slot worker-threads '())
+(define-window-context-slot worker-threads '())
 
 (define-class <worker> ()
   ((task-queue :init-form (make-task-queue))
@@ -181,7 +181,7 @@
 
 (define (make-worker-thread thunk :key (name #f) (size 1))
   (rlet1 worker-thread (make <worker-thread> :name name)
-    (application-context-slot-atomic-update! 'worker-threads
+    (window-context-slot-atomic-update! 'worker-threads
       (lambda (lst)
         (cons worker-thread lst)))
     (dotimes (size)
@@ -226,7 +226,7 @@
   (undefined))
 
 (define (all-worker-threads)
-  (application-context-slot-ref 'worker-threads))
+  (window-context-slot-ref 'worker-threads))
 
 (define-class <task-queue> ()
   ((mutex :init-form (make-mutex 'task-queue))
@@ -484,7 +484,7 @@
 (define (run-scheduler)
   (run-worker-thread scheduler :name "scheduler"))
 
-(define-application-context-slot scheduler (run-scheduler))
+(define-window-context-slot scheduler (run-scheduler))
 
 ;; thunk-or-event := procedure | (event-name args ...)
 (define (scheduler-add! callback :key ((:at abs-time) #f) ((:after rel-sec) #f) ((:every interval) #f))
@@ -492,7 +492,7 @@
               (and (not abs-time) rel-sec (not interval))
               (and (not abs-time) (not rel-sec) interval))
     (error "scheduler-add! needs :at, :after or :every keyword"))
-  (worker-fire-event (application-context-slot-ref 'scheduler)
+  (worker-fire-event (window-context-slot-ref 'scheduler)
                      'add
                      (cond
                              (abs-time
@@ -505,7 +505,7 @@
                      interval))
 
 (define (scheduler-delete! callback)
-  (worker-fire-event (application-context-slot-ref 'scheduler) 'del callback))
+  (worker-fire-event (window-context-slot-ref 'scheduler) 'del callback))
 
 (define (worker-sleep! time-or-sec)
   (shift-callback callback
@@ -519,7 +519,7 @@
               (errorf "<time> or <real> required, but got ~s" time-or-sec))))))
 
 ;;;
-(define-application-context-slot main-worker #f)
+(define-window-context-slot main-worker #f)
 
 (define (main-worker)
-  (application-context-slot-ref 'main-worker))
+  (window-context-slot-ref 'main-worker))

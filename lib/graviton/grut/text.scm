@@ -371,17 +371,17 @@
   (slot-set! self 'processor-state (make-text-processor self))
 
   ;; slots of <virtual-output-port>
-  (let1 ctx (application-context)
+  (let1 ctx (window-context)
     (slot-set! self 'putb (cut process-byte self <>))
     (slot-set! self 'putc (cut process-char self <>))
     (slot-set! self 'puts (cut process-text self <>))
     (slot-set! self 'flush (lambda ()
-                             ;; flush can be called in the different application-context (e.g. it can be called by GC).
-                             (when (eq? (application-context) ctx)
+                             ;; flush can be called in the different window-context (e.g. it can be called by GC).
+                             (when (eq? (window-context) ctx)
                                (process-byte self (eof-object)))))
     (slot-set! self 'close (lambda ()
-                             ;; close can be called in the different application-context (e.g. it can be called by GC).
-                             (when (eq? (application-context) ctx)
+                             ;; close can be called in the different window-context (e.g. it can be called by GC).
+                             (when (eq? (window-context) ctx)
                                (process-byte self (eof-object)))))))
 
 (define-automatic-jsobject-methods <grv-text>

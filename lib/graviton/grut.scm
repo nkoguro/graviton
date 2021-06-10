@@ -111,7 +111,7 @@
 
 (define (min-default-window-size)
   (cond
-    ((and (application-context)
+    ((and (window-context)
           (grv-config-parameter 'iframe-window?))
      (jslet/result ()
        (result (/ window.innerWidth 3) (/ window.innerHeight 3))))

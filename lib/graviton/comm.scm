@@ -97,7 +97,7 @@
 (define client-request-output (make-parameter #f))
 
 (define (flush-client-request)
-  (application-context-slot-atomic-ref 'websocket-output-port
+  (window-context-slot-atomic-ref 'websocket-output-port
     (lambda (wout)
       (let1 data (get-output-uvector (client-request-output) :shared #t)
         (when (< 0 (u8vector-length data))
@@ -267,19 +267,19 @@
     ((true) #t)
     (else sym)))
 
-(define-application-context-slot websocket-output-port #f)
+(define-window-context-slot websocket-output-port #f)
 
 (define (websocket-main-loop ctx in out req-user-agent thunk)
   (let1 exit-code 0
 
     (json-special-handler handle-json-special)
-    (application-context ctx)
+    (window-context ctx)
 
-    (application-context-slot-set! 'websocket-output-port out)
+    (window-context-slot-set! 'websocket-output-port out)
     (user-agent req-user-agent)
 
     (receive (ctrl-in ctrl-out) (sys-pipe)
-      (application-context-slot-set! 'control-out ctrl-out)
+      (window-context-slot-set! 'control-out ctrl-out)
 
       (let ((sel (make <selector>))
             (run-loop? #t))
@@ -305,7 +305,7 @@
         ;; Invoke main worker thread
         (let1 wt (make-worker-thread thunk :name "main")
           (worker-run wt)
-          (application-context-slot-set! 'main-worker wt))
+          (window-context-slot-set! 'main-worker wt))
 
         (while run-loop?
           (selector-select sel))
@@ -316,6 +316,6 @@
       (for-each worker-shutdown worker-threads)
       (for-each (cut worker-thread-wait <> :timeout 60) worker-threads))
 
-    (application-context-invalidate! ctx)
+    (window-context-invalidate! ctx)
 
     exit-code))

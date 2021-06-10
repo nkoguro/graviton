@@ -90,7 +90,7 @@
 (define-automatic-jsobject-methods <event>
   "composedPath")
 
-(define-application-context-slot jsevent-callback-table (make-hash-table 'equal?))
+(define-window-context-slot jsevent-callback-table (make-hash-table 'equal?))
 
 (define (parse-prop-spec str)
   (list->vector (reverse (fold (lambda (str result)
@@ -103,7 +103,7 @@
 
 (define-method jsevent-callback-set! ((jsobj <jsobject>) event-type prop-specs (callback <worker-callback>) :key (use-capture? #f))
   (jsevent-callback-delete! jsobj event-type)
-  (application-context-slot-atomic-ref 'jsevent-callback-table
+  (window-context-slot-atomic-ref 'jsevent-callback-table
     (lambda (tbl)
       (hash-table-put! tbl (list jsobj event-type) callback)))
   (jslet ((obj::object jsobj)
@@ -121,7 +121,7 @@
   (jsevent-callback-set! (jsobj-provider) event-type prop-specs proc-or-callback :use-capture? use-capture?))
 
 (define-method jsevent-callback-delete! ((jsobj <jsobject>) event-type :key (use-capture? #f))
-  (and-let1 callback (application-context-slot-atomic-ref 'jsevent-callback-table
+  (and-let1 callback (window-context-slot-atomic-ref 'jsevent-callback-table
                       (lambda (tbl)
                         (let1 key (list jsobj event-type)
                           (begin0
@@ -189,10 +189,10 @@
 ;;                (window "keydown" (key) #?=key))
 ;;    aaa)
 
-(define-application-context-slot animation-frame-callback #f)
+(define-window-context-slot animation-frame-callback #f)
 
 (define-method request-animation-frame-callback! ((callback <worker-callback>))
-  (let1 cur-callback (application-context-slot-ref 'animation-frame-callback)
+  (let1 cur-callback (window-context-slot-ref 'animation-frame-callback)
     (cond
       ((and cur-callback (not (equal? cur-callback callback)))
        ;; Need to unlink the current callback.
@@ -200,25 +200,25 @@
        (jslet/result ((callback))
          (result (Graviton.requestAnimationFrameServerCallback callback)))
        (unlink-callback cur-callback)
-       (application-context-slot-set! 'animation-frame-callback callback))
+       (window-context-slot-set! 'animation-frame-callback callback))
       (else
        (jslet ((callback))
          (Graviton.requestAnimationFrameServerCallback callback))
        (unless cur-callback
-         (application-context-slot-set! 'animation-frame-callback callback)))))
+         (window-context-slot-set! 'animation-frame-callback callback)))))
   (undefined))
 
 (define-method request-animation-frame-callback! ((proc <procedure>))
   (animation-frame-callback-set! (worker-callback proc)))
 
 (define (cancel-animation-frame-callback!)
-  (let1 cur-callback (application-context-slot-ref 'animation-frame-callback)
+  (let1 cur-callback (window-context-slot-ref 'animation-frame-callback)
     ;; Wait Graviton.requestAnimationFrameServerCallback intentionally to ensure removal of the current callback.
     (jslet/result ()
       (result (Graviton.requestAnimationFrameServerCallback undefined)))
     (when cur-callback
       (unlink-callback cur-callback))
-    (application-context-slot-set! 'animation-frame-callback #f))
+    (window-context-slot-set! 'animation-frame-callback #f))
   (undefined))
 
 (define-syntax on-repaint

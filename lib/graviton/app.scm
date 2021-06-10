@@ -39,16 +39,16 @@
   (use srfi-27)
   (use util.match)
 
-  (export application-context
-          make-application-context
-          application-context-invalidate!
-          lookup-application-context
-          application-context-id
-          application-context-slot-atomic-ref
-          application-context-slot-atomic-update!
-          application-context-slot-ref
-          application-context-slot-set!
-          define-application-context-slot
+  (export window-context
+          make-window-context
+          window-context-invalidate!
+          lookup-window-context
+          window-context-id
+          window-context-slot-atomic-ref
+          window-context-slot-atomic-update!
+          window-context-slot-ref
+          window-context-slot-set!
+          define-window-context-slot
           <window-parameter>
           make-window-parameter
           make-window-parameter*
@@ -114,31 +114,31 @@
 
 ;;;
 
-(define *application-context-slot-initial-forms* '())
+(define *window-context-slot-initial-forms* '())
 
-(define application-context-next-id (make-id-generator))
+(define window-context-next-id (make-id-generator))
 
-(define *application-context-table-atom* (atom (make-hash-table 'equal?)))
+(define *window-context-table-atom* (atom (make-hash-table 'equal?)))
 
-(define (register-application-context-slot! name init-proc)
-  (push! *application-context-slot-initial-forms* (cons name init-proc)))
+(define (register-window-context-slot! name init-proc)
+  (push! *window-context-slot-initial-forms* (cons name init-proc)))
 
 (define-class <window-parameter> ()
   ((key :init-form (gensym))))
 
 (define (make-window-parameter* init-proc)
   (rlet1 wparam (make <window-parameter>)
-    (register-application-context-slot! (slot-ref wparam 'key) (lambda ()
+    (register-window-context-slot! (slot-ref wparam 'key) (lambda ()
                                                                  (values->list (init-proc))))))
 
 (define (make-window-parameter :rest vals)
   (make-window-parameter* (^() (apply values vals))))
 
 (define (window-parameter-atomic-ref wparam proc)
-  (application-context-slot-atomic-ref (slot-ref wparam 'key) proc))
+  (window-context-slot-atomic-ref (slot-ref wparam 'key) proc))
 
 (define (window-parameter-atomic-update! wparam proc)
-  (application-context-slot-atomic-update! (slot-ref wparam 'key) proc))
+  (window-context-slot-atomic-update! (slot-ref wparam 'key) proc))
 
 (define-method object-apply ((wparam <window-parameter>) :rest args)
   (if (null? args)
@@ -146,20 +146,20 @@
     (window-parameter-atomic-update! wparam (^_ (apply values args)))))
 
 
-(define-syntax define-application-context-slot
+(define-syntax define-window-context-slot
   (syntax-rules ()
     ((_ name vals ...)
-     (register-application-context-slot! 'name (lambda () (list vals ...))))))
+     (register-window-context-slot! 'name (lambda () (list vals ...))))))
 
-(define-class <application-context> ()
+(define-class <window-context> ()
   ((id :init-keyword :id)
    (mutex :init-form (make-mutex))
    (slot-table :init-form (make-hash-table 'eq?))))
 
-(define application-context (make-parameter #f))
+(define window-context (make-parameter #f))
 
-(define (make-application-context)
-  (atomic *application-context-table-atom*
+(define (make-window-context)
+  (atomic *window-context-table-atom*
     (lambda (tbl)
       (define (make-id)
         (let loop ()
@@ -167,53 +167,53 @@
             (if (hash-table-contains? tbl id)
               (loop)
               id))))
-      (rlet1 ctx (make <application-context> :id (make-id))
+      (rlet1 ctx (make <window-context> :id (make-id))
         (hash-table-put! tbl (~ ctx'id) ctx)))))
 
-(define (application-context-invalidate! ctx)
-  (atomic *application-context-table-atom*
+(define (window-context-invalidate! ctx)
+  (atomic *window-context-table-atom*
     (lambda (tbl)
       (hash-table-delete! tbl (~ ctx'id)))))
 
-(define (lookup-application-context id)
-  (atomic *application-context-table-atom*
+(define (lookup-window-context id)
+  (atomic *window-context-table-atom*
     (lambda (tbl)
       (hash-table-get tbl id #f))))
 
-(define (application-context-id :optional ctx)
-  (slot-ref (or ctx (application-context)) 'id))
+(define (window-context-id :optional ctx)
+  (slot-ref (or ctx (window-context)) 'id))
 
-(define (get-application-context-slot-ratom name)
-  (with-slots (mutex slot-table) (application-context)
+(define (get-window-context-slot-ratom name)
+  (with-slots (mutex slot-table) (window-context)
     (define (get-ratom)
       (or (hash-table-get slot-table name #f)
-          (and-let1 thunk (assq-ref *application-context-slot-initial-forms* name #f)
+          (and-let1 thunk (assq-ref *window-context-slot-initial-forms* name #f)
             (rlet1 val-ratom (apply ratom (thunk))
               (hash-table-put! slot-table name val-ratom)))
-          (errorf "application-context doesn't have such slot: ~a" name)))
+          (errorf "window-context doesn't have such slot: ~a" name)))
     (cond
       ((eq? (mutex-state mutex) (current-thread))
        (get-ratom))
       (else
        (with-locking-mutex mutex get-ratom)))))
 
-(define (application-context-slot-atomic-ref name proc)
-  (unless (application-context)
-    (errorf "application-context-slot-atomic-ref called without application-context, name=~a, proc=~s, thread=~s" name proc (current-thread)))
-  (let1 val-ratom (get-application-context-slot-ratom name)
+(define (window-context-slot-atomic-ref name proc)
+  (unless (window-context)
+    (errorf "window-context-slot-atomic-ref called without window-context, name=~a, proc=~s, thread=~s" name proc (current-thread)))
+  (let1 val-ratom (get-window-context-slot-ratom name)
     (ratomic val-ratom proc)))
 
-(define (application-context-slot-ref name)
-  (application-context-slot-atomic-ref name values))
+(define (window-context-slot-ref name)
+  (window-context-slot-atomic-ref name values))
 
-(define (application-context-slot-atomic-update! name proc)
-  (unless (application-context)
-    (errorf "application-context-slot-atomic-update! called without application-context, name=~a, proc=~s, thread=~s" name proc (current-thread)))
-  (let1 val-ratom (get-application-context-slot-ratom name)
+(define (window-context-slot-atomic-update! name proc)
+  (unless (window-context)
+    (errorf "window-context-slot-atomic-update! called without window-context, name=~a, proc=~s, thread=~s" name proc (current-thread)))
+  (let1 val-ratom (get-window-context-slot-ratom name)
     (ratomic-update! val-ratom proc)))
 
-(define (application-context-slot-set! name :rest vals)
-  (application-context-slot-atomic-update! name (lambda _ (apply values vals))))
+(define (window-context-slot-set! name :rest vals)
+  (window-context-slot-atomic-update! name (lambda _ (apply values vals))))
 
 ;;;
 
@@ -221,10 +221,10 @@
 
 ;;;
 
-(define-application-context-slot control-out #f)
+(define-window-context-slot control-out #f)
 
 (define (app-exit code)
-  (let1 out (application-context-slot-ref 'control-out)
+  (let1 out (window-context-slot-ref 'control-out)
     (write `(shutdown ,code) out)
     (flush out)))
 
