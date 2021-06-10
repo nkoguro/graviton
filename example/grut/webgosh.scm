@@ -16,18 +16,35 @@
     (read-from-string str)
     #f))
 
+(define make-user-module
+  (let1 id 0
+    (lambda ()
+      (let* ((name (begin0
+                       (string->symbol (format "user~a" id))
+                     (inc! id)))
+             (module (make-module name)))
+        (eval '(import gauche) module)
+        (eval '(begin (use graviton) (use graviton.grut)) module)
+        module))))
+
 (define (eval-worker in out)
-  (let ((module (make-module #f)))
-    (eval '(import gauche) module)
+  (let* ((sandbox-module (make-module #f))
+         (curmod sandbox-module))
+    (eval '(import gauche) sandbox-module)
+    (eval '(begin (use graviton) (use graviton.grut)) sandbox-module)
+
+    (current-input-port in)
+    (current-output-port out)
+    (current-error-port out)
 
     (on-event 'eval (str)
-      (parameterize ((current-input-port in)
-                     (current-output-port out)
-                     (current-error-port out))
-        (begin0
-            (guard (e (else (list 'error e)))
-              (list 'success (values->list (eval (read-from-string str) module))))
-          (set! module (with-module gauche.internal (vm-current-module))))))))
+      (guard (e (else (list 'error e)))
+        (match (read-from-string str)
+          (('select-module name)
+           (set! curmod (find-module name))
+           (list 'success '()))
+          (sexpr
+           (list 'success (values->list (eval sexpr curmod)))))))))
 
 (define (main args)
   (let-args (cdr args) ((use-browser? "b|browser" #f)

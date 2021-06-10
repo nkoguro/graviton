@@ -107,6 +107,7 @@
           user-agent
 
           grv-config
+          grv-config-parameter
           with-window
           open-window
           close-window
@@ -154,7 +155,7 @@
 
 (define *grv-default-title*
   (if (and (list? (command-line))
-           (<= (length (command-line)) 1))
+           (<= 1 (length (command-line))))
     (path-sans-extension (sys-basename (list-ref (command-line) 0)))
     "Graviton"))
 
@@ -593,33 +594,53 @@
 
 ;;;
 
+(define *server-started?* #f)
+
 (define-class <grv-config> ()
   ((port :init-keyword :port)
+   (host :init-keyword :host)
+   (protocol :init-keyword :protocol)
    (client :init-keyword :client)
    (access-log :init-keyword :access-log)
-   (error-log :init-keyword :error-log)))
+   (error-log :init-keyword :error-log)
+   (iframe-window? :init-keyword :iframe-window?)))
 
 (define *grv-config* #f)
 
 (define (grv-config :key
-                    (port #f)
-                    (client #f)
+                    (host "localhost")
+                    (protocol "http")
+                    ;; TODO: Check graviton-player existence.
+                    (client 'player)
+                    (port (case client
+                            ((browser)
+                             8080)
+                            (else
+                             0)))
                     (access-log #f)
-                    (error-log #f))
-  (let* ((client (or client
-                     ;; TODO: Check graviton-player existence.
-                     'player))
-         (port (or port
-                   (case client
-                     ((browser)
-                      8080)
-                     (else
-                      0)))))
+                    (error-log #f)
+                    (iframe-window? (eq? client 'browser)))
+  (unless *server-started?*
     (set! *grv-config* (make <grv-config>
                          :port port
+                         :host host
+                         :protocol protocol
                          :client client
                          :access-log access-log
-                         :error-log error-log))))
+                         :error-log error-log
+                         :iframe-window? iframe-window?))))
+
+(define (grv-config-parameter name)
+  (case name
+    ((port) (~ *grv-config*'port))
+    ((host) (~ *grv-config*'host))
+    ((protocol) (~ *grv-config*'protocol))
+    ((client) (~ *grv-config*'client))
+    ((access-log) (~ *grv-config*'access-log))
+    ((error-log) (~ *grv-config*'error-log))
+    ((iframe-window?) (~ *grv-config*'iframe-window?))
+    (else
+     (errorf "Invalid parameter name: ~s" name))))
 
 ;; Set default config.
 (grv-config)
@@ -630,7 +651,10 @@
 (define *control-channel* (make-server-control-channel))
 
 (define (server-url sock)
-  (format "http://localhost:~a/" (sockaddr-port (socket-address sock))))
+  (format "~a://~a:~a/"
+          (grv-config-parameter 'protocol)
+          (grv-config-parameter 'host)
+          (sockaddr-port (socket-address sock))))
 
 (define (invoke-player url width height show? resizable?)
   (let* ((config-file (generate-player-config-file url width height show? resizable?))
@@ -665,17 +689,15 @@
       (process-output->string `("wslpath" "-w" ,config-file))
       config-file)))
 
-(define *server-started?* #f)
-
 (define (grv-start-server shutdown-if-all-connection-closed?
                           startup-callback
                           :key
                           (access-log #f)
                           (error-log #f))
   (set! *shutdown-if-all-connection-closed?* shutdown-if-all-connection-closed?)
-  (start-http-server :port (~ *grv-config*'port)
-                     :access-log (~ *grv-config*'access-log)
-                     :error-log (~ *grv-config*'error-log)
+  (start-http-server :port (grv-config-parameter 'port)
+                     :access-log (grv-config-parameter 'access-log)
+                     :error-log (grv-config-parameter 'error-log)
                      :control-channel *control-channel*
                      :startup-callback (lambda (socks)
                                          (set! *server-started?* #t)
@@ -693,8 +715,9 @@
   (jslet ((path::string)
           (width)
           (height)
-          (resizable?))
-    (Graviton.openWindow path width height resizable?)))
+          (resizable?)
+          (use-iframe? (grv-config-parameter 'iframe-window?)))
+    (Graviton.openWindow path width height resizable? use-iframe?)))
 
 (define (%with-window win thunk)
   (let* ((win (or win
@@ -703,13 +726,13 @@
                  #f
                  "/"))
          (win-controller (make-window-controller path (~ win'page) thunk))
-         (use-player? (eq? (~ *grv-config*'client) 'player))
+         (use-player? (eq? (grv-config-parameter 'client) 'player))
          (width (~ win'width))
          (height (~ win'height))
          (resizable? (~ win'resizable?)))
     (cond
       (*server-started?*
-       (open-client-window path width height resizable?))
+       (open-client-window (~ win-controller'path) width height resizable?))
       (else
        (grv-start-server use-player?
                          (if use-player?

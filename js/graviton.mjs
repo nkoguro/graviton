@@ -11,7 +11,11 @@ function connectServer() {
     webSocket.onclose = () => {
         console.log('closed');
         webSocket = null;
-        window.close();
+        if (window.grvCloseThisWindow) {
+            window.grvCloseThisWindow();
+        } else {
+            window.close();
+        }
     };
     webSocket.onmessage = (event) => {
         try {
@@ -783,15 +787,184 @@ export function unregisterAnimationFrameCallback(callback) {
     animationFrameCallbacks.splice(i, 1);
 }
 
-export function openWindow(path, width, height, resizable) {
-    const opts = [`resizable=${resizable ? 'yes' : 'no'}`];
-    if (width) {
-        opts.push(`width=${width}`);
+/**
+ * Open child window
+ */
+let draggingWindow = undefined;
+let childWindowOffsetX = 0;
+let childWindowOffsetY = 0;
+let windowPositionX = window.innerWidth / 3;
+let windowPositionY = window.innerHeight / 3;
+
+function activateIframeWindow(win) {
+    Array.from(document.querySelectorAll('.grv-window')).forEach((w) => {
+        inactivateIframeWindow(w);
+        w.style.zIndex = 'auto';
+    });
+    win.classList.remove('grv-window-inactive');
+    win.classList.add('grv-window-active');
+    win.style.zIndex = 100;
+    win.querySelector('.grv-window-iframe').contentWindow.focus();
+}
+
+function inactivateIframeWindow(win) {
+    win.classList.remove('grv-window-active');
+    win.classList.add('grv-window-inactive');
+}
+
+function computeWindowPosition(width, height) {
+    if (document.body.clientWidth <= (windowPositionX + width)) {
+        windowPositionX = 0;
     }
-    if (height) {
-        opts.push(`height=${height}`);
+    if (document.body.clientHeight <= (windowPositionY + height)) {
+        windowPositionY = 0;
     }
-    window.open(path, '_blank', opts.join(','));
+    return [windowPositionX, windowPositionY];
+}
+
+function updateNextWindowPosition(delta) {
+    windowPositionX += delta;
+    windowPositionY += delta;
+}
+
+function openWindowIframe(path, width, height, resizable) {
+    const win = document.createElement('div');
+    win.classList.add('grv-window');
+    win.style.visibility = 'hidden';
+    const winTitlebar = document.createElement('div');
+    winTitlebar.classList.add('grv-window-titlebar');
+    win.appendChild(winTitlebar);
+    const winTitle = document.createElement('div');
+    winTitle.innerText = 'Untitled';  // Dummy text to compute the height of the titlebar.
+    winTitle.classList.add('grv-window-title');
+    winTitlebar.appendChild(winTitle);
+    const closeButton = document.createElement('div');
+    closeButton.classList.add('grv-window-close');
+    winTitlebar.appendChild(closeButton);
+    const iframe = document.createElement('iframe');
+    iframe.classList.add('grv-window-iframe');
+    if (resizable) {
+        iframe.classList.add('grv-window-iframe-resizable');
+    } else {
+        iframe.classList.add('grv-window-iframe-fixed');
+    }
+    iframe.style.width = width || 800;
+    iframe.style.height = height || 600;
+    win.appendChild(iframe);
+    document.body.appendChild(win);
+
+    const rect = win.getBoundingClientRect();
+    const [winX, winY] = computeWindowPosition(rect.width, rect.height);
+    win.style.left = `${winX}px`;
+    win.style.top = `${winY}px`;
+    updateNextWindowPosition(winTitlebar.getBoundingClientRect().height);
+
+    winTitle.addEventListener('mousedown', startMoveWindow);
+    winTitle.addEventListener('touchstart', startMoveWindow);
+    closeButton.addEventListener('click', (e) => {
+        if (e.button === 0) {
+            document.body.removeChild(win);
+        }
+    });
+    iframe.addEventListener('mouseenter', endMoveWindow);
+    iframe.addEventListener('load', () => {
+        iframe.contentWindow.grvCloseThisWindow = () => {
+            document.body.removeChild(win);
+        };
+
+        iframe.contentWindow.addEventListener('focus', (e) => {
+            activateIframeWindow(win);
+        });
+        iframe.contentWindow.addEventListener('blur', (e) => {
+            inactivateIframeWindow(win);
+        });
+        iframe.contentWindow.addEventListener('resize', (e) => {
+            winTitlebar.style.width = `${iframe.getBoundingClientRect().width}px`;
+        });
+
+        winTitle.innerText = iframe.contentDocument.title;
+
+        const docTitle = iframe.contentDocument.querySelector('title');
+        if (!docTitle) {
+            return;
+        }
+        const observer = new MutationObserver((mutationList, observer) => {
+            winTitle.innerText = iframe.contentDocument.title;
+        });
+        observer.observe(docTitle, {attributes: false, childList: true, subtree: false});
+        win.style.visibility = 'visible';
+    });
+
+    iframe.src = path;
+    activateIframeWindow(win);
+}
+
+export function openWindow(path, width, height, resizable, useIframe) {
+    if (useIframe) {
+        openWindowIframe(path, width, height, resizable);
+    } else {
+        const opts = [`resizable=${resizable ? 'yes' : 'no'}`];
+        if (width) {
+            opts.push(`width=${width}`);
+        }
+        if (height) {
+            opts.push(`height=${height}`);
+        }
+        window.open(path, '_blank', opts.join(','));    
+    }
+}
+
+function moveWindow(event) {
+    event.preventDefault();
+
+    if (!draggingWindow) {
+        endMoveWindow(event);
+        return;
+    }
+
+    draggingWindow.style.left = `${event.clientX - childWindowOffsetX}px`;
+    draggingWindow.style.top = `${event.clientY - childWindowOffsetY}px`;
+}
+
+function endMoveWindow(event) {
+    event.preventDefault();
+
+    const layer = document.getElementById('grv-window-move-layer');
+    if (!layer) {
+        return;
+    }
+    document.body.removeChild(layer);
+    draggingWindow = undefined;
+}
+
+function startMoveWindow(event) {
+    if (event.button !== 0) {
+        return;
+    }
+
+    const win = event.target.parentElement.parentElement;
+    if (!win) {
+        return;
+    }
+
+    event.preventDefault();
+    
+    activateIframeWindow(win);
+
+    const rect = win.getBoundingClientRect();
+    childWindowOffsetX = event.clientX - rect.left;
+    childWindowOffsetY = event.clientY - rect.top;
+    draggingWindow = win;
+
+    const layer = document.createElement('div');
+    layer.id = 'grv-window-move-layer';
+    document.body.appendChild(layer);
+    layer.addEventListener('mousemove', moveWindow);
+    layer.addEventListener('mouseup', endMoveWindow);
+    layer.addEventListener('mouseleave', endMoveWindow);
+    layer.addEventListener('touchmove', moveWindow);
+    layer.addEventListener('touchend', endMoveWindow);
+    layer.addEventListener('touchcancel', endMoveWindow);
 }
 
 window.addEventListener('load', () => {

@@ -109,6 +109,15 @@
 (define *min-default-window-width* 800)
 (define *min-default-window-height* 600)
 
+(define (min-default-window-size)
+  (cond
+    ((and (application-context)
+          (grv-config-parameter 'iframe-window?))
+     (jslet/result ()
+       (result (/ window.innerWidth 3) (/ window.innerHeight 3))))
+    (else
+     (values *min-default-window-width* *min-default-window-height*))))
+
 (define (make-canvas-window width height
                             :key
                             (id "canvas")
@@ -119,23 +128,24 @@
                             (window-width #f)
                             (window-height #f)
                             (resizable? #t))
-  (let* ((window-width (or window-width
-                           (and window-height
-                                (ceiling->exact (* window-height (/. width height))))
-                           (if (<= height width)
-                             (max width *min-default-window-width*)
-                             (ceiling->exact (* (max height *min-default-window-height*) (/. width height))))))
-         (window-height (or window-height
-                            (ceiling->exact (* window-width (/. height width))))))
-    (grv-window :body (html:body
-                       :style (alist->style `(("color" . ,color)
-                                              ("background-color" . ,background-color)
-                                              ("margin" . ,margin)))
-                       (html:canvas :id id :class "grut-contain" :width width :height height))
-                :title title
-                :width window-width
-                :height window-height
-                :resizable? resizable?)))
+  (let-values (((default-width default-height) (min-default-window-size)))
+    (let* ((window-width (or window-width
+                             (and window-height
+                                  (ceiling->exact (* window-height (/. width height))))
+                             (if (< (/ height default-height) (/ width default-width))
+                               (max width default-width)
+                               (ceiling->exact (* (max height default-height) (/. width height))))))
+           (window-height (or window-height
+                              (ceiling->exact (* window-width (/. height width))))))
+      (grv-window :body (html:body
+                         :style (alist->style `(("color" . ,color)
+                                                ("background-color" . ,background-color)
+                                                ("margin" . ,margin)))
+                         (html:canvas :id id :class "grut-contain" :width width :height height))
+                  :title title
+                  :width window-width
+                  :height window-height
+                  :resizable? resizable?))))
 
 
 (define (make-text-window :key
