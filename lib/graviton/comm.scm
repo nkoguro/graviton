@@ -94,24 +94,36 @@
 
 ;;;
 
-(define client-request-output (make-parameter #f))
+(define %client-request-output (make-parameter #f))
+
+(define (client-request-output)
+  (or (%client-request-output)
+      (begin
+        (%client-request-output (open-output-uvector))
+        (%client-request-output))))
 
 (define (flush-client-request)
   (window-context-slot-atomic-ref 'websocket-output-port
     (lambda (wout)
       (let1 data (get-output-uvector (client-request-output) :shared #t)
         (when (< 0 (u8vector-length data))
-          (send-binary-frame wout data)
-          (client-request-output (open-output-uvector)))))))
+          (%client-request-output (open-output-uvector))
+          (send-binary-frame wout data))))))
+
+(define (discard-client-request)
+  (%client-request-output (open-output-uvector)))
 
 (define (with-client-request thunk)
-  (parameterize ((client-request-output (open-output-uvector)))
-    (begin0
-        (thunk)
-      (flush-client-request))))
+  (parameterize ((%client-request-output (open-output-uvector)))
+    (dynamic-wind
+        (lambda ()
+          #f)
+        (lambda ()
+          (guard (e (else (discard-client-request)
+                          (raise e)))
+            (thunk)))
+        flush-client-request)))
 
-(add-hook! worker-thread-start-hook (lambda ()
-                                      (client-request-output (open-output-uvector))))
 (add-hook! worker-process-event-start-hook flush-client-request)
 
 ;;;

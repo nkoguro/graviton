@@ -756,7 +756,7 @@
   (let* ((queue (make-mtqueue))
          (win-controller (make-window-controller #f (~ win'page) (lambda ()
                                                                    (let1 proc (dequeue/wait! queue)
-                                                                     (proc (window-context)))))))
+                                                                     (proc (current-worker)))))))
     (open-client-window (~ win-controller'path) (~ win'width) (~ win'height) (~ win'resizable?))
     (shift-callback callback
       (enqueue! queue callback))))

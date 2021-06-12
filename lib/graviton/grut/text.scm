@@ -60,7 +60,7 @@
           <input-context>
           <grv-text>
 
-          get-text-input-port
+          get-input-text
 
           call-with-console
           putch
@@ -372,9 +372,9 @@
 
   ;; slots of <virtual-output-port>
   (let1 ctx (window-context)
-    (slot-set! self 'putb (cut process-byte self <>))
-    (slot-set! self 'putc (cut process-char self <>))
-    (slot-set! self 'puts (cut process-text self <>))
+    (slot-set! self 'putb (^b (process-byte self b)))
+    (slot-set! self 'putc (^c (process-char self c)))
+    (slot-set! self 'puts (^s (process-text self s)))
     (slot-set! self 'flush (lambda ()
                              ;; flush can be called in the different window-context (e.g. it can be called by GC).
                              (when (eq? (window-context) ctx)
@@ -481,34 +481,20 @@
     (dequeue-all! input-queue))
   (undefined))
 
-(define (get-text-input-port grv-text :key (echo? #t))
-  (with-slots (input-queue) grv-text
-    (let1 in #f
-      (make <virtual-input-port>
-        :getb (lambda ()
-                (let loop ((b (if in
-                                (read-byte in)
-                                (eof-object))))
-                  (cond
-                    ((eof-object? b)
-                     (set! in (open-input-string
-                                (rlet1 str (match (dequeue/wait! input-queue)
-                                            (('text str)
-                                             str)
-                                            (('key key clipboard)
-                                             (if (#/C-[a-zA-Z]/ key)
-                                               (string (ucs->char (- (char->ucs (first
-                                                                                  (string->list
-                                                                                    (string-downcase
-                                                                                      (string-take-right key 1)))))
-                                                                     #x60)))
-                                               "")))
-                                  (when echo?
-                                    (putstr grv-text str)
-                                    (flush-client-request)))))
-                     (loop (read-byte in)))
-                    (else
-                     b))))))))
+(define (get-input-text grv-text :optional (wait? #f))
+  (match (dequeue-input grv-text wait?)
+    (('text str)
+     str)
+    (('key key clipboard)
+     (if (#/C-[a-zA-Z]/ key)
+       (string (ucs->char (- (char->ucs (first
+                                          (string->list
+                                            (string-downcase
+                                              (string-take-right key 1)))))
+                             #x60)))
+       ""))
+    (#f
+     #f)))
 
 ;;;
 
@@ -925,6 +911,7 @@
        (rlet1 c (car pending-characters)
          (set! pending-characters (cdr pending-characters))))
       (else
+       ;; TODO: Rewrite to use partcont.
        (or (match (dequeue-input grv-text wait?)
              (('key key clipboard)
               (key->ch key))
@@ -1300,7 +1287,7 @@
 
 (define (edit:newline-or-commit input-context)
   (delete-mark-region input-context)
-  (with-slots (text-element input-continues offset cursor-column cursor-row) input-context
+  (with-slots (text-element input-continues offset cursor-column cursor-row end-row) input-context
     (let1 text (get-input-content input-context)
       (cond
         ((or (and (procedure? input-continues)
@@ -1314,6 +1301,7 @@
          (draw-input-area input-context (- cursor-row 1)))
         (else
          ;; commit
+         (text-element'move-cursor 0 (+ end-row 1))
          (finish-edit input-context 'commit))))))
 
 (define (edit:cancel-edit input-context)

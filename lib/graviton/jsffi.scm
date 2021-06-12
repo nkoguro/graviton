@@ -634,6 +634,8 @@
   (encode-string (symbol->string sym) out))
 
 (define (encode-object obj out)
+  (unless (valid-window-context? obj)
+    (errorf "~s belongs to ~s, but the current window-context is ~s" obj (jsobject-window-context obj) (window-context)))
   ;; class-id isn't necessary because the object already exists in Javascript world.
   (encode-integer (jsobject-id obj) out))
 
@@ -789,7 +791,8 @@
                                  (lambda (manager)
                                    (or (find-jsobject manager jsobj-id)
                                        (let1 jsobj (make (hash-table-get *id->class-table* class-id)
-                                                     :id jsobj-id)
+                                                     :id jsobj-id
+                                                     :window-context (window-context))
                                          (register-jsobject! manager jsobj)
                                          jsobj)))))))
       ;; date
@@ -1272,7 +1275,8 @@
 
 (define-class <jsobject> ()
   ((%id :init-keyword :id)
-   (%jsproperty-cache :init-form (make-hash-table 'string=?)))
+   (%jsproperty-cache :init-form (make-hash-table 'string=?))
+   (%window-context :init-keyword :window-context))
   :metaclass <jsobject-meta>
   :jsclass "Object")
 
@@ -1312,6 +1316,12 @@
 (define-method jsobject-id ((jsobj <jsobject>))
   (or (slot-ref jsobj '%id)
       (error "Invalid access to freed object")))
+
+(define-method jsobject-window-context ((jsobj <jsobject>))
+  (slot-ref jsobj '%window-context))
+
+(define-method valid-window-context? ((jsobj <jsobject>))
+  (eq? (window-context) (slot-ref jsobj '%window-context)))
 
 (define (jsobject-free! obj)
   (let1 id (~ obj'%id)
@@ -1403,6 +1413,12 @@
 
 (define-method jsobject-id ((jsobj-provider <jsobject-provider>))
   (jsobject-id (provide-jsobject jsobj-provider)))
+
+(define-method jsobject-window-context ((jsobj-provider <jsobject-provider>))
+  (jsobject-window-context (provide-jsobject jsobj-provider)))
+
+(define-method valid-window-context? ((jsobj-provider <jsobject-provider>))
+  (valid-window-context? (provide-jsobject jsobj-provider)))
 
 (define-method jsobject-property-ref ((jsobj-provider <jsobject-provider>) property)
   (jsobject-property-ref (provide-jsobject jsobj-provider) property))

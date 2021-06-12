@@ -48,6 +48,8 @@
           window-context-slot-atomic-update!
           window-context-slot-ref
           window-context-slot-set!
+          all-window-contexts
+
           define-window-context-slot
           <window-parameter>
           make-window-parameter
@@ -145,6 +147,8 @@
     (window-parameter-atomic-ref wparam values)
     (window-parameter-atomic-update! wparam (^_ (apply values args)))))
 
+(define-method (setter object-apply) ((wparam <window-parameter>) :rest vals)
+  (apply wparam vals))
 
 (define-syntax define-window-context-slot
   (syntax-rules ()
@@ -180,7 +184,7 @@
     (lambda (tbl)
       (hash-table-get tbl id #f))))
 
-(define (window-context-id :optional ctx)
+(define (window-context-id :optional (ctx #f))
   (slot-ref (or ctx (window-context)) 'id))
 
 (define (get-window-context-slot-ratom name)
@@ -214,6 +218,11 @@
 
 (define (window-context-slot-set! name :rest vals)
   (window-context-slot-atomic-update! name (lambda _ (apply values vals))))
+
+(define (all-window-contexts)
+  (atomic *window-context-table-atom*
+    (lambda (tbl)
+      (hash-table-values tbl))))
 
 ;;;
 

@@ -56,6 +56,7 @@
           worker-thread-begin
           worker-run
           worker-close
+          worker-active?
           worker-shutdown
           worker-thread-wait
           all-worker-threads
@@ -180,12 +181,12 @@
       #t)))
 
 (define (make-worker-thread thunk :key (name #f) (size 1))
-  (rlet1 worker-thread (make <worker-thread> :name name)
+  (rlet1 worker-thread (make <worker-thread> :name (format "~a:~a" (window-context-id) name))
     (window-context-slot-atomic-update! 'worker-threads
       (lambda (lst)
         (cons worker-thread lst)))
-    (dotimes (size)
-      (let1 thread (make-thread (cut worker-thread-run-event-loop worker-thread thunk) (format "~s" worker-thread))
+    (dotimes (i size)
+      (let1 thread (make-thread (cut worker-thread-run-event-loop worker-thread thunk) (format "~s:~d" worker-thread i))
         (push! (~ worker-thread'threads) thread)))))
 
 (define-method worker-run ((worker-thread <worker-thread>))
@@ -209,6 +210,9 @@
 
 (define (worker-close worker)
   (task-queue-close (~ worker'task-queue)))
+
+(define (worker-active? worker)
+  (not (task-queue-closed? (~ worker'task-queue))))
 
 (define (worker-shutdown worker)
   (worker-close worker)
@@ -519,6 +523,7 @@
               (errorf "<time> or <real> required, but got ~s" time-or-sec))))))
 
 ;;;
+
 (define-window-context-slot main-worker #f)
 
 (define (main-worker)
