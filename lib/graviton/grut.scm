@@ -48,6 +48,8 @@
 
           copy-text-to-clipboard
 
+          alist->style
+
           make-canvas-window
           make-text-window))
 

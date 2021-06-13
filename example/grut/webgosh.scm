@@ -1,3 +1,4 @@
+(use file.util)
 (use gauche.logger)
 (use gauche.parameter)
 (use gauche.parseopt)
@@ -9,6 +10,8 @@
 (use srfi-13)
 (use text.html-lite)
 (use util.match)
+
+(bind-url-path "/webgosh.css" (build-path (sys-dirname (current-load-path)) "webgosh.css"))
 
 (define (input-continues? str)
   (cond
@@ -81,6 +84,14 @@
                     (format "gosh[~a]$ " (module-name module))))))
     (list prompt (string-append (make-string (- (string-length prompt) 1) #\.) " "))))
 
+(define (update-status! status worker)
+  (clear-screen status)
+  (let1 title (worker-eval* '(~ document'title)
+                            worker
+                            values
+                            (^e "*closed???*"))
+    (format status "~a: ~s" title worker)))
+
 (define (main args)
   (let-args (cdr args) ((use-browser? "b|browser" #f)
                         (font-size "font-size=s" #f))
@@ -92,27 +103,27 @@
 
     (with-window
         (grv-window
+          :css "/webgosh.css"
           :title "gosh on Web"
           :body
           (html:body
-           :style "color:white; background-color:black; margin: 0 0 0 5"
-           (html:grv-text :id "text"
-                          :class "grut-monospace-font"
-                          :style (string-join (append '("overflow-y: scroll"
-                                                        "height: 100vh")
-                                                      (if font-size `(,#"font-size:~|font-size|") '()))
-                                              ";"))))
-        (text)
-      (show-cursor text)
+           :class "grut-monospace-font"
+           (html:div
+            :id "container"
+            :style (alist->style `(("font-size" . ,font-size)))
+            (html:grv-text :id "console")
+            (html:grv-text :id "status"))))
+        (console status)
+      (show-cursor console)
 
       (on-event 'putb (b)
-        (write-byte b text))
+        (write-byte b console))
 
       (on-event 'puts (s)
-        (display s text))
+        (display s console))
 
       (let* ((out (get-text-output-port (current-worker)))
-             (in (get-text-input-port text out))
+             (in (get-text-input-port console out))
              (target-worker-stack (list (current-worker))))
         (define (%eval* sexpr success fail record?)
           (worker-eval* sexpr
@@ -127,12 +138,18 @@
                         :error-port out
                         :trace-port out))
 
-        (parameterize ((current-output-port text)
-                       (current-error-port text)
-                       (current-trace-port text))
+        (parameterize ((current-output-port console)
+                       (current-error-port console)
+                       (current-trace-port console))
           (while #t
-            (guard (e (else (format text "*** ~a~%" (condition-message e))))
-              (let1 str (read-text/edit text
+            (guard (e (else (format #t "*** ~a~%" (condition-message e))))
+              (unless (worker-active? (car target-worker-stack))
+                (format #t "*** ~s is inactive, detatched~%" (car target-worker-stack))
+                (pop! target-worker-stack))
+
+              (update-status! status (car target-worker-stack))
+
+              (let1 str (read-text/edit console
                                         :prompt (make-prompt (car target-worker-stack))
                                         :input-continues input-continues?)
                 (cond
@@ -145,13 +162,13 @@
                              (%eval* (read-from-string arg-str)
                                      (match-lambda*
                                        (((? (cut is-a? <> <worker>) worker) rest ...)
-                                        (write worker text)
-                                        (newline text)
+                                        (write worker)
+                                        (newline)
                                         (push! target-worker-stack worker))
                                        (vals
                                         (errorf "<worker> required, but got ~s" vals)))
                                      (lambda (e)
-                                       (report-error e text))
+                                       (report-error e))
                                      #t))
                             ((equal? toplevel-command "detach")
                              (unless (= (length target-worker-stack) 1)
@@ -166,11 +183,11 @@
                                                          (module-name (worker-sandbox-module
                                                                         (car target-worker-stack))))))
                                      (lambda _ #t)
-                                     (^e (report-error e text))
+                                     (^e (report-error e))
                                      #f))
                             ((equal? toplevel-command "cm")
-                             (write (worker-current-module (car target-worker-stack)) text)
-                             (newline text))
+                             (write (worker-current-module (car target-worker-stack)))
+                             (newline))
                             ((equal? toplevel-command "history")
                              (print-history))
                             (else
@@ -188,11 +205,11 @@
                                       (%eval* sexpr
                                               (lambda vals
                                                 (for-each (lambda (v)
-                                                            (write v text)
-                                                            (newline text))
+                                                            (write v)
+                                                            (newline))
                                                           vals))
                                               (lambda (e)
-                                                (report-error e text))
+                                                (report-error e))
                                               #t)))
                                   (let1 in (open-input-string str)
                                     (cut read in)))))))))))))

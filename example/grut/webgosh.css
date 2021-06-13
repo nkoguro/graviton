@@ -1,0 +1,27 @@
+body {
+    background-color: black;
+    color: white;
+    margin: 0;
+}
+
+#container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100%;
+}
+
+#console {
+    flex-grow: 1;
+    overflow-y: scroll;
+    padding: 0 0 0 5;
+}
+
+#status {
+    height: 1em;
+    line-height: 1em;
+    background-color: white;
+    color: black;
+    overflow-y: none;
+    padding: 0 0 0 5;
+}

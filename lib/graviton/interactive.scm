@@ -98,6 +98,9 @@
                       (output-port #f)
                       (error-port #f)
                       (trace-port #f))
+  (unless (worker-active? worker)
+    (errorf "~s is inactive" worker))
+
   (match (worker-call-event worker *eval-event* sexpr
                             input-port
                             output-port
@@ -121,9 +124,15 @@
                 :trace-port trace-port))
 
 (define (worker-current-module worker)
+  (unless (worker-active? worker)
+    (errorf "~s is inactive" worker))
+
   (worker-call-event worker *query-worker-current-module-event*))
 
 (define (worker-sandbox-module worker)
+  (unless (worker-active? worker)
+    (errorf "~s is inactive" worker))
+
   (worker-call-event worker *query-worker-sandbox-module-event*))
 
 ;;;
