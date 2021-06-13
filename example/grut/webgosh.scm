@@ -74,8 +74,9 @@
   (dotimes (i *history-size*)
     (format #t "*~d: ~s~%" (+ i 1) (global-variable-ref (find-module 'gauche) (string->symbol (format "*~d" (+ i 1))) #f))))
 
-(define (make-prompt worker)
-  (let* ((module (worker-current-module worker))
+(define (make-prompt env)
+  (let* ((worker (env-target-worker env))
+         (module (worker-current-module worker))
          (sandbox (worker-sandbox-module worker))
          (prompt (cond
                    ((equal? module sandbox)
@@ -84,13 +85,32 @@
                     (format "gosh[~a]$ " (module-name module))))))
     (list prompt (string-append (make-string (- (string-length prompt) 1) #\.) " "))))
 
-(define (update-status! status worker)
-  (clear-screen status)
-  (let1 title (worker-eval* '(~ document'title)
-                            worker
-                            values
-                            (^e "*closed???*"))
-    (format status "~a: ~s" title worker)))
+(define (update-status! status env)
+  (let1 worker (env-target-worker env)
+    (clear-screen status)
+    (format status "~a: ~s" (worker-eval '(~ document'title) worker) worker)))
+
+(define-class <environ> ()
+  ((target-worker-stack :init-form (list (current-worker)))))
+
+(define (env-target-worker env)
+  (let1 stack (~ env'target-worker-stack)
+    (cond
+      ((null? stack)
+       (format (current-error-port) "No workers found. Aborted.")
+       (close-window))
+      ((worker-active? (car stack))
+       (car stack))
+      (else
+       (set! (~ env'target-worker-stack) (cdr stack))
+       (errorf "~s is inactive, detatched." (car stack))))))
+
+(define (env-attach! env worker)
+  (push! (~ env'target-worker-stack) worker))
+
+(define (env-detatch! env)
+  (when (< 1 (length (~ env'target-worker-stack)))
+    (pop! (~ env'target-worker-stack))))
 
 (define (main args)
   (let-args (cdr args) ((use-browser? "b|browser" #f)
@@ -124,10 +144,10 @@
 
       (let* ((out (get-text-output-port (current-worker)))
              (in (get-text-input-port console out))
-             (target-worker-stack (list (current-worker))))
+             (env (make <environ>)))
         (define (%eval* sexpr success fail record?)
           (worker-eval* sexpr
-                        (car target-worker-stack)
+                        (env-target-worker env)
                         (lambda vals
                           (when (and record? (not (null? vals)))
                             (record-history (first vals)))
@@ -143,14 +163,10 @@
                        (current-trace-port console))
           (while #t
             (guard (e (else (format #t "*** ~a~%" (condition-message e))))
-              (unless (worker-active? (car target-worker-stack))
-                (format #t "*** ~s is inactive, detatched~%" (car target-worker-stack))
-                (pop! target-worker-stack))
-
-              (update-status! status (car target-worker-stack))
+              (update-status! status env)
 
               (let1 str (read-text/edit console
-                                        :prompt (make-prompt (car target-worker-stack))
+                                        :prompt (make-prompt env)
                                         :input-continues input-continues?)
                 (cond
                   ((#/^\s*,((\S+)(\s+(.*))?)/ str)
@@ -164,15 +180,14 @@
                                        (((? (cut is-a? <> <worker>) worker) rest ...)
                                         (write worker)
                                         (newline)
-                                        (push! target-worker-stack worker))
+                                        (env-attach! env worker))
                                        (vals
                                         (errorf "<worker> required, but got ~s" vals)))
                                      (lambda (e)
                                        (report-error e))
                                      #t))
                             ((equal? toplevel-command "detach")
-                             (unless (= (length target-worker-stack) 1)
-                               (pop! target-worker-stack)))
+                             (env-detatch! env))
                             ((equal? toplevel-command "lsw")
                              (print-main-worker-list))
                             ((equal? toplevel-command "sm")
@@ -180,13 +195,12 @@
                                                         ((and arg-str (< 0 (string-length arg-str)))
                                                          (string->symbol arg-str))
                                                         (else
-                                                         (module-name (worker-sandbox-module
-                                                                        (car target-worker-stack))))))
+                                                         (module-name (worker-sandbox-module (env-target-worker env))))))
                                      (lambda _ #t)
                                      (^e (report-error e))
                                      #f))
                             ((equal? toplevel-command "cm")
-                             (write (worker-current-module (car target-worker-stack)))
+                             (write (worker-current-module (env-target-worker env)))
                              (newline))
                             ((equal? toplevel-command "history")
                              (print-history))
@@ -194,22 +208,14 @@
                              (errorf "syntax error: ~a" (m 0)))))))
                   (else
                    (port-for-each (lambda (sexpr)
-                                    (let1 target-worker (car target-worker-stack)
-                                      (unless (worker-active? target-worker)
-                                        (cond
-                                          ((= (length target-worker-stack) 1)
-                                           (error "No workers in the stack"))
-                                          (else
-                                           (pop! target-worker-stack)
-                                           (errorf "~s is inactive, will switch to ~s" target-worker (car target-worker-stack)))))
-                                      (%eval* sexpr
-                                              (lambda vals
-                                                (for-each (lambda (v)
-                                                            (write v)
-                                                            (newline))
-                                                          vals))
-                                              (lambda (e)
-                                                (report-error e))
-                                              #t)))
+                                    (%eval* sexpr
+                                            (lambda vals
+                                              (for-each (lambda (v)
+                                                          (write v)
+                                                          (newline))
+                                                        vals))
+                                            (lambda (e)
+                                              (report-error e))
+                                            #t))
                                   (let1 in (open-input-string str)
                                     (cut read in)))))))))))))
