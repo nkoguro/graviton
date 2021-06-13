@@ -5,6 +5,7 @@
 (use graviton)
 (use graviton.interactive)
 (use graviton.grut)
+(use srfi-1)
 (use srfi-13)
 (use text.html-lite)
 (use util.match)
@@ -44,6 +45,31 @@
                    (loop (read-byte in)))
                   (else
                    b)))))))
+
+(define *history-size* 3)
+
+(dotimes (i *history-size*)
+  (eval `(define-in-module gauche ,(string->symbol (format "*~d" (+ i 1))) #f) (find-module 'gauche)))
+
+(define (record-history v)
+  (let loop ((i 1)
+             (sexprs '()))
+    (cond
+      ((< *history-size* i)
+       (eval `(begin ,@sexprs) (find-module 'gauche)))
+      ((= i 1)
+       (loop (+ i 1) (cons `(set! *1 ,(cond
+                                        ((or (symbol? v) (pair? v))
+                                         (list 'quote v))
+                                        (else
+                                         v)))
+                           sexprs)))
+      (else
+       (loop (+ i 1) (cons `(set! ,(string->symbol (format "*~d" i)) ,(string->symbol (format "*~d" (- i 1)))) sexprs))))))
+
+(define (print-history)
+  (dotimes (i *history-size*)
+    (format #t "*~d: ~s~%" (+ i 1) (global-variable-ref (find-module 'gauche) (string->symbol (format "*~d" (+ i 1))) #f))))
 
 (define (make-prompt worker)
   (let* ((module (worker-current-module worker))
@@ -88,9 +114,18 @@
       (let* ((out (get-text-output-port (current-worker)))
              (in (get-text-input-port text out))
              (target-worker-stack (list (current-worker))))
-        (define (%eval* sexpr success fail)
-          (worker-eval* sexpr (car target-worker-stack) success fail
-                        :input-port in :output-port out :error-port out :trace-port out))
+        (define (%eval* sexpr success fail record?)
+          (worker-eval* sexpr
+                        (car target-worker-stack)
+                        (lambda vals
+                          (when (and record? (not (null? vals)))
+                            (record-history (first vals)))
+                          (apply success vals))
+                        fail
+                        :input-port in
+                        :output-port out
+                        :error-port out
+                        :trace-port out))
 
         (parameterize ((current-output-port text)
                        (current-error-port text)
@@ -116,7 +151,8 @@
                                        (vals
                                         (errorf "<worker> required, but got ~s" vals)))
                                      (lambda (e)
-                                       (report-error e text))))
+                                       (report-error e text))
+                                     #t))
                             ((equal? toplevel-command "detach")
                              (unless (= (length target-worker-stack) 1)
                                (pop! target-worker-stack)))
@@ -130,10 +166,13 @@
                                                          (module-name (worker-sandbox-module
                                                                         (car target-worker-stack))))))
                                      (lambda _ #t)
-                                     (^e (report-error e text))))
+                                     (^e (report-error e text))
+                                     #f))
                             ((equal? toplevel-command "cm")
                              (write (worker-current-module (car target-worker-stack)) text)
                              (newline text))
+                            ((equal? toplevel-command "history")
+                             (print-history))
                             (else
                              (errorf "syntax error: ~a" (m 0)))))))
                   (else
@@ -146,18 +185,14 @@
                                           (else
                                            (pop! target-worker-stack)
                                            (errorf "~s is inactive, will switch to ~s" target-worker (car target-worker-stack)))))
-                                      (worker-eval* sexpr
-                                                    target-worker
-                                                    (lambda vals
-                                                      (for-each (lambda (v)
-                                                                  (write v text)
-                                                                  (newline text))
-                                                                vals))
-                                                    (lambda (e)
-                                                      (report-error e text))
-                                                    :input-port in
-                                                    :output-port out
-                                                    :error-port out
-                                                    :trace-port out)))
+                                      (%eval* sexpr
+                                              (lambda vals
+                                                (for-each (lambda (v)
+                                                            (write v text)
+                                                            (newline text))
+                                                          vals))
+                                              (lambda (e)
+                                                (report-error e text))
+                                              #t)))
                                   (let1 in (open-input-string str)
                                     (cut read in)))))))))))))
