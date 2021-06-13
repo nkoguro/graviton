@@ -91,7 +91,9 @@
     (format status "~a: ~s" (worker-eval '(~ document'title) worker) worker)))
 
 (define-class <environ> ()
-  ((target-worker-stack :init-form (list (current-worker)))))
+  ((target-worker-stack :init-form (list (current-worker)))
+   (input-port :init-keyword :input-port)
+   (output-port :init-keyword :output-port)))
 
 (define (env-target-worker env)
   (let1 stack (~ env'target-worker-stack)
@@ -111,6 +113,57 @@
 (define (env-detatch! env)
   (when (< 1 (length (~ env'target-worker-stack)))
     (pop! (~ env'target-worker-stack))))
+
+(define (env-eval* env sexpr success fail record?)
+  (worker-eval* sexpr
+                (env-target-worker env)
+                (lambda vals
+                  (when (and record? (not (null? vals)))
+                    (record-history (first vals)))
+                  (apply success vals))
+                fail
+                :input-port (~ env'input-port)
+                :output-port (~ env'output-port)
+                :error-port (~ env'output-port)
+                :trace-port (~ env'output-port)))
+
+;;;
+
+(define (process-toplevel-command env command arg-str)
+  (cond
+    ((equal? command "attach")
+     (env-eval* env
+                (read-from-string arg-str)
+                (match-lambda*
+                  (((? (cut is-a? <> <worker>) worker) rest ...)
+                   (write worker)
+                   (newline)
+                   (env-attach! env worker))
+                  (vals
+                   (errorf "<worker> required, but got ~s" vals)))
+                (lambda (e)
+                  (report-error e))
+                #t))
+    ((equal? command "detach")
+     (env-detatch! env))
+    ((equal? command "lsw")
+     (print-main-worker-list))
+    ((equal? command "sm")
+     (env-eval* env `(select-module ,(cond
+                                       ((and arg-str (< 0 (string-length arg-str)))
+                                        (string->symbol arg-str))
+                                       (else
+                                        (module-name (worker-sandbox-module (env-target-worker env))))))
+                (lambda _ #t)
+                (^e (report-error e))
+                #f))
+    ((equal? command "cm")
+     (write (worker-current-module (env-target-worker env)))
+     (newline))
+    ((equal? command "history")
+     (print-history))
+    (else
+     (errorf "Invalid toplevel command: ~a" command))))
 
 (define (main args)
   (let-args (cdr args) ((use-browser? "b|browser" #f)
@@ -144,20 +197,7 @@
 
       (let* ((out (get-text-output-port (current-worker)))
              (in (get-text-input-port console out))
-             (env (make <environ>)))
-        (define (%eval* sexpr success fail record?)
-          (worker-eval* sexpr
-                        (env-target-worker env)
-                        (lambda vals
-                          (when (and record? (not (null? vals)))
-                            (record-history (first vals)))
-                          (apply success vals))
-                        fail
-                        :input-port in
-                        :output-port out
-                        :error-port out
-                        :trace-port out))
-
+             (env (make <environ> :input-port in :output-port out)))
         (parameterize ((current-output-port console)
                        (current-error-port console)
                        (current-trace-port console))
@@ -171,51 +211,20 @@
                 (cond
                   ((#/^\s*,((\S+)(\s+(.*))?)/ str)
                    => (lambda (m)
-                        (let ((toplevel-command (m 2))
+                        (let ((command (m 2))
                               (arg-str (or (m 4) "")))
-                          (cond
-                            ((equal? toplevel-command "attach")
-                             (%eval* (read-from-string arg-str)
-                                     (match-lambda*
-                                       (((? (cut is-a? <> <worker>) worker) rest ...)
-                                        (write worker)
-                                        (newline)
-                                        (env-attach! env worker))
-                                       (vals
-                                        (errorf "<worker> required, but got ~s" vals)))
-                                     (lambda (e)
-                                       (report-error e))
-                                     #t))
-                            ((equal? toplevel-command "detach")
-                             (env-detatch! env))
-                            ((equal? toplevel-command "lsw")
-                             (print-main-worker-list))
-                            ((equal? toplevel-command "sm")
-                             (%eval* `(select-module ,(cond
-                                                        ((and arg-str (< 0 (string-length arg-str)))
-                                                         (string->symbol arg-str))
-                                                        (else
-                                                         (module-name (worker-sandbox-module (env-target-worker env))))))
-                                     (lambda _ #t)
-                                     (^e (report-error e))
-                                     #f))
-                            ((equal? toplevel-command "cm")
-                             (write (worker-current-module (env-target-worker env)))
-                             (newline))
-                            ((equal? toplevel-command "history")
-                             (print-history))
-                            (else
-                             (errorf "syntax error: ~a" (m 0)))))))
+                          (process-toplevel-command env command arg-str))))
                   (else
                    (port-for-each (lambda (sexpr)
-                                    (%eval* sexpr
-                                            (lambda vals
-                                              (for-each (lambda (v)
-                                                          (write v)
-                                                          (newline))
-                                                        vals))
-                                            (lambda (e)
-                                              (report-error e))
-                                            #t))
+                                    (env-eval* env
+                                               sexpr
+                                               (lambda vals
+                                                 (for-each (lambda (v)
+                                                             (write v)
+                                                             (newline))
+                                                           vals))
+                                               (lambda (e)
+                                                 (report-error e))
+                                               #t))
                                   (let1 in (open-input-string str)
                                     (cut read in)))))))))))))
