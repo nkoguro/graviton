@@ -18,10 +18,11 @@ body {
 }
 
 #status {
-    height: 1em;
+    flex-shrink: 0;
+    height: 1.2em;
     line-height: 1em;
     background-color: white;
     color: black;
-    overflow-y: none;
+    overflow-y: hidden;
     padding: 0 0 0 5;
 }
