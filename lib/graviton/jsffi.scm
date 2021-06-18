@@ -1304,16 +1304,48 @@
     ((rargs ...)
      (call-jsmethod jsobj method #t (reverse rargs)))))
 
-(define-method slot-missing ((klass <class>) (jsobject-class <jsobject-meta>) slot . value)
-  (or (and (null? value)
+(define-method slot-missing ((klass <class>) (jsobject-class <jsobject-meta>) slot :optional value)
+  (or (and (undefined? value)
            (find-jsobject-method jsobject-class slot))
       (next-method)))
 
-(define-method slot-missing ((jsobject-class <jsobject-meta>) jsobj slot . value)
+(define *special-stem-table*
+  (alist->hash-table
+    '(("2d". "2D")
+      ("byob" . "BYOB")
+      ("cdata" . "CDATA")
+      ("css". "CSS")
+      ("db" . "DB")
+      ("dom" . "DOM")
+      ("gatt" . "GATT")
+      ("html" . "HTML")
+      ("idb" . "IDB")
+      ("iframe" . "IFrame")
+      ("midi" . "MIDI")
+      ("rtc" . "RTC")
+      ("url" . "URL")
+      ("vtt" . "VTT")
+      ("webgl" . "WebGL")
+      ("xml" . "XML")
+      ("xr" . "XR"))
+    'equal?))
+
+(define (estimate-jsproperty slot)
+  (match-let1 (head . rest) (string-split (symbol->string slot) "-")
+    (string-join (cons head (map (lambda (stem)
+                                   (or (hash-table-get *special-stem-table* stem #f)
+                                       (string-titlecase stem)))
+                                 rest))
+                 "")))
+
+(define-method slot-missing ((jsobject-class <jsobject-meta>) jsobj slot :optional value)
   (or (and-let* (((null? value))
                  (gf (find-jsobject-method (class-of jsobj) slot)))
         (cut gf jsobj <...>))
-      (next-method)))
+      (let1 prop (estimate-jsproperty slot)
+        (if (undefined? value)
+          (jsobject-property-ref jsobj prop)
+          (jsobject-property-set! jsobj prop value)))))
 
 (define-method jsobject-id ((jsobj <jsobject>))
   (or (slot-ref jsobj '%id)
@@ -1398,8 +1430,14 @@
 (define-method ref ((obj <jsobject>) (property <string>))
   (jsobject-property-ref obj property))
 
+(define-method ref ((obj <jsobject>) (slot <symbol>))
+  (slot-ref obj slot))
+
 (define-method (setter ref) ((obj <jsobject>) (property <string>) value)
   (jsobject-property-set! obj property value))
+
+(define-method (setter ref) ((obj <jsobject>) (slot <symbol>) value)
+  (slot-set! obj slot value))
 
 (define (call-jsmethod jsobj method result-spec args)
   (define (call-jsmethod/void args)
@@ -1474,11 +1512,11 @@
 (define-method (setter ref) ((jsobj-provider <jsobject-provider>) (slot <symbol>) value)
   (slot-set! (provide-jsobject jsobj-provider) slot value))
 
-(define-method slot-missing ((klass <class>) (jsobj-provider <jsobject-provider>) slot . value)
+(define-method slot-missing ((klass <class>) (jsobj-provider <jsobject-provider>) slot :optional value)
   (let1 jsobj (provide-jsobject jsobj-provider)
-    (if (null? value)
+    (if (undefined? value)
       (slot-ref jsobj slot)
-      (apply slot-set! jsobj slot value))))
+      (slot-set! jsobj slot value))))
 
 (define-window-context-slot global-jsobject-table (make-hash-table 'eq?))
 
