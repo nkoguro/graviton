@@ -88,6 +88,8 @@
           global-keymap
           bind-key
 
+          compute-character-position&size
+
           edit:backward-delete-char
           edit:beginning-of-edit-area
           edit:beginning-of-line
@@ -429,6 +431,8 @@
 
   "setMark"
   "clearMark"
+
+  ("computeCharacterPositionAndSize" :result #t)
   )
 
 (define-jsobject-method <grv-text> cursor-column ()
@@ -1106,6 +1110,11 @@
         (else
          (set-mark! text-element cursor-column cursor-row cursor-column cursor-row)
          (set! force-mark? #t))))))
+
+;;;
+
+(define (compute-character-position&size grv-text column row)
+  (apply values (vector->list (grv-text'compute-character-position-and-size column row))))
 
 ;;;
 

@@ -937,6 +937,51 @@ class GrvText extends HTMLElement {
         return [undefined, undefined];
     }
 
+    computeCharacterPositionAndSize(column, row) {
+        this.refresh();
+        const lineDivList = this.view.childNodes;
+        const lineDiv = lineDivList[row];
+
+        let span = null;
+        let offset = 0;
+        const childNodes = lineDiv.childNodes;
+        for (let i = 0; i < childNodes.length; ++i) {
+            let node = childNodes[i];
+            if (node instanceof HTMLSpanElement && !node.isContentEditable) {
+                const len = Array.from(node.innerText).length;
+                if (offset <= column && column < offset + len) {
+                    span = node;
+                    break;
+                }
+                offset += len;
+            }
+        }
+
+        if (span) {
+            const range = new Range();
+            const text = span.firstChild;
+            let charIndex = 0;
+            let i = 0;
+            while (i < text.length) {
+                const code = text.data.charCodeAt(i);
+                let end = i;
+                if (0xd800 <= code && code <= 0xdfff) {
+                    ++end;
+                }
+                if (offset + charIndex === column) {
+                    const code = text.data.charCodeAt(i);
+                    range.setStart(text, i);
+                    range.setEnd(text, end + 1);
+                    const rect = range.getBoundingClientRect();
+                    return [rect.x, rect.y, rect.width, rect.height];
+                }
+                i = end + 1;
+                ++charIndex;
+            }
+        }
+        return [false, false, false, false];
+    }
+
     /// Editing operations
 
     eraseLineAfterCursor() {
