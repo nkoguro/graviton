@@ -97,6 +97,8 @@
           input-context-data-get
           input-context-data-put!
           input-context-data-delete!
+          input-context-text-line
+          input-context-text-content
 
           edit:backward-delete-char
           edit:beginning-of-edit-area
@@ -224,6 +226,12 @@
 (define (input-context-data-delete! input-context key)
   (with-slots (data) input-context
     (hash-table-delete! data key)))
+
+(define (input-context-text-line input-context :optional (row (~ input-context'cursor-row)))
+  (get-input-line input-context row))
+
+(define (input-context-text-content input-context)
+  (get-input-content input-context))
 
 (define (modifier-key-pressed? input-context modifier)
   (with-slots (this-key) input-context
@@ -1337,21 +1345,20 @@
 (define (edit:newline-or-commit input-context)
   (delete-mark-region input-context)
   (with-slots (text-element input-continues offset cursor-column cursor-row end-row) input-context
-    (let1 text (get-input-content input-context)
-      (cond
-        ((or (and (procedure? input-continues)
-                  (input-continues text))
-             (and (not (procedure? input-continues))
-                  input-continues))
-         ;; newline
-         (split-input-line! input-context cursor-row cursor-column)
-         (set! cursor-row (+ cursor-row 1))
-         (set! cursor-column offset)
-         (draw-input-area input-context (- cursor-row 1)))
-        (else
-         ;; commit
-         (text-element'move-cursor 0 (+ end-row 1))
-         (finish-edit input-context 'commit))))))
+    (cond
+      ((or (and (procedure? input-continues)
+                (input-continues input-context))
+           (and (not (procedure? input-continues))
+                input-continues))
+       ;; newline
+       (split-input-line! input-context cursor-row cursor-column)
+       (set! cursor-row (+ cursor-row 1))
+       (set! cursor-column offset)
+       (draw-input-area input-context (- cursor-row 1)))
+      (else
+       ;; commit
+       (text-element'move-cursor 0 (+ end-row 1))
+       (finish-edit input-context 'commit)))))
 
 (define (edit:cancel-edit input-context)
   (finish-edit input-context 'cancel))
