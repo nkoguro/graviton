@@ -136,22 +136,30 @@
     ((_ css-path ...)
      (add-autoload-css! (current-module) css-path ...))))
 
+(define (%autoload-css-list cache module)
+  (cond
+    ((hash-table-get cache module #f)
+     => values)
+    (else
+     (rlet1 css-list (let1 css-list (append (apply append (map (cut %autoload-css-list cache <>) (module-imports module)))
+                                            (apply append (map (cut %autoload-css-list cache <>) (module-parents module)))
+                                            (reverse (hash-table-get *autoload-css-table* module '())))
+                       ;; Remove duplicated css
+                       ;; Keep later element (e.g. (A B C E D E) -> (A B C D E))
+                       (let1 tbl (make-hash-table 'equal?)
+                         (reverse (fold (lambda (path css-list)
+                                          (cond
+                                            ((hash-table-contains? tbl path)
+                                             css-list)
+                                            (else
+                                             (hash-table-put! tbl path #t)
+                                             (cons path css-list))))
+                                        '()
+                                        (reverse css-list)))))
+       (hash-table-put! cache module css-list)))))
+
 (define (autoload-css-list module)
-  (let1 css-list (append (apply append (map autoload-css-list (module-imports module)))
-                         (apply append (map autoload-css-list (module-parents module)))
-                         (reverse (hash-table-get *autoload-css-table* module '())))
-    ;; Remove duplicated css
-    ;; Keep later element (e.g. (A B C E D E) -> (A B C D E))
-    (let1 tbl (make-hash-table 'equal?)
-      (reverse (fold (lambda (path css-list)
-                       (cond
-                         ((hash-table-contains? tbl path)
-                          css-list)
-                         (else
-                          (hash-table-put! tbl path #t)
-                          (cons path css-list))))
-                     '()
-                     (reverse css-list))))))
+  (%autoload-css-list (make-hash-table) module))
 
 ;;;
 
