@@ -745,6 +745,10 @@ export function makeJSObject(className, args) {
     return new klass(...args);
 }
 
+export function extractJSObjectProperties(obj, props) {
+    return props.map(prop => obj[prop]);
+}
+
 /**
  * animation frame
  */

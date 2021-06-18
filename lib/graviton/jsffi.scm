@@ -82,6 +82,7 @@
           jsobject-property-set!
           jsobject-free!
           with-jsobjects
+          let-jsproperties
           make-global-jsobject-provider
           define-global-jsobject
 
@@ -1362,6 +1363,37 @@
           (val::any val))
     (set! (~ obj property) val)))
 
+(define-method extract-jsobject-properties ((jsobj <jsobject>) (properties <list>))
+  (vector->list (jslet/result ((obj::object jsobj)
+                               (properties::list))
+                  (result (Graviton.extractJSObjectProperties obj properties)))))
+
+(define-syntax let-jsproperties
+  (er-macro-transformer
+    (lambda (form rename id=?)
+      (match form
+        ((_ expr (prop-specs ...) body ...)
+         (let loop ((prop-specs prop-specs)
+                    (vars '())
+                    (jsprops '()))
+           (match prop-specs
+             (()
+              (quasirename rename `(let* ((jsobj ,expr)
+                                          (vals (extract-jsobject-properties jsobj ',jsprops)))
+                                     (jsobject-free! jsobj)
+                                     (receive ,vars (apply values vals)
+                                       ,@body))))
+             (((? symbol? var) rest ...)
+              (loop rest (cons var vars) (cons (estimate-jsproperty var) jsprops)))
+             ((((? symbol? var) (? string? jsprop)) rest ...)
+              (loop rest (cons var vars) (cons jsprop jsprops)))
+             ((((? symbol? var) (? symbol? prop)) rest ...)
+              (loop rest (cons var vars) (cons (estimate-jsproperty prop) jsprops)))
+             (_
+              (errorf "malformed property spec: ~s" prop-specs)))))
+        (_
+         (errorf "malformed with-jsproperties: ~s" form))))))
+
 (define-method ref ((obj <jsobject>) (property <string>))
   (jsobject-property-ref obj property))
 
@@ -1425,6 +1457,9 @@
 
 (define-method jsobject-property-set! ((jsobj-provider <jsobject-provider>) property val)
   (jsobject-property-set! (provide-jsobject jsobj-provider) val))
+
+(define-method extract-jsobject-properties ((jsobj-provider <jsobject-provider>) (properties <list>))
+  (extract-jsobject-properties (provide-jsobject jsobj-provider) properties))
 
 (define-method ref ((jsobj-provider <jsobject-provider>) (property <string>))
   (jsobject-property-ref jsobj-provider property))

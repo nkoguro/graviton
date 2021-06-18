@@ -103,6 +103,7 @@
           define-global-jsobject
 
           make-jsobject
+          let-jsproperties
 
           user-agent
 
