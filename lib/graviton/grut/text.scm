@@ -90,6 +90,7 @@
           make-keymap
           global-keymap
           bind-key
+          switch-keymap
 
           compute-character-position&size
 
@@ -269,6 +270,7 @@
     (cond
       (keymap
        (with-slots (text-element-list) keymap
+         (set! (~ input-context'keymap) keymap)
          (%bind-keys keymap)
          (push! text-element-list text-element)))
       (else
