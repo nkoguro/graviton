@@ -679,14 +679,7 @@ class GrvText extends HTMLElement {
             this.tabSize = parseInt(styleTabSize);
         }
 
-        const dummyDiv = document.createElement('div');
-        dummyDiv.innerText = 'M';
-        dummyDiv.style.display = 'inline-block';
-        this.view.appendChild(dummyDiv);
-        const charRect = dummyDiv.getBoundingClientRect();
-        this.lineHeight = charRect.height;
-        this.characterWidth = charRect.width;
-        this.view.removeChild(dummyDiv);
+        this.updateCharacterSize();
 
         const widthColumn = parseInt(this.getAttribute('column'));
         if (widthColumn) {
@@ -702,6 +695,73 @@ class GrvText extends HTMLElement {
         } else {
             this.heightCharacter = undefined;
         }
+    }
+
+    updateCharacterSize() {
+        const dummyDiv = document.createElement('div');
+        dummyDiv.innerText = 'M';
+        dummyDiv.style.display = 'inline-block';
+        this.view.appendChild(dummyDiv);
+        const charRect = dummyDiv.getBoundingClientRect();
+        this.lineHeight = charRect.height;
+        this.characterWidth = charRect.width;
+        this.view.removeChild(dummyDiv);
+    }
+
+    static get observedAttributes() {
+        return ['column', 'row'];
+    }
+
+    attributeChangedCallback(name, oldValue, newValue) {
+        this.updateCharacterSize();
+        switch (name) {
+            case 'column':
+                const widthColumn = parseInt(newValue);
+                if (widthColumn) {
+                    this.style.width = this.characterWidth * widthColumn;
+                    this.widthCharacter = widthColumn;
+                } else {
+                    this.widthCharacter = undefined;
+                }
+                break;
+            case 'row':
+                const heightRow = parseInt(newValue);
+                if (heightRow) {
+                    this.style.height = this.lineHeight * heightRow;
+                    this.heightCharacter = heightRow;
+                } else {
+                    this.heightCharacter = undefined;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    get column() {
+        const widthColumn = this.getAttribute('column');
+        if (widthColumn) {
+            return parseInt(widthColumn);
+        } else {
+            return undefined;
+        }
+    }
+
+    set column(value) {
+        this.setAttribute('column', value);
+    }
+
+    get row() {
+        const heightRow = this.getAttribute('row');
+        if (heightRow) {
+            return parseInt(heightRow);
+        } else {
+            return undefined;
+        }
+    }
+
+    set row(value) {
+        this.setAttribute('row', value);
     }
 
     ///
