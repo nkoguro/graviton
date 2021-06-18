@@ -76,23 +76,23 @@ class TextAttribute {
         });
     }
 
-    updateSpan(span) {
-        span.removeAttribute('class');
+    updateElement(element) {
+        element.removeAttribute('class');
         this.cssClasses.forEach((cssClass) => {
             if (cssClass.length > 0) {
-                span.classList.add(cssClass);
+                element.classList.add(cssClass);
             }
         })
-        span.removeAttribute('style');
+        element.removeAttribute('style');
         Object.keys(this.styleJson).forEach((key) => {
             let value = this.styleJson[key];
-            span.style[key] = value;
+            element.style[key] = value;
             switch (key) {
                 case 'background-color':
-                    span.style.setProperty(BACKGROUND_COLOR_PROPERTY, value);
+                    element.style.setProperty(BACKGROUND_COLOR_PROPERTY, value);
                     break;
                 case 'color':
-                    span.style.setProperty(COLOR_PROPERTY, value);
+                    element.style.setProperty(COLOR_PROPERTY, value);
                     break;
                 default:
                     break;
@@ -238,7 +238,7 @@ class LineUpdater {
             } else {
                 span.removeAttribute('id');
             }
-            attr.updateSpan(span);
+            attr.updateElement(span);
             span.innerText = c;
         }
 
@@ -246,7 +246,7 @@ class LineUpdater {
             const attr = this.computeAttr(DEFAULT_ATTRIBUTE, i, true);
             const span = this.spanIter.next();
             span.id = MAIN_CURSOR_ID;
-            attr.updateSpan(span);
+            attr.updateElement(span);
             span.innerText = ' ';
         }
 
@@ -540,6 +540,7 @@ class GrvText extends HTMLElement {
 
         this.attrCharsList = [[]];
         this.startColumnList = [0];
+        this.lineAttrList = [DEFAULT_ATTRIBUTE];
         this.updatedRowSet = new Set([0]);
         this.currentAttribute = DEFAULT_ATTRIBUTE;
         this.savedAttributes = [];
@@ -1016,6 +1017,7 @@ class GrvText extends HTMLElement {
         for (let i = 0; i < n; ++i) {
             this.attrCharsList.push([]);
             this.startColumnList.push(0);
+            this.lineAttrList.push(DEFAULT_ATTRIBUTE);
             this.requestUpdateRow(this.rows - 1);
         }
     }
@@ -1027,6 +1029,7 @@ class GrvText extends HTMLElement {
     insertLine(row) {
         this.attrCharsList.splice(row, 0, []);
         this.startColumnList.splice(row, 0, 0);
+        this.lineAttrList.splice(row, 0, DEFAULT_ATTRIBUTE);
         for (let i = row; i < this.rows; ++i) {
             this.requestUpdateRow(i);
         }
@@ -1035,9 +1038,11 @@ class GrvText extends HTMLElement {
     removeLine(row = this.cursor.row) {
         this.attrCharsList.splice(row, 1);
         this.startColumnList.splice(row, 1);
+        this.lineAttrList.splice(row, 1);
         if (this.attrCharsList.length === 0) {
             this.attrCharsList = [[]];
             this.startColumnList = [0];
+            this.lineAttrList = [DEFAULT_ATTRIBUTE];
         }
         // Need to update the last deleted line, so the end must be this.rows + 1.
         for (let i = row; i < this.rows + 1; ++i) {
@@ -1049,6 +1054,7 @@ class GrvText extends HTMLElement {
         this.requestAllUpdate();
         this.attrCharsList = [[]];
         this.startColumnList = [0];
+        this.lineAttrList = [DEFAULT_ATTRIBUTE];
         this.cursor.column = 0;
         this.cursor.row = 0;
     }
@@ -1154,6 +1160,7 @@ class GrvText extends HTMLElement {
         this.currentAttribute = this.savedAttributes.pop() || this.currentAttribute;
     }
 
+    // TODO: Rename this method.
     updateTextAttribute(key, value) {
         const newStyle = Object.assign({}, this.currentAttribute.styleJson);
         if (value) {
@@ -1164,7 +1171,20 @@ class GrvText extends HTMLElement {
         this.currentAttribute = new TextAttribute(this.currentAttribute.cssClasses, newStyle);
     }
 
-    updateLineAttribute(fromColumn, toColumn, row, cssClasses, styleJson) {
+    setLineStyle(row, key, value) {
+        const attr = this.lineAttrList[row];
+        const newStyle = Object.assign({}, attr.styleJson);
+        if (value) {
+            newStyle[key] = value;
+        } else {
+            delete newStyle[key];
+        }
+        this.lineAttrList[row] = new TextAttribute(attr.cssClasses, newStyle);
+        this.requestUpdateRow(row);
+    }
+
+    // TODO: Rename this method.
+    updateCharacterAttributeInLine(fromColumn, toColumn, row, cssClasses, styleJson) {
         const attrChars = this.line(row);
         const attr = new TextAttribute(cssClasses || [], styleJson || {});
         for (let i = fromColumn; i <= toColumn; ++i) {
@@ -1312,7 +1332,9 @@ class GrvText extends HTMLElement {
                 newLineDiv.appendChild(document.createElement('br'));
                 this.view.appendChild(newLineDiv);
             }
-            const spanIter = new SpanIterator(lineDivNodes[row]);
+            const lineDiv = lineDivNodes[row];
+            this.lineAttrList[row].updateElement(lineDiv);
+            const spanIter = new SpanIterator(lineDiv);
             const updater = new LineUpdater(context, this.startColumnList[row], row, attrChars, spanIter);
             updater.update();
         });

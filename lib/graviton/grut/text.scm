@@ -82,6 +82,8 @@
           reset-character-attribute
           with-character-attribute
 
+          set-line-style!
+
           make-keymap
           global-keymap
           bind-key
@@ -398,7 +400,8 @@
   "saveTextAttribute"
   "restoreTextAttribute"
   "updateTextAttribute"
-  "updateLineAttribute"
+  "updateCharacterAttributeInLine"
+  "setLineStyle"
 
   "writeLine"
   "updateLineString"
@@ -1045,6 +1048,11 @@
           (hide-cursor grv-text))
         (move-cursor-to grv-text row col)
         (grv-text'restore-text-attribute)))))
+
+;;;
+
+(define (set-line-style! grv-text row key val)
+  (grv-text'set-line-style row key val))
 
 ;;;
 
