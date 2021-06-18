@@ -766,7 +766,7 @@
   (alist->hash-table
     `(
       ;; undefined
-      (,VAL-TYPE-UNDEFINED . ,(^(in) undefined))
+      (,VAL-TYPE-UNDEFINED . ,(^(in) (undefined)))
       ;; null
       (,VAL-TYPE-NULL . ,(^(in) 'null))
       ;; true
