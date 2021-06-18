@@ -26,3 +26,15 @@ body {
     overflow-y: hidden;
     padding: 0 0 0 5;
 }
+
+
+#completion {
+    position: absolute;
+    left: 0px;
+    top: 0px;
+    overflow-x: hidden;
+    overflow-y: scroll;
+    border: 1px solid white;
+    max-width: 50%;
+    background-color: black;
+}
