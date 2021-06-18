@@ -885,7 +885,7 @@ function openWindowIframe(path, width, height, resizable) {
         const observer = new MutationObserver((mutationList, observer) => {
             winTitle.innerText = iframe.contentDocument.title;
         });
-        observer.observe(docTitle, {attributes: false, childList: true, subtree: false});
+        observer.observe(docTitle, { attributes: false, childList: true, subtree: false });
         win.style.visibility = 'visible';
     });
 
@@ -904,7 +904,7 @@ export function openWindow(path, width, height, resizable, useIframe) {
         if (height) {
             opts.push(`height=${height}`);
         }
-        window.open(path, '_blank', opts.join(','));    
+        window.open(path, '_blank', opts.join(','));
     }
 }
 
@@ -942,7 +942,7 @@ function startMoveWindow(event) {
     }
 
     event.preventDefault();
-    
+
     activateIframeWindow(win);
 
     const rect = win.getBoundingClientRect();
