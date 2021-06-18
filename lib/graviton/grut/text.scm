@@ -94,6 +94,10 @@
 
           compute-character-position&size
 
+          input-context-data-get
+          input-context-data-put!
+          input-context-data-delete!
+
           edit:backward-delete-char
           edit:beginning-of-edit-area
           edit:beginning-of-line
@@ -199,7 +203,8 @@
    (force-mark? :init-value #f)
    (keymap :init-keyword :keymap)
    (this-key :init-value #f)
-   (clipboard-text :init-value #f)))
+   (clipboard-text :init-value #f)
+   (data :init-form (make-hash-table))))
 
 (define-method initialize ((ctx <input-context>) initargs)
   (next-method)
@@ -207,6 +212,18 @@
   (let1 row (slot-ref ctx 'cursor-row)
     (slot-set! ctx 'start-row row)
     (slot-set! ctx 'end-row row)))
+
+(define (input-context-data-get input-context key :optional (default #f))
+  (with-slots (data) input-context
+    (hash-table-get data key default)))
+
+(define (input-context-data-put! input-context key val)
+  (with-slots (data) input-context
+    (hash-table-put! data key val)))
+
+(define (input-context-data-delete! input-context key)
+  (with-slots (data) input-context
+    (hash-table-delete! data key)))
 
 (define (modifier-key-pressed? input-context modifier)
   (with-slots (this-key) input-context
@@ -1534,16 +1551,16 @@
 (define (read-text/edit grv-text
                         :key
                         (prompt "")
-                        (keymap #f)
+                        (keymap (global-keymap))
                         (input-continues #f)
                         (initial-text #f)
                         ((:cursor-column initial-cursor-column) #f)
                         ((:cursor-row initial-cursor-row) #f)
                         (on-change #f)
-                        (on-input #f))
+                        (on-input #f)
+                        (data-alist '()))
   (let* ((row (grv-text'cursor-row))
          (cursor-visibility (grv-text'cursor-visible?))
-         (keymap (or keymap (global-keymap)))
          (input-context (make <input-context>
                           :text-element grv-text
                           :row row
@@ -1590,6 +1607,11 @@
              (draw-input-area input-context row row))
             (else
              #f)))))
+
+    (for-each (match-lambda
+                ((key . val)
+                 (input-context-data-put! input-context key val)))
+              data-alist)
 
     (with-slots (input-hook clipboard-hook mouse-hook) grv-text
       (unwind-protect
