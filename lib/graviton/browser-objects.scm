@@ -208,9 +208,11 @@
 
 (define-class <element> (<node>)
   ((attributes :jsproperty "attributes"
-               :read-only? #t)
+               :read-only? #t
+               :cacheable? #t)
    (class-list :jsproperty "classList"
-               :read-only? #t)
+               :read-only? #t
+               :cacheable? #t)
    (class-name :jsproperty "className")
    (client-height :jsproperty "clientHeight"
                   :read-only? #t)
@@ -298,7 +300,8 @@
    (is-content-editable :jsproperty "isContentEditable"
                         :read-only? #t)
    (dataset :jsproperty "dataset"
-            :read-only? #t)
+            :read-only? #t
+            :cacheable? #t)
    (dir :jsproperty "dir")
    (draggable :jsproperty "draggable")
    (dropzone :jsproperty "dropzone"
@@ -317,7 +320,9 @@
                :read-only? #t)
    (offset-width :jsproperty "offsetWidth"
                  :read-only? #t)
-   (style :jsproperty "style")
+   (style :jsproperty "style"
+          :read-only? #t
+          :cacheable? #t)
    (tab-index :jsproperty "tabIndex")
    (title :jsproperty "title"))
   :jsclass "HTMLElement")
@@ -490,50 +495,104 @@
 
 (define-class <window> (<event-target>)
   ((closed :jsproperty "closed")
-   (console :jsproperty "console")
-   (custom-elements :jsproperty "customElements")
+   (console :jsproperty "console"
+            :read-only? #t
+            :cacheable? #t)
+   (custom-elements :jsproperty "customElements"
+                    :read-only? #t
+                    :cacheable? #t)
    (crypto :jsproperty "crypto")
    (device-pixel-ratio :jsproperty "devicePixelRatio")
-   (document :jsproperty "document")
-   (event :jsproperty "event")
-   (frame-element :jsproperty "frameElement")
-   (frames :jsproperty "frames")
-   (history :jsproperty "history")
-   (inner-height :jsproperty "innerHeight")
-   (inner-width :jsproperty "innerWidth")
-   (is-secure-context :jsproperty "isSecureContext")
-   (length :jsproperty "length")
+   (document :jsproperty "document"
+             :read-only? #t)
+   (event :jsproperty "event"
+          :read-only? #t)
+   (frame-element :jsproperty "frameElement"
+                  :read-only? #t)
+   (frames :jsproperty "frames"
+           :read-only? #t)
+   (history :jsproperty "history"
+            :read-only? #t
+            :cacheable? #t)
+   (inner-height :jsproperty "innerHeight"
+                 :read-only? #t)
+   (inner-width :jsproperty "innerWidth"
+                :read-only? #t)
+   (is-secure-context :jsproperty "isSecureContext"
+                      :read-only? #t)
+   (length :jsproperty "length"
+           :read-only? #t)
    (location :jsproperty "location")
-   (locationbar :jsproperty "locationbar")
-   (local-storage :jsproperty "localStorage")
-   (menubar :jsproperty "menubar")
+   (locationbar :jsproperty "locationbar"
+                :read-only? #t
+                :cacheable? #t)
+   (local-storage :jsproperty "localStorage"
+                  :read-only? #t
+                  :cacheable? #t)
+   (menubar :jsproperty "menubar"
+            :read-only? #t
+            :cacheable? #t)
    (name :jsproperty "name")
-   (navigator :jsproperty "navigator")
+   (navigator :jsproperty "navigator"
+              :read-only? #t
+              :cacheable? #t)
    (opener :jsproperty "opener")
-   (outer-height :jsproperty "outerHeight")
-   (outer-width :jsproperty "outerWidth")
-   (page-x-offset :jsproperty "pageXOffset")
-   (page-y-offset :jsproperty "pageYOffset")
-   (parent :jsproperty "parent")
-   (performance :jsproperty "performance")
-   (personalbar :jsproperty "personalbar")
-   (screen :jsproperty "screen")
-   (screen-x :jsproperty "screenX")
-   (screen-left :jsproperty "screenLeft")
-   (screen-y :jsproperty "screenY")
-   (screen-top :jsproperty "screenTop")
-   (scrollbars :jsproperty "scrollbars")
-   (scroll-x :jsproperty "scrollX")
-   (scroll-y :jsproperty "scrollY")
-   (self :jsproperty "self")
+   (outer-height :jsproperty "outerHeight"
+                 :read-only? #t)
+   (outer-width :jsproperty "outerWidth"
+                :read-only? #t)
+   (page-x-offset :jsproperty "pageXOffset"
+                  :read-only? #t)
+   (page-y-offset :jsproperty "pageYOffset"
+                  :read-only? #t)
+   (parent :jsproperty "parent"
+           :read-only? #t)
+   (performance :jsproperty "performance"
+                :read-only? #t
+                :cacheable? #t)
+   (personalbar :jsproperty "personalbar"
+                :read-only? #t
+                :cacheable? #t)
+   (screen :jsproperty "screen"
+           :read-only? #t
+           :cacheable? #t)
+   (screen-x :jsproperty "screenX"
+             :read-only? #t)
+   (screen-left :jsproperty "screenLeft"
+                :read-only? #t)
+   (screen-y :jsproperty "screenY"
+             :read-only? #t)
+   (screen-top :jsproperty "screenTop"
+               :read-only? #t)
+   (scrollbars :jsproperty "scrollbars"
+               :read-only? #t
+               :cacheable? #t)
+   (scroll-x :jsproperty "scrollX"
+             :read-only? #t)
+   (scroll-y :jsproperty "scrollY"
+             :read-only? #t)
+   (self :jsproperty "self"
+         :read-only? #t
+         :cacheable? #t)
    (session-storage :jsproperty "sessionStorage")
-   (speech-synthesis :jsproperty "speechSynthesis")
+   (speech-synthesis :jsproperty "speechSynthesis"
+                     :read-only? #t
+                     :cacheable? #t)
    (status :jsproperty "status")
-   (statusbar :jsproperty "statusbar")
-   (toolbar :jsproperty "toolbar")
-   (top :jsproperty "top")
-   (visual-viewport :jsproperty "visualViewport")
-   (window :jsproperty "window"))
+   (statusbar :jsproperty "statusbar"
+              :read-only? #t
+              :cacheable? #t)
+   (toolbar :jsproperty "toolbar"
+            :read-only? #t
+            :cacheable? #t)
+   (top :jsproperty "top"
+        :read-only? #t)
+   (visual-viewport :jsproperty "visualViewport"
+                    :read-only? #t
+                    :cacheable? #t)
+   (window :jsproperty "window"
+           :read-only? #t
+           :cacheable? #t))
   :jsclass "Window")
 
 (define-global-jsobject window (jslet/result ()
