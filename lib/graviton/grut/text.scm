@@ -83,6 +83,9 @@
           with-character-attribute
 
           set-line-style!
+          scroll-up
+          scroll-down
+          scroll-to
 
           make-keymap
           global-keymap
@@ -426,6 +429,7 @@
 
   "scrollUp"
   "scrollDown"
+  "scrollTo"
 
   ("extractMarkRegionText" :result #t)
 
@@ -1057,6 +1061,15 @@
 
 (define (set-line-style! grv-text row key val)
   (grv-text'set-line-style row key val))
+
+(define (scroll-up grv-text :optional (n 1))
+  (grv-text'scroll-up n))
+
+(define (scroll-down grv-text :optional (n 1))
+  (grv-text'scroll-down n))
+
+(define (scroll-to grv-text row :optional (align-to-top #t))
+  (grv-text'scroll-to row align-to-top))
 
 ;;;
 

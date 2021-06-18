@@ -1319,6 +1319,11 @@ class GrvText extends HTMLElement {
         this.shadowRoot.host.scrollTop += n * this.lineHeight;
     }
 
+    scrollTo(row, alignToTop) {
+        this.refresh();
+        this.view.childNodes[row].scrollIntoView(alignToTop);
+    }
+
     get pageSize() {
         return Math.max(1, Math.floor(this.shadowRoot.host.clientHeight / this.lineHeight) - 1);
     }
