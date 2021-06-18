@@ -40,7 +40,6 @@ export function closeConnection() {
 
 const classIdTable = new Map();
 const objectTable = new Map();
-const objectIdTable = new Map();
 let objectNextId = 0;
 
 function lookupObject(objectId) {
@@ -69,20 +68,15 @@ function findClassId(obj) {
 }
 
 function findObjectId(obj) {
-    let objectId = objectIdTable.get(obj);
-    if (objectId === undefined) {
-        do {
-            objectId = objectNextId++;
-        } while (objectTable.get(objectId));
-        objectTable.set(objectId, obj);
-        objectIdTable.set(obj, objectId);
-    }
+    let objectId;
+    do {
+        objectId = objectNextId++;
+    } while (objectTable.get(objectId));
+    objectTable.set(objectId, obj);
     return objectId;
 }
 
 export function freeObjectId(objectId) {
-    const obj = objectTable.get(objectId);
-    objectIdTable.delete(obj);
     objectTable.delete(objectId);
     if (objectId < objectNextId) {
         objectNextId = objectId;
