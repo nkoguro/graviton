@@ -1233,7 +1233,8 @@
 (define (find-jsobject manager id)
   (with-slots (object-vector id->index-table) manager
     (and-let1 index (hash-table-get id->index-table id #f)
-      (weak-vector-ref object-vector index))))
+      (rlet1 jsobj (weak-vector-ref object-vector index)
+        (log-framework-debug "Found jsobject: ~s" jsobj)))))
 
 (define (register-jsobject! manager jsobj)
   (with-slots (id-vector object-vector id->index-table next-index) manager
@@ -1256,7 +1257,7 @@
              (weak-vector-set! object-vector index jsobj)
              (hash-table-put! id->index-table (jsobject-id jsobj) index)
              (set! next-index (modulo (+ index 1) len))
-             (log-framework-debug "Allocated jsobject: #x~8,'0x" (jsobject-id jsobj)))))))))
+             (log-framework-debug "Allocated jsobject: #x~8,'0x (~s)" (jsobject-id jsobj) jsobj))))))))
 
 (define (expand-jsobject-table! manager)
   (with-slots (id-vector object-vector next-index) manager
@@ -1337,7 +1338,7 @@
             (hash-table-delete! id->index-table id)
             (set! next-index index))
           (set! (~ obj'%id) #f))
-        (log-framework-debug "Freed jsobject: #x~8,'0x (by manually)" id)))))
+        (log-framework-debug "Freed jsobject: #x~8,'0x (by manually) (~s)" id obj)))))
 
 (define-syntax with-jsobjects
   (syntax-rules ()
@@ -1350,7 +1351,7 @@
                  (sort (list jsobjects ...) (^(o1 o2) (> (~ o1'%id) (~ o2'%id)))))))))
 
 (define-method write-object ((obj <jsobject>) port)
-  (format port "#<~a id:#x~8,'0x>" (class-name (class-of obj)) (jsobject-id obj)))
+  (format port "#<~a id:#x~8,'0x>" (class-name (class-of obj)) (~ obj'%id)))
 
 (define-method jsobject-property-ref ((jsobj <jsobject>) property)
   (jslet/result ((obj::object jsobj)
