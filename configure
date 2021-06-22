@@ -53,8 +53,7 @@
                                                                      "gauche-graviton")))
                                        player-path))
                                  (current-directory curdir))))
-                           (process-output->string
-                             "${graviton-data-dir}/player")))))
+                           "${graviton-data-dir}/player"))))
 
 ;; Initialize configure.  This creates the global context, parses
 ;; command-line args and sets up default values.
