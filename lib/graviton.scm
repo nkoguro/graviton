@@ -674,11 +674,13 @@
     (cond
       ((file-exists? player-path)
        (run-process `(,player-path "--config" ,config-file)
+                    :input :null
                     :output stdout-filename
                     :error stderr-filename))
       (else
        (run-process `("npx" "electron" "." "--config" ,config-file)
                     :directory "./player/src"
+                    :input :null
                     :output stdout-filename
                     :error stderr-filename)))))
 
