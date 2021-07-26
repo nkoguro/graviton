@@ -325,8 +325,7 @@
         (selector-delete! sel #f #f #f)))
 
     (let1 worker-threads (all-worker-threads)
-      (for-each worker-shutdown worker-threads)
-      (for-each (cut worker-thread-wait <> :timeout 60) worker-threads))
+      (for-each worker-shutdown worker-threads))
 
     (window-context-invalidate! ctx)
 
