@@ -72,7 +72,6 @@
           worker-callback
           worker-callback?
           invoke-worker-callback
-          worker-shift
           shift-callback
           scheduler-add!
           scheduler-delete!
