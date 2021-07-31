@@ -404,7 +404,7 @@
 (define-method invoke-worker-callback ((callback <procedure-callback>) arg-creator)
   (with-slots (worker procedure priority) callback
     (worker-submit-task worker (lambda ()
-                                 (apply callback (arg-creator)))
+                                 (apply procedure (arg-creator)))
                         :priority priority)))
 
 (define-method object-apply ((callback <procedure-callback>) :rest args)
