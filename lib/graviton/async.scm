@@ -79,6 +79,13 @@
           scheduler-delete!
           worker-sleep!
           main-worker
+
+          <channel>
+          make-channel
+          channel-send
+          channel-close
+          channel-closed?
+          channel-recv
           ))
 
 (select-module graviton.async)
@@ -537,3 +544,64 @@
 
 (define (main-worker)
   (window-context-slot-ref 'main-worker))
+
+;;;
+
+(define-class <channel> ()
+  ((lock :init-form (make-mutex))
+   (queue :init-form (make-queue))
+   (closed? :init-value #f)
+   (callbacks :init-value '())))
+
+(define (make-channel)
+  (make <channel>))
+
+(define (%notify-update! channel)
+  (with-slots (callbacks) channel
+    (for-each (^c (c)) callbacks)
+    (set! callbacks '())))
+
+(define (channel-send channel :rest vals)
+  (with-slots (lock queue closed?) channel
+    (with-locking-mutex lock
+      (lambda ()
+        (when closed?
+          (errorf "I/O attempted on closed channel: ~s" channel))
+        (for-each (^v (enqueue! queue v)) vals)
+        (%notify-update! channel)))))
+
+(define (channel-close channel)
+  (with-slots (lock closed?) channel
+    (with-locking-mutex lock
+      (lambda ()
+        (set! closed? #t)
+        (%notify-update! channel)))))
+
+(define (channel-closed? channel)
+  (with-slots (lock closed? callbacks) channel
+    (with-locking-mutex lock
+      (lambda ()
+        closed?))))
+
+(define (channel-recv channel :optional fallback)
+  (with-slots (lock queue closed? callbacks) channel
+    (mutex-lock! lock timeout timeout-val)
+    (cond
+      ((not (queue-empty? queue))
+       (begin0
+           (dequeue! queue)
+         (mutex-unlock! lock)))
+      (closed?
+       (begin0
+           (eof-object)
+         (mutex-unlock! lock)))
+      ((undefined? fallback)
+       (shift-callback callback
+         (push! callbacks callback)
+         (mutex-unlock! lock))
+       (channel-recv channel))
+      (else
+       fallback))))
+
+(define-method object-apply ((channel <channel>))
+  (channel-recv channel))
