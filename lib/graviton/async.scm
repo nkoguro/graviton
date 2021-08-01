@@ -62,6 +62,8 @@
           all-worker-threads
           worker-submit-task
           worker-yield!
+          run-concurrent
+          concurrent
           worker-fire-event
           worker-call-event
           on-event
@@ -343,6 +345,14 @@
         (priority (current-priority)))
     (shift cont
       (worker-submit-task worker cont :priority priority))))
+
+(define (run-concurrent thunk)
+  (worker-submit-task (current-worker) thunk :priority (current-priority)))
+
+(define-syntax concurrent
+  (syntax-rules ()
+    ((_ body ...)
+     (run-concurrent (lambda () body ...)))))
 
 (define (register-event-handler! event proc :key (priority 'default))
   (hash-table-put! (~ (current-worker)'event-table) event (cons proc priority)))
