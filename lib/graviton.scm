@@ -70,6 +70,7 @@
   (use text.html-lite)
   (use text.tree)
   (use util.match)
+  (use www.css)
 
   (extend graviton.async graviton.browser-objects graviton.event graviton.canvas graviton.audio)
 
@@ -222,6 +223,24 @@
             (respond/ok req js-code :content-type "text/javascript"))
           (respond/ng req 404)))))
 
+(define *resource-table* (make-hash-table 'equal?))
+(define resource-id-generator (make-id-generator))
+
+(define-http-handler #/\/_r\/(.*)/
+  (lambda (req app)
+    (let1 res-id ((slot-ref req 'path-rxmatch) 1)
+      (match-let1 (content-type body) (hash-table-get *resource-table* res-id '(#f #f))
+        (cond
+          (content-type
+           (respond/ok req body :content-type content-type))
+          (else
+           (respond/ng req 404)))))))
+
+(define (allocate-resource content-type data)
+  (let1 res-id (number->string (resource-id-generator) 36)
+    (hash-table-put! *resource-table* res-id (list content-type data))
+    (string-append "/_r/" res-id)))
+
 ;;;
 
 (define *path->window-table* (make-hash-table 'equal?))
@@ -305,18 +324,6 @@
              height
              resizable?
              show?))
-      ((':css (? list? css) rest ...)
-       (for-each (^x (unless (string? x) (errorf "a list of <string> required, but got ~s" x))) css)
-       (loop rest
-             title
-             (append css-list css)
-             js-list
-             head
-             body
-             width
-             height
-             resizable?
-             show?))
       ((':css (? string? css) rest ...)
        (loop rest
              title
@@ -328,18 +335,18 @@
              height
              resizable?
              show?))
-      ((':js (? list js) rest ...)
-       (for-each (^x (unless (string? x) (errorf "a list of <string> required, but got ~s" x))) js)
-       (loop rest
-             title
-             css-list
-             (append js-list js)
-             head
-             body
-             width
-             height
-             resizable?
-             show?))
+      ((':css sxcss rest ...)
+       (let1 css (allocate-resource "text/css" (call-with-output-string (cut construct-css sxcss <>)))
+         (loop rest
+               title
+               (append css-list (list css))
+               js-list
+               head
+               body
+               width
+               height
+               resizable?
+               show?)))
       ((':js (? string? js) rest ...)
        (loop rest
              title
