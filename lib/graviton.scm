@@ -499,6 +499,7 @@
 
 (define *shutdown-if-all-connection-closed?* #f)
 (define *num-connection-atom* (atom 0))
+(define *requested?-atom* (atom #f))
 
 (define (start-websocket-dispatcher! ctx sock in out req-user-agent thunk)
   (thread-start!
@@ -507,6 +508,7 @@
         (guard (e (else (report-error e)
                         (exit 70)))
           (atomic-update! *num-connection-atom* (^x (+ x 1)))
+          (atomic-update! *requested?-atom* (^_ #t))
           (let1 exit-code (websocket-main-loop ctx in out req-user-agent thunk)
             (log-framework-debug "WebSocket dispatcher finished: ~a" exit-code)
             (close-input-port in)
@@ -678,18 +680,30 @@
          (player-path (graviton-config 'graviton-player-path))
          (stdout-filename (build-path (temporary-directory) (format "graviton-player.~a.out" (sys-getpid))))
          (stderr-filename (build-path (temporary-directory) (format "graviton-player.~a.err" (sys-getpid)))))
-    (cond
-      ((file-exists? player-path)
-       (run-process `(,player-path "--config" ,config-file)
-                    :input :null
-                    :output stdout-filename
-                    :error stderr-filename))
-      (else
-       (run-process `("npx" "electron" "." "--config" ,config-file)
-                    :directory "./player/src"
-                    :input :null
-                    :output stdout-filename
-                    :error stderr-filename)))))
+    (let1 player-process (cond
+                           ((file-exists? player-path)
+                            (run-process `(,player-path "--config" ,config-file)
+                                         :input :null
+                                         :output stdout-filename
+                                         :error stderr-filename))
+                           (else
+                            (run-process `("npx" "electron" "." "--config" ,config-file)
+                                         :directory "./player/src"
+                                         :input :null
+                                         :output stdout-filename
+                                         :error stderr-filename)))
+      (thread-start! (make-thread (lambda ()
+                                    (process-wait player-process)
+                                    (let* ((status (process-exit-status player-process))
+                                           (exit-code (sys-wait-exit-status status)))
+                                      ;; If websocket connection is established, the connection handler will quit this app
+                                      ;; when the connection is lost.
+                                      ;; However, the player exits before such connection is established, no one can quit this app.
+                                      ;; So we need to quit this app here when the player exits in the no-connection case.
+                                      (when (and (not (= exit-code 0))
+                                                 (not (atom-ref *requested?-atom*)))
+                                        (display (file->string stderr-filename) (current-error-port))
+                                        (exit 70)))))))))
 
 (define (generate-player-config-file url width height show? resizable?)
   (let* ((config `((width . ,width)
