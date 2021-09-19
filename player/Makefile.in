@@ -10,6 +10,8 @@ SRCS := src/main.js src/renderer.js
 
 PLAYER_INSTALL_DIR := @GRAVITON_PLAYER_INSTALL_DIR@
 
+.DEFAULT_GOAL := build
+
 define player-template
 .PHONY: build-$(1)
 
