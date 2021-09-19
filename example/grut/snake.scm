@@ -1,3 +1,4 @@
+(use gauche.parseopt)
 (use graviton)
 (use graviton.grut)
 (use srfi-1)
@@ -260,18 +261,21 @@
 (define *interval-sec* 0.2)
 
 (define (main args)
-  (with-window (grv-window
-                 :body
-                 (html:body
-                  :style "background-color: black; color: white"
-                  (html:grv-text :id "text" :column *text-width* :row *text-height* :class "grut-monospace-font grut-fill"))
-                 :width 600
-                 :height 600)
-      (text)
-    (let1 state (make <game-state> :text text)
-      (scene-change state 'title)
-      (call-with-console text
-        (lambda (con)
-          (while #t
-            (scene-dispatch state)
-            (worker-sleep! *interval-sec*)))))))
+  (let-args (cdr args) ((use-browser? "b|browser" #f))
+    (grv-config :client (if use-browser? 'browser 'player))
+
+    (with-window (grv-window
+                   :body
+                   (html:body
+                    :style "background-color: black; color: white"
+                    (html:grv-text :id "text" :column *text-width* :row *text-height* :class "grut-monospace-font grut-fill"))
+                   :width 600
+                   :height 600)
+        (text)
+      (let1 state (make <game-state> :text text)
+        (scene-change state 'title)
+        (call-with-console text
+          (lambda (con)
+            (while #t
+              (scene-dispatch state)
+              (worker-sleep! *interval-sec*))))))))
