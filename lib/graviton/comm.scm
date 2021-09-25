@@ -102,6 +102,9 @@
         (%client-request-output (open-output-uvector))
         (%client-request-output))))
 
+(define (init-client-request-output)
+  (%client-request-output (open-output-uvector)))
+
 (define (flush-client-request)
   (window-context-slot-atomic-ref 'websocket-output-port
     (lambda (wout)
@@ -124,6 +127,7 @@
             (thunk)))
         flush-client-request)))
 
+(add-hook! worker-thread-start-hook init-client-request-output)
 (add-hook! worker-process-event-start-hook flush-client-request)
 
 ;;;
