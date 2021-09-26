@@ -131,7 +131,7 @@
 (define (make-window-parameter* init-proc)
   (rlet1 wparam (make <window-parameter>)
     (register-window-context-slot! (slot-ref wparam 'key) (lambda ()
-                                                                 (values->list (init-proc))))))
+                                                            (values->list (init-proc))))))
 
 (define (make-window-parameter :rest vals)
   (make-window-parameter* (^() (apply values vals))))

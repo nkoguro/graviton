@@ -16,25 +16,28 @@
         (l (round->exact (* (/. n max-n) 100))))
     (format "hsl(~a,100%,~a%)" h l)))
 
-(define (compute-worker-main)
-  (on-event 'compute (width height offset-width offset-height start-x start-y delta-x delta-y max-loop)
-    (define (x+y->z x y)
-      (make-rectangular (+ start-x (* x delta-x)) (+ start-y (* y delta-y))))
+(define compute-worker
+  (grv-worker
+   :name "mandelbrot compute worker"
+   :size 4
+   (on-event 'compute (width height offset-width offset-height start-x start-y delta-x delta-y max-loop)
+     (define (x+y->z x y)
+       (make-rectangular (+ start-x (* x delta-x)) (+ start-y (* y delta-y))))
 
-    (define (compute zn c n)
-      (cond ((>= n max-loop) n)
-            ((>= (magnitude zn) 2) n)
-            (else (compute (+ (* zn zn) c) c (+ n 1)))))
+     (define (compute zn c n)
+       (cond ((>= n max-loop) n)
+             ((>= (magnitude zn) 2) n)
+             (else (compute (+ (* zn zn) c) c (+ n 1)))))
 
-    (let1 pixels '()
-      (do ((y offset-height (+ y 1)))
-          ((<= (+ height offset-height) y) #f)
-        (do ((x offset-width (+ x 1)))
-            ((<= (+ width offset-width) x) #f)
-          (let1 n (compute 0 (x+y->z x y) 0)
-            (when (< n max-loop)
-              (push! pixels (list x y (n->color n *max-n*)))))))
-      (worker-fire-event (main-worker) 'draw-tile pixels))))
+     (let1 pixels '()
+       (do ((y offset-height (+ y 1)))
+           ((<= (+ height offset-height) y) #f)
+         (do ((x offset-width (+ x 1)))
+             ((<= (+ width offset-width) x) #f)
+           (let1 n (compute 0 (x+y->z x y) 0)
+             (when (< n max-loop)
+               (push! pixels (list x y (n->color n *max-n*)))))))
+       (worker-fire-event (main-worker) 'draw-tile pixels)))))
 
 (define (main args)
   (with-window (make-canvas-window *width* *height* :background-color "black")
@@ -54,8 +57,7 @@
               #f
               pixels))
 
-      (let* ((worker (run-worker-thread compute-worker-main :name "mandelbrot compute worker" :size 4))
-             (delta-x (/. 3 *width*))
+      (let* ((delta-x (/. 3 *width*))
              (delta-y (/. 3 *height*))
              (mesh-x 16)
              (mesh-y 16)
@@ -63,7 +65,7 @@
              (mesh-h (round->exact (/. *height* mesh-y))))
         (for-each (match-lambda
                     ((i j)
-                     (worker-fire-event worker
+                     (worker-fire-event compute-worker
                                         'compute
                                         mesh-w
                                         mesh-h

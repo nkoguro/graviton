@@ -53,7 +53,6 @@
           make-worker-thread
           worker-begin
           run-worker-thread
-          worker-thread-begin
           worker-run
           worker-close
           worker-active?
@@ -79,6 +78,7 @@
           scheduler-delete!
           worker-sleep!
           main-worker
+          grv-worker
 
           <channel>
           make-channel
@@ -205,16 +205,6 @@
 (define (run-worker-thread thunk :key (name #f) (size 1))
   (rlet1 worker-thread (make-worker-thread thunk :name name :size size)
     (worker-run worker-thread)))
-
-(define-syntax worker-thread-begin
-  (er-macro-transformer
-    (lambda (form rename id=?)
-      (match form
-        ((_ name (specs ...) body ...)
-         (quasirename rename `(rlet1 worker-thread (apply make-worker-thread (lambda () body ...) :name name specs)
-                                (worker-run worker-thread))))
-        (_
-         (errorf "malformed worker-thread: ~s" form))))))
 
 (define (worker-close worker)
   (task-queue-close (~ worker'task-queue)))
@@ -367,7 +357,7 @@
 (define (unregister-event-handler! event)
   (hash-table-delete! (~ (current-worker)'event-table) event))
 
-(define (worker-fire-event worker event :rest args)
+(define-method worker-fire-event ((worker <worker>) event :rest args)
   (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event #f args)))
 
 (define-syntax on-event
@@ -454,57 +444,78 @@
        (let1 callback (worker-callback cont)
          expr ...)))))
 
-(define (worker-call-event worker event :rest args)
+(define-method worker-call-event ((worker <worker>) event :rest args)
   (shift-callback callback
     (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event callback args))))
 
 ;;;
 
-(define (scheduler)
-  ;; schedule := (time-in-sec callback interval-in-sec)
-  (let1 schedule-list '()
-    (define (update-idle-timeout!)
-      (worker-thread-idle-timeout (if (null? schedule-list)
-                                    #f
-                                    (max 0 (- (first (car schedule-list)) (now-seconds))))))
+(define-syntax grv-worker
+  (er-macro-transformer
+    (lambda (form rename id=?)
+      (let loop ((args (cdr form))
+                 (specs '()))
+        (match args
+          (((? keyword? kw) val rest ...)
+           (loop rest (append specs (list kw val))))
+          ((body ...)
+           (quasirename rename `(let1 provider (lambda ()
+                                                 (rlet1 worker-thread (apply make-worker-thread (lambda () ,@body) (list ,@specs))
+                                                   (worker-run worker-thread)))
+                                  (if (window-context)
+                                    (provider)
+                                    (make-window-parameter* provider))))))))))
 
-    (define (add-schedule! time-in-sec callback interval-in-sec)
-      (set! schedule-list (sort (cons (list time-in-sec callback interval-in-sec)
-                                      schedule-list)
-                                (lambda (s1 s2)
-                                  (< (first s1) (first s2)))))
-      (update-idle-timeout!))
+(define-method worker-fire-event ((wparam <window-parameter>) event :rest args)
+  (apply worker-fire-event (wparam) event args))
 
-    (define (del-schedule! callback)
-      (set! schedule-list (remove (match-lambda
-                                    ((_ cb _ ...)
-                                     (equal? cb callback))
-                                    (schedule
-                                     (errorf "Invalid schedule: ~s" schedule)))
-                                  schedule-list))
-      (update-idle-timeout!))
+(define-method worker-call-event ((wparam <window-parameter>) event :rest args)
+  (apply worker-call-event (wparam) event args))
 
-    (define (process-schedule!)
-      (let loop ()
-        (unless (null? schedule-list)
-          (match-let1 (time-in-sec callback interval-in-sec) (car schedule-list)
-            (let1 now (now-seconds)
-              (when (<= time-in-sec now)
-                (callback)
-                (pop! schedule-list)
-                (when interval-in-sec
-                  (add-schedule! (+ now interval-in-sec) callback interval-in-sec))
-                (loop))))))
-      (update-idle-timeout!))
+;;;
 
-    (on-idle process-schedule!)
-    (on-event 'add add-schedule!)
-    (on-event 'del del-schedule!)))
+(define scheduler
+  (grv-worker
+   :name "scheduler"
+   ;; schedule := (time-in-sec callback interval-in-sec)
+   (let1 schedule-list '()
+     (define (update-idle-timeout!)
+       (worker-thread-idle-timeout (if (null? schedule-list)
+                                     #f
+                                     (max 0 (- (first (car schedule-list)) (now-seconds))))))
 
-(define (run-scheduler)
-  (run-worker-thread scheduler :name "scheduler"))
+     (define (add-schedule! time-in-sec callback interval-in-sec)
+       (set! schedule-list (sort (cons (list time-in-sec callback interval-in-sec)
+                                       schedule-list)
+                                 (lambda (s1 s2)
+                                   (< (first s1) (first s2)))))
+       (update-idle-timeout!))
 
-(define-window-context-slot scheduler (run-scheduler))
+     (define (del-schedule! callback)
+       (set! schedule-list (remove (match-lambda
+                                     ((_ cb _ ...)
+                                      (equal? cb callback))
+                                     (schedule
+                                      (errorf "Invalid schedule: ~s" schedule)))
+                                   schedule-list))
+       (update-idle-timeout!))
+
+     (define (process-schedule!)
+       (let loop ()
+         (unless (null? schedule-list)
+           (match-let1 (time-in-sec callback interval-in-sec) (car schedule-list)
+             (let1 now (now-seconds)
+               (when (<= time-in-sec now)
+                 (callback)
+                 (pop! schedule-list)
+                 (when interval-in-sec
+                   (add-schedule! (+ now interval-in-sec) callback interval-in-sec))
+                 (loop))))))
+       (update-idle-timeout!))
+
+     (on-idle process-schedule!)
+     (on-event 'add add-schedule!)
+     (on-event 'del del-schedule!))))
 
 ;; thunk-or-event := procedure | (event-name args ...)
 (define (scheduler-add! callback :key ((:at abs-time) #f) ((:after rel-sec) #f) ((:every interval) #f))
@@ -512,7 +523,7 @@
               (and (not abs-time) rel-sec (not interval))
               (and (not abs-time) (not rel-sec) interval))
     (error "scheduler-add! needs :at, :after or :every keyword"))
-  (worker-fire-event (window-context-slot-ref 'scheduler)
+  (worker-fire-event scheduler
                      'add
                      (cond
                              (abs-time
@@ -525,7 +536,7 @@
                      interval))
 
 (define (scheduler-delete! callback)
-  (worker-fire-event (window-context-slot-ref 'scheduler) 'del callback))
+  (worker-fire-event scheduler 'del callback))
 
 (define (worker-sleep! time-or-sec)
   (shift-callback callback
