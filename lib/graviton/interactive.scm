@@ -90,7 +90,7 @@
 
   (%worker-current-module (%worker-sandbox-module)))
 
-(add-hook! worker-thread-start-hook inject-evaluator)
+(add-hook! worker-start-hook inject-evaluator)
 
 (define (worker-eval* sexpr worker success fail
                       :key

@@ -127,7 +127,7 @@
             (thunk)))
         flush-client-request)))
 
-(add-hook! worker-thread-start-hook init-client-request-output)
+(add-hook! worker-start-hook init-client-request-output)
 (add-hook! worker-process-event-start-hook flush-client-request)
 
 ;;;
@@ -319,7 +319,7 @@
                        '(r))
 
         ;; Invoke main worker thread
-        (let1 wt (make-worker-thread thunk :name "main")
+        (let1 wt (make-worker thunk :name "main")
           (worker-run wt)
           (window-context-slot-set! 'main-worker wt))
 
@@ -328,8 +328,8 @@
 
         (selector-delete! sel #f #f #f)))
 
-    (let1 worker-threads (all-worker-threads)
-      (for-each worker-shutdown worker-threads))
+    (let1 workers (all-workers)
+      (for-each worker-shutdown workers))
 
     (window-context-invalidate! ctx)
 

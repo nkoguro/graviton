@@ -44,21 +44,17 @@
 
   (export current-worker
           current-priority
-          worker-thread-idle-timeout
+          worker-idle-timeout
           worker-process-event-start-hook
-          worker-thread-start-hook
+          worker-start-hook
           <worker>
-          <worker-thread>
           make-worker
-          make-worker-thread
-          worker-begin
-          run-worker-thread
           worker-run
           worker-close
           worker-active?
           worker-shutdown
-          worker-thread-wait
-          all-worker-threads
+          worker-wait
+          all-workers
           worker-submit-task
           worker-yield!
           run-concurrent
@@ -94,31 +90,29 @@
 
 (define current-worker (make-parameter #f))
 (define current-priority (make-parameter #f))
-(define worker-thread-idle-timeout (make-parameter #f))
-(define-window-context-slot worker-threads '())
+(define worker-idle-timeout (make-parameter #f))
+(define-window-context-slot workers '())
 
 (define-class <worker> ()
   ((task-queue :init-form (make-task-queue))
    (event-table :init-form (make-hash-table 'eq?))
-   (idle-handler :init-value #f)))
-
-(define-class <worker-thread> (<worker>)
-  ((name :init-keyword :name
+   (idle-handler :init-value #f)
+   (name :init-keyword :name
          :init-value #f)
    (threads :init-value '())))
 
-(define-method write-object ((obj <worker-thread>) port)
-  (format port "#<worker-thread ~s>" (~ obj'name)))
+(define-method write-object ((obj <worker>) port)
+  (format port "#<worker ~s>" (~ obj'name)))
 
 (define worker-process-event-start-hook (make-hook))
 
-(define (worker-process-event worker :optional (timeout #f))
+(define (worker-process-event timeout)
   (define (invoke-thunk priority thunk)
     (parameterize ((current-priority priority))
       (reset
         (thunk))))
 
-  (parameterize ((current-worker worker))
+  (let1 worker (current-worker)
     (run-hook worker-process-event-start-hook)
 
     (log-framework-debug "Start worker-process-event: ~s" worker)
@@ -151,60 +145,33 @@
            (errorf "Invalid value in task-queue: ~s" v)))
       (log-framework-debug "End worker-process-event: ~s" worker))))
 
-(define (make-worker thunk)
-  (rlet1 worker (make <worker>)
-    (worker-submit-task worker thunk)))
+(define worker-start-hook (make-hook))
 
-(define-method worker-run ((worker <worker>))
-  (worker-process-event worker 0))
-
-(define-method object-apply ((worker <worker>))
-  (worker-run worker))
-
-(define-syntax worker-begin
-  (er-macro-transformer
-    (lambda (form rename id=?)
-      (match form
-        ((_ body ...)
-         (let1 worker-box (box #f)
-           (quasirename rename
-             `(if-let1 worker (unbox ,worker-box)
-                (worker-run worker)
-                (let1 worker (lambda () body ...)
-                   (set-box! ,worker-box worker)
-                   (worker-run worker))))))))))
-
-(define worker-thread-start-hook (make-hook))
-
-(define (worker-thread-run-event-loop worker-thread thunk)
+(define (worker-run-event-loop worker thunk)
   (guard (e (else (report-error e)
                   (app-exit 70)))
-    (current-worker worker-thread)
+    (current-worker worker)
     (current-priority 'default)
-    (run-hook worker-thread-start-hook)
+    (run-hook worker-start-hook)
 
     (reset
       (thunk))
-    (while (worker-process-event worker-thread (worker-thread-idle-timeout))
+    (while (worker-process-event (worker-idle-timeout))
       #t)))
 
-(define (make-worker-thread thunk :key (name #f) (size 1))
-  (rlet1 worker-thread (make <worker-thread> :name (format "~a:~a" (window-context-id) name))
-    (window-context-slot-atomic-update! 'worker-threads
+(define (make-worker thunk :key (name #f) (size 1))
+  (rlet1 worker (make <worker> :name (format "~a:~a" (window-context-id) name))
+    (window-context-slot-atomic-update! 'workers
       (lambda (lst)
-        (cons worker-thread lst)))
+        (cons worker lst)))
     (dotimes (i size)
-      (let1 thread (make-thread (cut worker-thread-run-event-loop worker-thread thunk) (format "~s:~d" worker-thread i))
-        (push! (~ worker-thread'threads) thread)))))
+      (let1 thread (make-thread (cut worker-run-event-loop worker thunk) (format "~s:~d" worker i))
+        (push! (~ worker'threads) thread)))))
 
-(define-method worker-run ((worker-thread <worker-thread>))
-  (dolist (thread (~ worker-thread'threads))
+(define (worker-run worker)
+  (dolist (thread (~ worker'threads))
     (when (eq? (thread-state thread) 'new)
       (thread-start! thread))))
-
-(define (run-worker-thread thunk :key (name #f) (size 1))
-  (rlet1 worker-thread (make-worker-thread thunk :name name :size size)
-    (worker-run worker-thread)))
 
 (define (worker-close worker)
   (task-queue-close (~ worker'task-queue)))
@@ -215,20 +182,23 @@
 (define (worker-shutdown worker)
   (worker-close worker)
   (remove-all-tasks! worker)
+  (window-context-slot-atomic-update! 'workers
+    (lambda (workers)
+      (delete worker workers)))
   (undefined))
 
-(define (worker-thread-wait worker-thread :key (timeout #f))
+(define (worker-wait worker :key (timeout #f))
   (let1 timeout-val (gensym)
     (for-each (lambda (thread)
                 (when (eq? (thread-join! thread timeout timeout-val) timeout-val)
                   (thread-terminate! thread)
                   (log-error "~s is killed due to timeout" thread)))
-              (~ worker-thread'threads))
-    (set! (~ worker-thread'threads) '()))
+              (~ worker'threads))
+    (set! (~ worker'threads) '()))
   (undefined))
 
-(define (all-worker-threads)
-  (window-context-slot-ref 'worker-threads))
+(define (all-workers)
+  (window-context-slot-ref 'workers))
 
 (define-class <task-queue> ()
   ((mutex :init-form (make-mutex 'task-queue))
@@ -460,8 +430,8 @@
            (loop rest (append specs (list kw val))))
           ((body ...)
            (quasirename rename `(let1 provider (lambda ()
-                                                 (rlet1 worker-thread (apply make-worker-thread (lambda () ,@body) (list ,@specs))
-                                                   (worker-run worker-thread)))
+                                                 (rlet1 worker (apply make-worker (lambda () ,@body) (list ,@specs))
+                                                   (worker-run worker)))
                                   (if (window-context)
                                     (provider)
                                     (make-window-parameter* provider))))))))))
@@ -480,7 +450,7 @@
    ;; schedule := (time-in-sec callback interval-in-sec)
    (let1 schedule-list '()
      (define (update-idle-timeout!)
-       (worker-thread-idle-timeout (if (null? schedule-list)
+       (worker-idle-timeout (if (null? schedule-list)
                                      #f
                                      (max 0 (- (first (car schedule-list)) (now-seconds))))))
 
