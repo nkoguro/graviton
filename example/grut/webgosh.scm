@@ -98,7 +98,8 @@
 (define-class <environ> ()
   ((target-worker-stack :init-form (list (current-worker)))
    (input-port :init-keyword :input-port)
-   (output-port :init-keyword :output-port)))
+   (output-port :init-keyword :output-port)
+   (console :init-keyword :console)))
 
 (define (env-target-worker env)
   (let1 stack (~ env'target-worker-stack)
@@ -130,7 +131,8 @@
                 :input-port (~ env'input-port)
                 :output-port (~ env'output-port)
                 :error-port (~ env'output-port)
-                :trace-port (~ env'output-port)))
+                :trace-port (~ env'output-port)
+                :console (~ env'console)))
 
 ;;;
 
@@ -409,7 +411,7 @@
 
       (let* ((out (get-text-output-port (current-worker)))
              (in (get-text-input-port console out))
-             (env (make <environ> :input-port in :output-port out))
+             (env (make <environ> :input-port in :output-port out :console console))
              (hook (make-hook 3))
              (completion-keymap (make-keymap (global-keymap))))
         (parameterize ((current-output-port console)

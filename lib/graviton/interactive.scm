@@ -43,6 +43,8 @@
           worker-current-module
           worker-sandbox-module
 
+          current-console
+
           print-main-worker-list))
 
 (select-module graviton.interactive)
@@ -67,8 +69,10 @@
                                                  (reverse (module-imports original-module)))
                                        (eval `(extend ,(module-name original-module)) sandbox))))))
 
+(define current-console (make-parameter #f))
+
 (define (inject-evaluator)
-  (on-event *eval-event* (sexpr in out err trace)
+  (on-event *eval-event* (sexpr in out err trace console)
     (eval `(select-module ,(module-name (%worker-current-module))) (%worker-current-module))
 
     (guard (e (else (list 'error e)))
@@ -77,7 +81,8 @@
                                    (parameterize ((current-input-port (or in (current-input-port)))
                                                   (current-output-port (or out (current-output-port)))
                                                   (current-error-port (or err (current-error-port)))
-                                                  (current-trace-port (or trace (current-trace-port))))
+                                                  (current-trace-port (or trace (current-trace-port)))
+                                                  (current-console console))
                                      (eval sexpr (%worker-current-module))))))
         (%worker-current-module (vm-current-module))
         (list 'success vals))))
@@ -97,15 +102,18 @@
                       (input-port #f)
                       (output-port #f)
                       (error-port #f)
-                      (trace-port #f))
+                      (trace-port #f)
+                      (console #f))
   (unless (worker-active? worker)
     (errorf "~s is inactive" worker))
 
-  (match (worker-call-event worker *eval-event* sexpr
-                            input-port
-                            output-port
-                            error-port
-                            trace-port)
+  (match ((worker *eval-event*
+                  sexpr
+                  input-port
+                  output-port
+                  error-port
+                  trace-port
+                  console))
     (('success vals)
      (apply success vals))
     (('error e)
@@ -116,12 +124,14 @@
                      (input-port #f)
                      (output-port #f)
                      (error-port #f)
-                     (trace-port #f))
+                     (trace-port #f)
+                     (console #f))
   (worker-eval* sexpr worker values raise
                 :input-port input-port
                 :output-port output-port
                 :error-port error-port
-                :trace-port trace-port))
+                :trace-port trace-port
+                :console console))
 
 (define (worker-current-module worker)
   (unless (worker-active? worker)
