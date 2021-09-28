@@ -34,9 +34,9 @@
 (define (get-text-output-port ui-worker)
   (make <virtual-output-port>
     :putb (lambda (b)
-            (worker-fire-event ui-worker 'putb b))
+            (ui-worker'putb b))
     :puts (lambda (s)
-            (worker-fire-event ui-worker 'puts s))))
+            (ui-worker'puts s))))
 
 (define (get-text-input-port grv-text out)
   (let1 in #f

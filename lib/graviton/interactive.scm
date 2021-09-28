@@ -137,13 +137,13 @@
   (unless (worker-active? worker)
     (errorf "~s is inactive" worker))
 
-  (worker-call-event worker *query-worker-current-module-event*))
+  ((worker *query-worker-current-module-event*)))
 
 (define (worker-sandbox-module worker)
   (unless (worker-active? worker)
     (errorf "~s is inactive" worker))
 
-  (worker-call-event worker *query-worker-sandbox-module-event*))
+  ((worker *query-worker-sandbox-module-event*)))
 
 ;;;
 

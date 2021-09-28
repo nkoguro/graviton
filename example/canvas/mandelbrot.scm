@@ -37,7 +37,7 @@
            (let1 n (compute 0 (x+y->z x y) 0)
              (when (< n max-loop)
                (push! pixels (list x y (n->color n *max-n*)))))))
-       (worker-fire-event (main-worker) 'draw-tile pixels)))))
+       ((main-worker)'draw-tile pixels)))))
 
 (define (main args)
   (with-window (make-canvas-window *width* *height* :background-color "black")
@@ -65,15 +65,13 @@
              (mesh-h (round->exact (/. *height* mesh-y))))
         (for-each (match-lambda
                     ((i j)
-                     (worker-fire-event compute-worker
-                                        'compute
-                                        mesh-w
-                                        mesh-h
-                                        (* mesh-w i)
-                                        (* mesh-h j)
-                                        -2
-                                        -1.5
-                                        delta-x
-                                        delta-y
-                                        *max-n*)))
+                     (compute-worker'compute mesh-w
+                                             mesh-h
+                                             (* mesh-w i)
+                                             (* mesh-h j)
+                                             -2
+                                             -1.5
+                                             delta-x
+                                             delta-y
+                                             *max-n*)))
                   (cartesian-product (list (iota mesh-x) (iota mesh-y))))))))

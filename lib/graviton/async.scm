@@ -59,8 +59,7 @@
           worker-yield!
           run-concurrent
           concurrent
-          worker-fire-event
-          worker-call-event
+          worker-dispatch-event
           on-event
           on-idle
           <worker-callback>
@@ -82,6 +81,11 @@
           channel-close
           channel-closed?
           channel-recv
+
+          <grv-future>
+          make-grv-future
+          grv-future-set!
+          grv-future-get
           ))
 
 (select-module graviton.async)
@@ -418,7 +422,25 @@
   (shift-callback callback
     (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event callback args))))
 
+(define-method worker-dispatch-event ((worker <worker>) event :rest args)
+  (let1 future (make-grv-future)
+    (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list*
+                                                       (now-seconds)
+                                                       event
+                                                       (lambda vals (apply grv-future-set! future vals))
+                                                       args))
+    future))
+
+(define-method object-apply ((worker <worker>) event :rest args)
+  (apply worker-dispatch-event worker event args))
+
 ;;;
+
+(define-class <worker-wrapper> ()
+  ((wparam :init-keyword :wparam)))
+
+(define (unwrap-worker worker-wrapper)
+  ((~ worker-wrapper'wparam)))
 
 (define-syntax grv-worker
   (er-macro-transformer
@@ -434,13 +456,19 @@
                                                    (worker-run worker)))
                                   (if (window-context)
                                     (provider)
-                                    (make-window-parameter* provider))))))))))
+                                    (make <worker-wrapper> :wparam (make-window-parameter* provider)))))))))))
 
-(define-method worker-fire-event ((wparam <window-parameter>) event :rest args)
-  (apply worker-fire-event (wparam) event args))
+(define-method worker-fire-event ((worker-wrapper <worker-wrapper>) event :rest args)
+  (apply worker-fire-event (unwrap-worker worker-wrapper) event args))
 
-(define-method worker-call-event ((wparam <window-parameter>) event :rest args)
-  (apply worker-call-event (wparam) event args))
+(define-method worker-call-event ((worker-wrapper <worker-wrapper>) event :rest args)
+  (apply worker-call-event (unwrap-worker worker-wrapper) event args))
+
+(define-method worker-dispatch-event ((worker-wrapper <worker-wrapper>) event :rest args)
+  (apply worker-dispatch-event (unwrap-worker worker-wrapper) event args))
+
+(define-method object-apply ((worker-wrapper <worker-wrapper>) event :rest args)
+  (apply worker-dispatch-event (unwrap-worker worker-wrapper) event args))
 
 ;;;
 
@@ -566,7 +594,7 @@
 
 (define (channel-recv channel :optional fallback)
   (with-slots (lock queue closed? callbacks) channel
-    (mutex-lock! lock timeout timeout-val)
+    (mutex-lock! lock)
     (cond
       ((not (queue-empty? queue))
        (begin0
@@ -586,3 +614,42 @@
 
 (define-method object-apply ((channel <channel>))
   (channel-recv channel))
+
+;;;
+
+(define-class <grv-future> ()
+  ((lock :init-form (make-mutex))
+   (value-list :init-value #f)
+   (callbacks :init-value '())))
+
+(define (make-grv-future)
+  (make <grv-future>))
+
+(define (grv-future-set! future :rest vals)
+  (with-slots (lock value-list callbacks) future
+    (with-locking-mutex lock
+      (lambda ()
+        (when value-list
+          (errorf "<future> already has values: ~s" future))
+        (set! value-list vals)
+        (for-each (^c (c)) callbacks)
+        (set! callbacks '())))))
+
+(define (grv-future-get future :rest fallback-values)
+  (with-slots (lock value-list callbacks) future
+    (mutex-lock! lock)
+    (cond
+      (value-list
+       (begin0
+           (apply values value-list)
+         (mutex-unlock! lock)))
+      ((null? fallback-values)
+       (shift-callback callback
+         (push! callbacks callback)
+         (mutex-unlock! lock))
+       (grv-future-get future))
+      (else
+       (apply values fallback-values)))))
+
+(define-method object-apply ((grv-future <grv-future>))
+  (grv-future-get grv-future))
