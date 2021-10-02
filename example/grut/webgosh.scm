@@ -403,10 +403,10 @@
         (console status completion)
       (show-cursor console)
 
-      (on-event 'putb (b)
+      (define-message putb (b)
         (write-byte b console))
 
-      (on-event 'puts (s)
+      (define-message puts (s)
         (display s console))
 
       (let* ((out (get-text-output-port (current-worker)))

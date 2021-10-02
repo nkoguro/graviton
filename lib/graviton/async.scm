@@ -60,7 +60,6 @@
           run-concurrent
           concurrent
           worker-dispatch-event
-          on-event
           on-idle
           <worker-callback>
           <procedure-callback>
@@ -74,6 +73,10 @@
           worker-sleep!
           main-worker
           grv-worker
+
+          add-message-handler!
+          delete-message-handler!
+          define-message
 
           <channel>
           make-channel
@@ -325,25 +328,25 @@
     ((_ body ...)
      (run-concurrent (lambda () body ...)))))
 
-(define (register-event-handler! event proc :key (priority 'default))
-  (hash-table-put! (~ (current-worker)'event-table) event (cons proc priority)))
-
-(define (unregister-event-handler! event)
-  (hash-table-delete! (~ (current-worker)'event-table) event))
-
 (define-method worker-fire-event ((worker <worker>) event :rest args)
   (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event #f args)))
 
-(define-syntax on-event
+(define (add-message-handler! message proc :key (priority 'default))
+  (hash-table-put! (~ (current-worker)'event-table) message (cons proc priority)))
+
+(define (delete-message-handler! message)
+  (hash-table-delete! (~ (current-worker)'event-table) message))
+
+(define-syntax define-message
   (syntax-rules (:priority)
-    ((_ (event :priority priority) (arg ...) body ...)
-     (register-event-handler! event (lambda (arg ...) body ...) :priority priority))
-    ((_ (event :priority priority) proc)
-     (register-event-handler! event proc :priority priority))
-    ((_ event (arg ...) body ...)
-     (register-event-handler! event (lambda (arg ...) body ...)))
-    ((_ event proc)
-     (register-event-handler! event proc))))
+    ((_ message (arg ...) :priority priority body ...)
+     (add-message-handler! 'message (lambda (arg ...) body ...) :priority priority))
+    ((_ message (arg ...) body ...)
+     (add-message-handler! 'message (lambda (arg ...) body ...)))
+    ((_ message args :priority priority body ...)
+     (add-message-handler! 'message (lambda args body ...) :priority priority))
+    ((_ messag args body ...)
+     (add-message-handler! 'message (lambda args body ...)))))
 
 (define (register-idle-handler! thunk)
   (set! (~ (current-worker)'idle-handler) thunk))
@@ -512,8 +515,8 @@
        (update-idle-timeout!))
 
      (on-idle process-schedule!)
-     (on-event 'add add-schedule!)
-     (on-event 'del del-schedule!))))
+     (add-message-handler! add add-schedule!)
+     (add-message-handler! del del-schedule!))))
 
 ;; thunk-or-event := procedure | (event-name args ...)
 (define (scheduler-add! callback :key ((:at abs-time) #f) ((:after rel-sec) #f) ((:every interval) #f))

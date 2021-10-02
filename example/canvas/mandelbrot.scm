@@ -20,7 +20,7 @@
   (grv-worker
    :name "mandelbrot compute worker"
    :size 4
-   (on-event 'compute (width height offset-width offset-height start-x start-y delta-x delta-y max-loop)
+   (define-message compute (width height offset-width offset-height start-x start-y delta-x delta-y max-loop)
      (define (x+y->z x y)
        (make-rectangular (+ start-x (* x delta-x)) (+ start-y (* y delta-y))))
 
@@ -47,7 +47,8 @@
         (when (equal? key "Escape")
           (close-window)))
 
-      (on-event ('draw-tile :priority 'low) (pixels)
+      (define-message draw-tile (pixels)
+        :priority 'low
         (fold (lambda (pixel prev-color)
                 (match-let1 (x y color) pixel
                   (unless (equal? prev-color color)

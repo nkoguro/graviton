@@ -72,26 +72,29 @@
 (define current-console (make-parameter #f))
 
 (define (inject-evaluator)
-  (on-event *eval-event* (sexpr in out err trace console)
-    (eval `(select-module ,(module-name (%worker-current-module))) (%worker-current-module))
+  (add-message-handler! *eval-event*
+    (lambda (sexpr in out err trace console)
+      (eval `(select-module ,(module-name (%worker-current-module))) (%worker-current-module))
 
-    (guard (e (else (list 'error e)))
-      (let1 vals (values->list (with-client-request
-                                 (lambda ()
-                                   (parameterize ((current-input-port (or in (current-input-port)))
-                                                  (current-output-port (or out (current-output-port)))
-                                                  (current-error-port (or err (current-error-port)))
-                                                  (current-trace-port (or trace (current-trace-port)))
-                                                  (current-console console))
-                                     (eval sexpr (%worker-current-module))))))
-        (%worker-current-module (vm-current-module))
-        (list 'success vals))))
+      (guard (e (else (list 'error e)))
+        (let1 vals (values->list (with-client-request
+                                   (lambda ()
+                                     (parameterize ((current-input-port (or in (current-input-port)))
+                                                    (current-output-port (or out (current-output-port)))
+                                                    (current-error-port (or err (current-error-port)))
+                                                    (current-trace-port (or trace (current-trace-port)))
+                                                    (current-console console))
+                                       (eval sexpr (%worker-current-module))))))
+          (%worker-current-module (vm-current-module))
+          (list 'success vals)))))
 
-  (on-event *query-worker-current-module-event* ()
-    (%worker-current-module))
+  (add-message-handler! *query-worker-current-module-event*
+    (lambda ()
+      (%worker-current-module)))
 
-  (on-event *query-worker-sandbox-module-event* ()
-    (%worker-sandbox-module))
+  (add-message-handler! *query-worker-sandbox-module-event*
+    (lambda ()
+      (%worker-sandbox-module)))
 
   (%worker-current-module (%worker-sandbox-module)))
 
