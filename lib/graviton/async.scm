@@ -44,7 +44,7 @@
 
   (export current-worker
           current-priority
-          worker-idle-timeout
+          worker-event-wait-timeout
           worker-process-event-start-hook
           worker-start-hook
           <worker>
@@ -60,7 +60,6 @@
           run-concurrent
           concurrent
           worker-dispatch-event
-          on-idle
           <worker-callback>
           <procedure-callback>
           <event-callback>
@@ -73,6 +72,7 @@
           worker-sleep!
           main-worker
           grv-worker
+          worker-event-loop-hook
 
           add-message-handler!
           delete-message-handler!
@@ -97,13 +97,13 @@
 
 (define current-worker (make-parameter #f))
 (define current-priority (make-parameter #f))
-(define worker-idle-timeout (make-parameter #f))
+(define worker-event-wait-timeout (make-parameter #f))
 (define-window-context-slot workers '())
 
 (define-class <worker> ()
   ((task-queue :init-form (make-task-queue))
    (event-table :init-form (make-hash-table 'eq?))
-   (idle-handler :init-value #f)
+   (event-loop-hook :init-form (make-hook))
    (name :init-keyword :name
          :init-value #f)
    (threads :init-value '())))
@@ -123,14 +123,12 @@
     (run-hook worker-process-event-start-hook)
 
     (log-framework-debug "Start worker-process-event: ~s" worker)
+    (run-hook (~ worker'event-loop-hook))
     (begin0
         (match (dequeue-task! worker timeout)
           ((? eof-object? eof)
            #f)
           (#f
-           (and-let1 thunk (~ worker'idle-handler)
-             (log-framework-debug "Invoke idle handler in worker: ~s" worker)
-             (invoke-thunk 'low thunk))
            #t)
           (((? real? timestamp) (? symbol? event-name) result-callback args ...)
            (and-let* ((proc+priority (hash-table-get (~ worker'event-table) event-name #f))
@@ -163,7 +161,7 @@
 
     (reset
       (thunk))
-    (while (worker-process-event (worker-idle-timeout))
+    (while (worker-process-event (worker-event-wait-timeout))
       #t)))
 
 (define (make-worker thunk :key (name #f) (size 1))
@@ -206,6 +204,9 @@
 
 (define (all-workers)
   (window-context-slot-ref 'workers))
+
+(define (worker-event-loop-hook :optional (worker (current-worker)))
+  (~ worker'event-loop-hook))
 
 (define-class <task-queue> ()
   ((mutex :init-form (make-mutex 'task-queue))
@@ -348,16 +349,6 @@
     ((_ messag args body ...)
      (add-message-handler! 'message (lambda args body ...)))))
 
-(define (register-idle-handler! thunk)
-  (set! (~ (current-worker)'idle-handler) thunk))
-
-(define-syntax on-idle
-  (syntax-rules ()
-    ((_ () body ...)
-     (register-idle-handler! (lambda () body ...)))
-    ((_ proc)
-     (register-idle-handler! proc))))
-
 (define-class <worker-callback> ()
   ((worker :init-keyword :worker)))
 
@@ -480,8 +471,8 @@
    :name "scheduler"
    ;; schedule := (time-in-sec callback interval-in-sec)
    (let1 schedule-list '()
-     (define (update-idle-timeout!)
-       (worker-idle-timeout (if (null? schedule-list)
+     (define (update-event-wait-timeout!)
+       (worker-event-wait-timeout (if (null? schedule-list)
                                      #f
                                      (max 0 (- (first (car schedule-list)) (now-seconds))))))
 
@@ -490,7 +481,7 @@
                                        schedule-list)
                                  (lambda (s1 s2)
                                    (< (first s1) (first s2)))))
-       (update-idle-timeout!))
+       (update-event-wait-timeout!))
 
      (define (del-schedule! callback)
        (set! schedule-list (remove (match-lambda
@@ -499,7 +490,7 @@
                                      (schedule
                                       (errorf "Invalid schedule: ~s" schedule)))
                                    schedule-list))
-       (update-idle-timeout!))
+       (update-event-wait-timeout!))
 
      (define (process-schedule!)
        (let loop ()
@@ -512,9 +503,9 @@
                  (when interval-in-sec
                    (add-schedule! (+ now interval-in-sec) callback interval-in-sec))
                  (loop))))))
-       (update-idle-timeout!))
+       (update-event-wait-timeout!))
 
-     (on-idle process-schedule!)
+     (add-hook! (worker-event-loop-hook) process-schedule!)
      (add-message-handler! 'add add-schedule!)
      (add-message-handler! 'del del-schedule!))))
 
