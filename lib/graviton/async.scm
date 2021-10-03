@@ -515,8 +515,8 @@
        (update-idle-timeout!))
 
      (on-idle process-schedule!)
-     (add-message-handler! add add-schedule!)
-     (add-message-handler! del del-schedule!))))
+     (add-message-handler! 'add add-schedule!)
+     (add-message-handler! 'del del-schedule!))))
 
 ;; thunk-or-event := procedure | (event-name args ...)
 (define (scheduler-add! callback :key ((:at abs-time) #f) ((:after rel-sec) #f) ((:every interval) #f))
