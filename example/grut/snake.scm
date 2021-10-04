@@ -278,4 +278,4 @@
           (lambda (con)
             (while #t
               (scene-dispatch state)
-              (worker-sleep! *interval-sec*))))))))
+              (grv-sleep! *interval-sec*))))))))

@@ -25,5 +25,5 @@
   (with-window #f
       ()
     (play-wave '((2000 0.1) (1000 0.1)))
-    (worker-sleep! 1.0)
+    (grv-sleep! 1.0)
     (close-window)))

@@ -1004,7 +1004,7 @@
   (let* ((mq (make-mtqueue))
          (future-id (allocate-future-id mq)))
     (call-command (slot-ref js-proc 'command-id)
-                  (slot-ref js-proc 'types)
+                   (slot-ref js-proc 'types)
                   (cons future-id args))
     (flush-client-request)
     (let1 arg-creator (dequeue/wait! mq)

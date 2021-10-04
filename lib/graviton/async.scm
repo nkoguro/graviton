@@ -69,7 +69,7 @@
           shift-callback
           scheduler-add!
           scheduler-delete!
-          worker-sleep!
+          grv-sleep!
           main-worker
           grv-worker
           worker-event-loop-hook
@@ -530,7 +530,7 @@
 (define (scheduler-delete! callback)
   (worker-fire-event scheduler 'del callback))
 
-(define (worker-sleep! time-or-sec)
+(define (grv-sleep! time-or-sec)
   (shift-callback callback
     (apply scheduler-add! callback
            (cond
