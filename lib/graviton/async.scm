@@ -85,10 +85,10 @@
           channel-closed?
           channel-recv
 
-          <grv-future>
-          make-grv-future
-          grv-future-set!
-          grv-future-get
+          <grv-promise>
+          make-grv-promise
+          grv-promise-set!
+          grv-promise-get
           ))
 
 (select-module graviton.async)
@@ -417,11 +417,11 @@
     (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event callback args))))
 
 (define-method worker-dispatch-event ((worker <worker>) event :rest args)
-  (let1 future (make-grv-future)
+  (let1 future (make-grv-promise)
     (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list*
                                                        (now-seconds)
                                                        event
-                                                       (lambda vals (apply grv-future-set! future vals))
+                                                       (lambda vals (apply grv-promise-set! future vals))
                                                        args))
     future))
 
@@ -611,15 +611,15 @@
 
 ;;;
 
-(define-class <grv-future> ()
+(define-class <grv-promise> ()
   ((lock :init-form (make-mutex))
    (value-list :init-value #f)
    (callbacks :init-value '())))
 
-(define (make-grv-future)
-  (make <grv-future>))
+(define (make-grv-promise)
+  (make <grv-promise>))
 
-(define (grv-future-set! future :rest vals)
+(define (grv-promise-set! future :rest vals)
   (with-slots (lock value-list callbacks) future
     (with-locking-mutex lock
       (lambda ()
@@ -629,7 +629,7 @@
         (for-each (^c (c)) callbacks)
         (set! callbacks '())))))
 
-(define (grv-future-get future :rest fallback-values)
+(define (grv-promise-get future :rest fallback-values)
   (with-slots (lock value-list callbacks) future
     (mutex-lock! lock)
     (cond
@@ -641,9 +641,9 @@
        (shift-callback callback
          (push! callbacks callback)
          (mutex-unlock! lock))
-       (grv-future-get future))
+       (grv-promise-get future))
       (else
        (apply values fallback-values)))))
 
-(define-method object-apply ((grv-future <grv-future>))
-  (grv-future-get grv-future))
+(define-method object-apply ((grv-promise <grv-promise>))
+  (grv-promise-get grv-promise))
