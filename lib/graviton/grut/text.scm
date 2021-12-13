@@ -467,15 +467,15 @@
   )
 
 (define-jsobject-method <grv-text> cursor-column ()
-  (jslet/result ((self::object))
+  (jslet/await ((self::object))
     (result self.cursor.column)))
 
 (define-jsobject-method <grv-text> cursor-row ()
-  (jslet/result ((self::object))
+  (jslet/await ((self::object))
     (result self.cursor.row)))
 
 (define-jsobject-method <grv-text> cursor-position ()
-  (jslet/result ((self::object))
+  (jslet/await ((self::object))
     (result self.cursor.column self.cursor.row)))
 
 (define-jsobject-method <grv-text> set-cursor-position! (col row)
@@ -494,7 +494,7 @@
     (self.cursor.hide)))
 
 (define-jsobject-method <grv-text> cursor-visible? ()
-  (jslet/result ((self::object))
+  (jslet/await ((self::object))
     (result self.cursor.visible)))
 
 (define (enqueue-input grv-text type :rest args)

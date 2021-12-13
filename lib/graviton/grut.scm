@@ -61,7 +61,7 @@
 ;;;
 
 (define (load-image url :key (content-type #f) (on-error :error))
-  (or (jslet/result ((url::string))
+  (or (jslet/await ((url::string))
         (let ((img (make Image)))
           (set! img.src url)
           (set! img.onload (lambda ()
@@ -79,7 +79,7 @@
          (errorf "bad value for :on-error argument; must be #f or :error, but got ~s" on-error)))))
 
 (define (load-audio url :key (content-type #f) (on-error :error))
-  (receive (audio err) (jslet/result ((url::string))
+  (receive (audio err) (jslet/await ((url::string))
                          (let1 audio (make Audio url)
                            (set! audio.onloadeddata (lambda ()
                                                       (set! audio.onloadeddata undefined)
@@ -115,7 +115,7 @@
   (cond
     ((and (window-context)
           (grv-config-parameter 'iframe-window?))
-     (jslet/result ()
+     (jslet/await ()
        (result (/ window.innerWidth 3) (/ window.innerHeight 3))))
     (else
      (values *min-default-window-width* *min-default-window-height*))))

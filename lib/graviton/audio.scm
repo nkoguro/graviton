@@ -242,8 +242,8 @@
   :jsclass "BiquadFilterNode")
 
 (define-jsobject-method <biquad-filter-node> get-frequency-response (frequency-array)
-  (jslet/result ((self::object self)
-                 (frequency-array))
+  (jslet/await ((self::object self)
+                (frequency-array))
     (let ((mag-response-output (make Float32Array frequency-array.length))
           (phase-response-output (make Float32Array frequency-array.length)))
       (self.getFrequencyResponse mag-response-output phase-response-output)
@@ -296,8 +296,8 @@
   :jsclass "IIRFilterNode")
 
 (define-jsobject-method <iir-filter-node> get-frequency-response (frequency-array)
-  (jslet/result ((self::object self)
-                 (frequency-array))
+  (jslet/await ((self::object self)
+                (frequency-array))
     (let ((mag-response-output (make Float32Array frequency-array.length))
           (phase-response-output (make Float32Array frequency-array.length)))
       (self.getFrequencyResponse mag-response-output phase-response-output)
@@ -368,5 +368,5 @@
    (oversample :jsproperty "oversample"))
   :jsclass "WaveShaperNode")
 
-(define-global-jsobject audio-context (jslet/result ()
+(define-global-jsobject audio-context (jslet/await ()
                                         (result audioContext)))

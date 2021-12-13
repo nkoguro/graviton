@@ -591,8 +591,8 @@
   (apply make-jsobject (~ jsobject-class'jsclass) args))
 
 (define-method make-jsobject ((jsclass <string>) :rest args)
-  (jslet/result ((jsclass::string)
-                 (args (list->vector args)))
+  (jslet/await ((jsclass::string)
+                (args (list->vector args)))
     (result (Graviton.makeJSObject jsclass args))))
 
 ;;;

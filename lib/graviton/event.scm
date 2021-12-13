@@ -184,7 +184,7 @@
 ;;   (er-macro-transformer
 ;;     (lambda (form rename id=?)
 ;;       (match form
-;;         ((_ 
+;;         ((_
 ;; (with-jsevents ((window "keyup" (key) #=key)
 ;;                (window "keydown" (key) #?=key))
 ;;    aaa)
@@ -197,7 +197,7 @@
       ((and cur-callback (not (equal? cur-callback callback)))
        ;; Need to unlink the current callback.
        ;; Wait Graviton.requestAnimationFrameServerCallback intentionally to ensure removal of the current callback.
-       (jslet/result ((callback))
+       (jslet/await ((callback))
          (result (Graviton.requestAnimationFrameServerCallback callback)))
        (unlink-callback cur-callback)
        (window-context-slot-set! 'animation-frame-callback callback))
@@ -214,7 +214,7 @@
 (define (cancel-animation-frame-callback!)
   (let1 cur-callback (window-context-slot-ref 'animation-frame-callback)
     ;; Wait Graviton.requestAnimationFrameServerCallback intentionally to ensure removal of the current callback.
-    (jslet/result ()
+    (jslet/await ()
       (result (Graviton.requestAnimationFrameServerCallback undefined)))
     (when cur-callback
       (unlink-callback cur-callback))

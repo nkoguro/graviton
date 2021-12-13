@@ -410,7 +410,7 @@
                 :read-only? #t))
   :jsclass "Document")
 
-(define-global-jsobject document (jslet/result ()
+(define-global-jsobject document (jslet/await ()
                                    (result document)))
 
 (define-automatic-jsobject-methods <document>
@@ -448,8 +448,8 @@
   "writeln")
 
 (define-jsobject-method <document> query-selector-all (selectors)
-  (vector->list (jslet/result ((document::object self)
-                               (selectors::string))
+  (vector->list (jslet/await ((document::object self)
+                              (selectors::string))
                   (result (Array.from (document.querySelectorAll selectors))))))
 
 ;;; Document Body
@@ -595,7 +595,7 @@
            :cacheable? #t))
   :jsclass "Window")
 
-(define-global-jsobject window (jslet/result ()
+(define-global-jsobject window (jslet/await ()
                                  (result window)))
 
 (define-automatic-jsobject-methods <window>

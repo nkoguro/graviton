@@ -71,7 +71,7 @@
 
           define-jsenum
           jslet
-          jslet/result
+          jslet/await
 
           <jsobject>
           <jsobject-meta>
@@ -345,7 +345,7 @@
                                  (Graviton.notifyValues %future-id ,@vals)
                                  (return))))
      (else
-      (error "result is called outside jslet/result.")))))
+      (error "result is called outside jslet/await.")))))
 
 (define-jsstmt return env
   (()
@@ -981,7 +981,7 @@
                           (Graviton.registerBinaryCommand ,command-id ,name)))
     (make <jsprocedure> :command-id command-id :types (map (cut list-ref <> 1) var-type-list))))
 
-(define (compile-jslet/result arg-specs body)
+(define (compile-jslet/await arg-specs body)
   (compile-jslet (cons '%future-id::future arg-specs) body))
 
 (define-jsmacro raise
@@ -1030,8 +1030,8 @@
                      (list-ref (parse-arg-spec spec) 2))
                    arg-specs)))
 
-(define-macro (jslet/result arg-specs :rest body)
-  `(,jscall/result ,(compile-jslet/result arg-specs body)
+(define-macro (jslet/await arg-specs :rest body)
+  `(,jscall/result ,(compile-jslet/await arg-specs body)
                    ,@(map (lambda (spec)
                             (list-ref (parse-arg-spec spec) 2))
                           arg-specs)))
@@ -1119,7 +1119,7 @@
          (errorf "<string> required for :jsproperty, but got ~s" jsproperty))
        (list
          ;; slot-ref
-         (let1 jsgetter (compile-jslet/result '(obj::object) `((result (~ obj ,jsproperty))))
+         (let1 jsgetter (compile-jslet/await '(obj::object) `((result (~ obj ,jsproperty))))
            (if (and read-only? cacheable?)
              ;; cacheable case
              (lambda (jsobj)
@@ -1208,15 +1208,15 @@
                              (undefined)))
                          (((? string? jsmethod) ':result . (or (#t) ()))
                           `(define-jsobject-method ,jsobject-class ,(string->symbol (convert-jsname jsmethod)) (:rest args)
-                             (jslet/result ((self::object)
-                                            (args::list))
+                             (jslet/await ((self::object)
+                                           (args::list))
                                (result ((~ (~ self ,jsmethod) 'apply) self args)))))
                          (((? string? jsmethod) ':result json-value-class)
                           `(define-jsobject-method ,jsobject-class ,(string->symbol (convert-jsname jsmethod)) (:rest args)
                              (json->obj ,json-value-class
-                                        (jslet/result ((self::object)
-                                                       (args::list)
-                                                       (rule::json (json-rule ,json-value-class)))
+                                        (jslet/await ((self::object)
+                                                      (args::list)
+                                                      (rule::json (json-rule ,json-value-class)))
                                           (result (json-value ((~ (~ self ,jsmethod) 'apply) self args) rule))))))))
                      specs))))))))
 
@@ -1386,8 +1386,8 @@
   (format port "#<~a id:#x~8,'0x>" (class-name (class-of obj)) (~ obj'%id)))
 
 (define-method jsobject-property-ref ((jsobj <jsobject>) property)
-  (jslet/result ((obj::object jsobj)
-                 (property::string property))
+  (jslet/await ((obj::object jsobj)
+                (property::string property))
     (result (~ obj property))))
 
 (define-method jsobject-property-set! ((jsobj <jsobject>) property val)
@@ -1397,8 +1397,8 @@
     (set! (~ obj property) val)))
 
 (define-method extract-jsobject-properties ((jsobj <jsobject>) (properties <list>))
-  (vector->list (jslet/result ((obj::object jsobj)
-                               (properties::list))
+  (vector->list (jslet/await ((obj::object jsobj)
+                              (properties::list))
                   (result (Graviton.extractJSObjectProperties obj properties)))))
 
 (define-syntax let-jsproperties
@@ -1447,16 +1447,16 @@
       ((~ (~ obj method) 'apply) obj args))
     (undefined))
   (define (call-jsmethod/result args)
-    (jslet/result ((obj::object jsobj)
-                   (method::string)
-                   (args::list))
+    (jslet/await ((obj::object jsobj)
+                  (method::string)
+                  (args::list))
       (result ((~ (~ obj method) 'apply) obj args))))
   (define (call-jsmethod/json-value-result json-value-class args)
     (json->obj json-value-class
-               (jslet/result ((obj::object jsobj)
-                              (method::string)
-                              (args::list)
-                              (rule::json (json-rule json-value-class)))
+               (jslet/await ((obj::object jsobj)
+                             (method::string)
+                             (args::list)
+                             (rule::json (json-rule json-value-class)))
                  (result (json-value ((~ (~ obj method) 'apply) obj args) rule)))))
   (cond
     ((eq? result-spec #f)

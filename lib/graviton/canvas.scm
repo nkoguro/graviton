@@ -61,9 +61,9 @@
   ;; https://html.spec.whatwg.org/multipage/canvas.html#dom-canvas-getcontext
   (let1 cache (~ self'%context-cache)
     (or (hash-table-get cache context-type #f)
-        (let1 ctx (jslet/result ((canvas::object self)
-                                 (context-type::string)
-                                 (context-attribute::json))
+        (let1 ctx (jslet/await ((canvas::object self)
+                                (context-type::string)
+                                (context-attribute::json))
                     (result (canvas.getContext context-type context-attribute)))
           (hash-table-put! cache context-type ctx)
           ctx))))
@@ -220,17 +220,17 @@
 (define (f32vector->dom-matrix f32vec)
   (unless (f32vector? f32vec)
     (errorf "<f32vector> required, but got ~s" f32vec))
-  (jslet/result ((f32vec))
+  (jslet/await ((f32vec))
     (result (DOMMatrix.fromFloat32Array f32vec))))
 
 (define (f64vector->dom-matrix f64vec)
   (unless (f64vector? f64vec)
     (errorf "<f64vector> required, but got ~s" f64vec))
-  (jslet/result ((f64vec))
+  (jslet/await ((f64vec))
     (result (DOMMatrix.fromFloat64Array f64vec))))
 
 (define (dom-matrix-copy dom-matrix)
-  (jslet/result ((dom-matrix::object))
+  (jslet/await ((dom-matrix::object))
     (result (DOMMatrix.fromMatrix dom-matrix))))
 
 
