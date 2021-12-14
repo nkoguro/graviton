@@ -87,7 +87,8 @@
 
           <grv-promise>
           make-grv-promise
-          grv-promise-set!
+          grv-promise-set-thunk!
+          grv-promise-set-values!
           grv-promise-get
           ))
 
@@ -417,13 +418,13 @@
     (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event callback args))))
 
 (define-method worker-dispatch-event ((worker <worker>) event :rest args)
-  (let1 future (make-grv-promise)
+  (let1 gpromise (make-grv-promise)
     (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list*
                                                        (now-seconds)
                                                        event
-                                                       (lambda vals (apply grv-promise-set! future vals))
+                                                       (lambda vals (grv-promise-set-values! gpromise vals))
                                                        args))
-    future))
+    gpromise))
 
 (define-method object-apply ((worker <worker>) event :rest args)
   (apply worker-dispatch-event worker event args))
@@ -614,26 +615,47 @@
 (define-class <grv-promise> ()
   ((lock :init-form (make-mutex))
    (value-list :init-value #f)
+   (arg-creator :init-value #f)
    (callbacks :init-value '())))
 
 (define (make-grv-promise)
   (make <grv-promise>))
 
-(define (grv-promise-set! future :rest vals)
-  (with-slots (lock value-list callbacks) future
+(define (grv-promise-set-thunk! gpromise thunk)
+  (with-slots (lock arg-creator value-list callbacks) gpromise
     (with-locking-mutex lock
       (lambda ()
         (when value-list
-          (errorf "<future> already has values: ~s" future))
+          (errorf "<grv-promise> already has values: ~s" gpromise))
+        (when arg-creator
+          (errorf "<grv-promise> already has arg-creator: ~s" gpromise))
+        (set! arg-creator thunk)
+        (for-each (^c (c)) callbacks)
+        (set! callbacks '())))))
+
+(define (grv-promise-set-values! gpromise vals)
+  (with-slots (lock arg-creator value-list callbacks) gpromise
+    (with-locking-mutex lock
+      (lambda ()
+        (when value-list
+          (errorf "<grv-promise> already has values: ~s" gpromise))
+        (when arg-creator
+          (errorf "<grv-promise> already has arg-creator: ~s" gpromise))
         (set! value-list vals)
         (for-each (^c (c)) callbacks)
         (set! callbacks '())))))
 
-(define (grv-promise-get future :rest fallback-values)
-  (with-slots (lock value-list callbacks) future
+(define (grv-promise-get gpromise :rest fallback-values)
+  (with-slots (lock value-list arg-creator callbacks) gpromise
     (mutex-lock! lock)
     (cond
       (value-list
+       (begin0
+           (apply values value-list)
+         (mutex-unlock! lock)))
+      (arg-creator
+       (set! value-list (arg-creator))
+       (set! arg-creator #f)
        (begin0
            (apply values value-list)
          (mutex-unlock! lock)))
@@ -641,7 +663,7 @@
        (shift-callback callback
          (push! callbacks callback)
          (mutex-unlock! lock))
-       (grv-promise-get future))
+       (grv-promise-get gpromise))
       (else
        (apply values fallback-values)))))
 

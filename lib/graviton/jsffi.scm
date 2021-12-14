@@ -1012,17 +1012,14 @@
       (apply values (arg-creator)))))
 
 (define (jscall/result-async js-proc args)
-  (let1 future-id #f
-    (receive vals (shift-callback callback
-                    ;; Use allocate-future-id directly instead of link-callback because this callback is
-                    ;; one-off object. So it isn't necessary to register the object in client.
-                    (set! future-id (allocate-future-id callback))
-                    (call-command (slot-ref js-proc 'command-id)
-                                  (slot-ref js-proc 'types)
-                                  (cons future-id args)))
-      (when future-id
-        (free-future-id future-id))
-      (apply values vals))))
+  (let* ((gpromise (make-grv-promise))
+         (future-id (allocate-future-id gpromise)))
+    (call-command (slot-ref js-proc 'command-id)
+                  (slot-ref js-proc 'types)
+                  (cons future-id args))
+    (begin0
+        (grv-promise-get gpromise)
+      (free-future-id future-id))))
 
 (define-macro (jslet arg-specs :rest body)
   `(,jscall ,(compile-jslet arg-specs body)
@@ -1680,6 +1677,9 @@
           ((? mtqueue? mq)
            (log-framework-debug "future ID: #x~8,'0x received. Enqueued the procedure which makes the result" future-id)
            (enqueue! mq arg-creator))
+          ((? (cut is-a? <> <grv-promise>) gpromise)
+           (log-framework-debug "future ID: #x~8,'0x received. Set values to grv-promise: ~s" future-id gpromise)
+           (grv-promise-set-thunk! gpromise arg-creator))
           ((? worker-callback? callback)
            (log-framework-debug "future ID: #x~8,'0x received. Invoke callback: ~s" future-id callback)
            (invoke-worker-callback callback arg-creator))
