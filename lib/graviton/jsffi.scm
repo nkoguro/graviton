@@ -993,10 +993,10 @@
                 (slot-ref js-proc 'types)
                 args))
 
-(define use-jscall/result-sync? (make-parameter #f))
+(define disable-async-wait (make-parameter #f))
 
 (define (jscall/result js-proc :rest args)
-  (if (use-jscall/result-sync?)
+  (if (disable-async-wait)
     (jscall/result-sync js-proc args)
     (jscall/result-async js-proc args)))
 
@@ -1524,7 +1524,7 @@
                    (window-context-slot-atomic-ref 'global-jsobject-table
                      (lambda (tbl)
                        (or (hash-table-get tbl key #f)
-                           (rlet1 jsobj (parameterize ((use-jscall/result-sync? #f))
+                           (rlet1 jsobj (parameterize ((disable-async-wait #f))
                                           (log-framework-debug "Try to resolve jsobject ~s, provider: ~s" name provider)
                                           (with-client-request provider))
                              (hash-table-put! tbl key jsobj)))))))))
