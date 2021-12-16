@@ -1008,7 +1008,6 @@
                   (cons future-id args))
     (flush-client-request)
     (let1 arg-creator (dequeue/wait! mq)
-      (free-future-id future-id)
       (apply values (arg-creator)))))
 
 (define (jscall/result-async js-proc args)
@@ -1017,9 +1016,7 @@
     (call-command (slot-ref js-proc 'command-id)
                   (slot-ref js-proc 'types)
                   (cons future-id args))
-    (begin0
-        (grv-promise-get gpromise)
-      (free-future-id future-id))))
+    (grv-promise-get gpromise)))
 
 (define-macro (jslet arg-specs :rest body)
   `(,jscall ,(compile-jslet arg-specs body)
@@ -1676,10 +1673,14 @@
         (match receiver
           ((? mtqueue? mq)
            (log-framework-debug "future ID: #x~8,'0x received. Enqueued the procedure which makes the result" future-id)
-           (enqueue! mq arg-creator))
+           (enqueue! mq arg-creator)
+           ;; We can free this future-id because mtqueue is an one-time object.
+           (free-future-id future-id))
           ((? (cut is-a? <> <grv-promise>) gpromise)
            (log-framework-debug "future ID: #x~8,'0x received. Set values to grv-promise: ~s" future-id gpromise)
-           (grv-promise-set-thunk! gpromise arg-creator))
+           (grv-promise-set-thunk! gpromise arg-creator)
+           ;; We can free this future-id because grv-promise is an one-time object.
+           (free-future-id future-id))
           ((? worker-callback? callback)
            (log-framework-debug "future ID: #x~8,'0x received. Invoke callback: ~s" future-id callback)
            (invoke-worker-callback callback arg-creator))
