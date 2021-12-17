@@ -90,6 +90,7 @@
           grv-promise-set-thunk!
           grv-promise-set-values!
           grv-promise-get
+          disable-async-wait
           ))
 
 (select-module graviton.async)
@@ -614,6 +615,7 @@
 
 (define-class <grv-promise> ()
   ((lock :init-form (make-mutex))
+   (condition-variable :init-form (make-condition-variable))
    (value-list :init-value #f)
    (arg-creator :init-value #f)
    (callbacks :init-value '())))
@@ -622,7 +624,7 @@
   (make <grv-promise>))
 
 (define (grv-promise-set-thunk! gpromise thunk)
-  (with-slots (lock arg-creator value-list callbacks) gpromise
+  (with-slots (lock condition-variable arg-creator value-list callbacks) gpromise
     (with-locking-mutex lock
       (lambda ()
         (when value-list
@@ -631,10 +633,11 @@
           (errorf "<grv-promise> already has arg-creator: ~s" gpromise))
         (set! arg-creator thunk)
         (for-each (^c (c)) callbacks)
-        (set! callbacks '())))))
+        (set! callbacks '())))
+    (condition-variable-broadcast! condition-variable)))
 
 (define (grv-promise-set-values! gpromise vals)
-  (with-slots (lock arg-creator value-list callbacks) gpromise
+  (with-slots (lock condition-variable arg-creator value-list callbacks) gpromise
     (with-locking-mutex lock
       (lambda ()
         (when value-list
@@ -643,10 +646,13 @@
           (errorf "<grv-promise> already has arg-creator: ~s" gpromise))
         (set! value-list vals)
         (for-each (^c (c)) callbacks)
-        (set! callbacks '())))))
+        (set! callbacks '())))
+    (condition-variable-broadcast! condition-variable)))
+
+(define disable-async-wait (make-parameter #f))
 
 (define (grv-promise-get gpromise :rest fallback-values)
-  (with-slots (lock value-list arg-creator callbacks) gpromise
+  (with-slots (lock condition-variable value-list arg-creator callbacks) gpromise
     (mutex-lock! lock)
     (cond
       (value-list
@@ -660,12 +666,18 @@
            (apply values value-list)
          (mutex-unlock! lock)))
       ((null? fallback-values)
-       (shift-callback callback
-         (push! callbacks callback)
-         (mutex-unlock! lock))
+       (cond
+         ((disable-async-wait)
+          (mutex-unlock! lock condition-variable))
+         (else
+          (shift-callback callback
+            (push! callbacks callback)
+            (mutex-unlock! lock))))
        (grv-promise-get gpromise))
       (else
-       (apply values fallback-values)))))
+       (begin0
+           (apply values fallback-values)
+         (mutex-unlock! lock))))))
 
 (define-method object-apply ((grv-promise <grv-promise>))
   (grv-promise-get grv-promise))

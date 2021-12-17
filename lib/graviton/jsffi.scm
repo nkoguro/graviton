@@ -993,24 +993,7 @@
                 (slot-ref js-proc 'types)
                 args))
 
-(define disable-async-wait (make-parameter #f))
-
 (define (jscall/result js-proc :rest args)
-  (if (disable-async-wait)
-    (jscall/result-sync js-proc args)
-    (jscall/result-async js-proc args)))
-
-(define (jscall/result-sync js-proc args)
-  (let* ((mq (make-mtqueue))
-         (future-id (allocate-future-id mq)))
-    (call-command (slot-ref js-proc 'command-id)
-                   (slot-ref js-proc 'types)
-                  (cons future-id args))
-    (flush-client-request)
-    (let1 arg-creator (dequeue/wait! mq)
-      (apply values (arg-creator)))))
-
-(define (jscall/result-async js-proc args)
   (let* ((gpromise (make-grv-promise))
          (future-id (allocate-future-id gpromise)))
     (call-command (slot-ref js-proc 'command-id)
@@ -1671,11 +1654,6 @@
     (lambda (tbl future-next-id)
       (let1 receiver (hash-table-get tbl future-id #f)
         (match receiver
-          ((? mtqueue? mq)
-           (log-framework-debug "future ID: #x~8,'0x received. Enqueued the procedure which makes the result" future-id)
-           (enqueue! mq arg-creator)
-           ;; We can free this future-id because mtqueue is an one-time object.
-           (free-future-id future-id))
           ((? (cut is-a? <> <grv-promise>) gpromise)
            (log-framework-debug "future ID: #x~8,'0x received. Set values to grv-promise: ~s" future-id gpromise)
            (grv-promise-set-thunk! gpromise arg-creator)
