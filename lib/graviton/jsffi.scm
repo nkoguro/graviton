@@ -71,6 +71,7 @@
 
           define-jsenum
           jslet
+          jslet/async
           jslet/await
 
           <jsobject>
@@ -981,7 +982,7 @@
                           (Graviton.registerBinaryCommand ,command-id ,name)))
     (make <jsprocedure> :command-id command-id :types (map (cut list-ref <> 1) var-type-list))))
 
-(define (compile-jslet/await arg-specs body)
+(define (compile-jslet/async arg-specs body)
   (compile-jslet (cons '%future-id::future arg-specs) body))
 
 (define-jsmacro raise
@@ -993,13 +994,16 @@
                 (slot-ref js-proc 'types)
                 args))
 
-(define (jscall/result js-proc :rest args)
+(define (jscall/async js-proc :rest args)
   (let* ((gpromise (make-grv-promise))
          (future-id (allocate-future-id gpromise)))
     (call-command (slot-ref js-proc 'command-id)
                   (slot-ref js-proc 'types)
                   (cons future-id args))
-    (grv-promise-get gpromise)))
+    gpromise))
+
+(define (jscall/await js-proc :rest args)
+  (grv-promise-get (apply jscall/async js-proc args)))
 
 (define-macro (jslet arg-specs :rest body)
   `(,jscall ,(compile-jslet arg-specs body)
@@ -1007,11 +1011,16 @@
                      (list-ref (parse-arg-spec spec) 2))
                    arg-specs)))
 
-(define-macro (jslet/await arg-specs :rest body)
-  `(,jscall/result ,(compile-jslet/await arg-specs body)
-                   ,@(map (lambda (spec)
-                            (list-ref (parse-arg-spec spec) 2))
-                          arg-specs)))
+(define-macro (jslet/async arg-specs :rest body)
+  `(,jscall/async ,(compile-jslet/async arg-specs body)
+                  ,@(map (lambda (spec)
+                           (list-ref (parse-arg-spec spec) 2))
+                         arg-specs)))
+
+(define-syntax jslet/await
+  (syntax-rules ()
+    ((_ arg-specs body ...)
+     (grv-promise-get (jslet/async arg-specs body ...)))))
 
 (define-class <jsenum> ()
   ((symbol->value-table :init-form (make-hash-table))
@@ -1096,18 +1105,18 @@
          (errorf "<string> required for :jsproperty, but got ~s" jsproperty))
        (list
          ;; slot-ref
-         (let1 jsgetter (compile-jslet/await '(obj::object) `((result (~ obj ,jsproperty))))
+         (let1 jsgetter (compile-jslet/async '(obj::object) `((result (~ obj ,jsproperty))))
            (if (and read-only? cacheable?)
              ;; cacheable case
              (lambda (jsobj)
                (let1 tbl (slot-ref jsobj '%jsproperty-cache)
                  (if (hash-table-contains? tbl jsproperty)
                    (hash-table-get tbl jsproperty)
-                   (rlet1 v (jscall/result jsgetter jsobj)
+                   (rlet1 v (jscall/await jsgetter jsobj)
                      (hash-table-put! tbl jsproperty v)))))
              ;; non-cacheable case
              (lambda (jsobj)
-               (jscall/result jsgetter jsobj))))
+               (jscall/await jsgetter jsobj))))
          ;; slot-set!
          (if read-only?
            #f
