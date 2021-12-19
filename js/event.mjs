@@ -31,11 +31,11 @@ export function unregisterEventHandler(obj, type, callback, useCapture) {
     }
 }
 
-export function registerOneShotEventHandler(obj, type, props, futureId, useCapture) {
+export function registerOneShotEventHandler(obj, type, props, proc, useCapture) {
     const eventHandler = (e) => {
         obj.removeEventListener(type, eventHandler, useCapture);
-        const val = props ? extractEventValues(e, props) : e;
-        notifyValues(futureId, val);
+        const vals = props ? extractEventValues(e, props) : [e];
+        proc(vals);
     }
     obj.addEventListener(type, eventHandler, useCapture);
 }

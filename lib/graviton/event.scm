@@ -56,7 +56,7 @@
           cancel-animation-frame-callback!
           on-repaint
 
-          jsevent-wait
+          jsevent-await
           ))
 
 (select-module graviton.event)
@@ -239,31 +239,19 @@
     ((_ (sec-per-frame) body ...)
      (on-repaint :priority #f (sec-per-frame) body ...))))
 
-(define (jsevent-wait jsobj type :key (jsproperties #f) (timeout #f) (timeout-val #f) (use-capture? #f))
-  (let ((worker (current-worker))
-        (priority (current-priority))
-        (returned? #f))
-    (let1 v (shift cont
-              (when timeout
-                (let1 timeout-callback (worker-callback (^() (cont timeout-val)) :worker worker :priority priority)
-                  (scheduler-add! timeout-callback :after timeout)))
-              (letrec* ((event-callback (worker-callback (lambda (v)
-                                                           (free-future-id future-id)
-                                                           (cont v))
-                                                         :worker worker
-                                                         :priority priority))
-                        (future-id (allocate-future-id event-callback)))
-                (jslet ((jsobj::object)
-                        (type::string)
-                        (jsproperties::list)
-                        (future-id)
-                        (use-capture?))
-                  (Event.registerOneShotEventHandler jsobj type jsproperties future-id use-capture?))))
-      (cond
-        (returned?
-         (shift _
-           ;; Escape from the current reset scope.
-           #f))
-        (else
-         (set! returned? #t)
-         v)))))
+(define (jsevent-await jsobj type prop-specs :key (use-capture? #f))
+  (vector->list (jslet/await ((jsobj::object)
+                              (type::string)
+                              (jsproperties (let loop ((specs prop-specs)
+                                                       (props '()))
+                                              (match specs
+                                                (()
+                                                 (list->vector (reverse props)))
+                                                (((? symbol? prop) rest ...)
+                                                 (loop rest (cons (estimate-prop-spec prop) props)))
+                                                (((? string? prop-spec) rest ...)
+                                                 (loop rest (cons (parse-prop-spec prop-spec) props)))
+                                                (_
+                                                 (errorf "malformed prop-specs: ~s" prop-specs)))))
+                              (use-capture?))
+                  (Event.registerOneShotEventHandler jsobj type jsproperties (lambda (vals) (result vals)) use-capture?))))

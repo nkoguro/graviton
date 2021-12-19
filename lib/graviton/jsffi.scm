@@ -1000,6 +1000,8 @@
     (call-command (slot-ref js-proc 'command-id)
                   (slot-ref js-proc 'types)
                   (cons future-id args))
+    (when (disable-async-wait)
+      (flush-client-request))
     gpromise))
 
 (define (jscall/await js-proc :rest args)
@@ -1513,7 +1515,7 @@
                    (window-context-slot-atomic-ref 'global-jsobject-table
                      (lambda (tbl)
                        (or (hash-table-get tbl key #f)
-                           (rlet1 jsobj (parameterize ((disable-async-wait #f))
+                           (rlet1 jsobj (parameterize ((disable-async-wait #t))
                                           (log-framework-debug "Try to resolve jsobject ~s, provider: ~s" name provider)
                                           (with-client-request provider))
                              (hash-table-put! tbl key jsobj)))))))))
