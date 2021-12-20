@@ -411,7 +411,7 @@
   :jsclass "Document")
 
 (define-global-jsobject document (jslet/await ()
-                                   (result document)))
+                                   (respond document)))
 
 (define-automatic-jsobject-methods <document>
   ("adoptNode" :result)
@@ -450,7 +450,7 @@
 (define-jsobject-method <document> query-selector-all (selectors)
   (vector->list (jslet/await ((document::object self)
                               (selectors::string))
-                  (result (Array.from (document.querySelectorAll selectors))))))
+                  (respond (Array.from (document.querySelectorAll selectors))))))
 
 ;;; Document Body
 
@@ -596,7 +596,7 @@
   :jsclass "Window")
 
 (define-global-jsobject window (jslet/await ()
-                                 (result window)))
+                                 (respond window)))
 
 (define-automatic-jsobject-methods <window>
   "alert"

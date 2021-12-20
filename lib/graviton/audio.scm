@@ -247,7 +247,7 @@
     (let ((mag-response-output (make Float32Array frequency-array.length))
           (phase-response-output (make Float32Array frequency-array.length)))
       (self.getFrequencyResponse mag-response-output phase-response-output)
-      (result mag-response-output phase-response-output))))
+      (respond mag-response-output phase-response-output))))
 
 (define-class <channel-merger-node> (<audio-node>)
   ()
@@ -301,7 +301,7 @@
     (let ((mag-response-output (make Float32Array frequency-array.length))
           (phase-response-output (make Float32Array frequency-array.length)))
       (self.getFrequencyResponse mag-response-output phase-response-output)
-      (result mag-response-output phase-response-output))))
+      (respond mag-response-output phase-response-output))))
 
 (define-class <media-element-audio-source-node> (<audio-node>)
   ((media-element :jsproperty "mediaElement"
@@ -369,4 +369,4 @@
   :jsclass "WaveShaperNode")
 
 (define-global-jsobject audio-context (jslet/await ()
-                                        (result audioContext)))
+                                        (respond audioContext)))

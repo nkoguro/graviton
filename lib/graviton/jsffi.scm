@@ -338,16 +338,15 @@
               clauses)
          "}")))
 
-(define-jsstmt result env
+(define-jsstmt respond env
   ((vals ...)
    (cond
      ((resolve-js-local-var env '%future-id)
       (compile-jsise-stmt env `(begin
                                  (Graviton.notifyValues %future-id ,@vals)
-                                 (set! %future-id #f)
-                                 (return))))
+                                 (set! %future-id #f))))
      (else
-      (error "result is called outside jslet/await.")))))
+      (error "respond is called outside jslet/await.")))))
 
 (define-jsstmt return env
   (()
@@ -1108,7 +1107,7 @@
          (errorf "<string> required for :jsproperty, but got ~s" jsproperty))
        (list
          ;; slot-ref
-         (let1 jsgetter (compile-jslet/async '(obj::object) `((result (~ obj ,jsproperty))))
+         (let1 jsgetter (compile-jslet/async '(obj::object) `((respond (~ obj ,jsproperty))))
            (if (and read-only? cacheable?)
              ;; cacheable case
              (lambda (jsobj)
@@ -1199,14 +1198,14 @@
                           `(define-jsobject-method ,jsobject-class ,(string->symbol (convert-jsname jsmethod)) (:rest args)
                              (jslet/await ((self::object)
                                            (args::list))
-                               (result ((~ (~ self ,jsmethod) 'apply) self args)))))
+                               (respond ((~ (~ self ,jsmethod) 'apply) self args)))))
                          (((? string? jsmethod) ':result json-value-class)
                           `(define-jsobject-method ,jsobject-class ,(string->symbol (convert-jsname jsmethod)) (:rest args)
                              (json->obj ,json-value-class
                                         (jslet/await ((self::object)
                                                       (args::list)
                                                       (rule::json (json-rule ,json-value-class)))
-                                          (result (json-value ((~ (~ self ,jsmethod) 'apply) self args) rule))))))))
+                                          (respond (json-value ((~ (~ self ,jsmethod) 'apply) self args) rule))))))))
                      specs))))))))
 
 (define *initial-jsobject-table-size* 128)
@@ -1377,7 +1376,7 @@
 (define-method jsobject-property-ref ((jsobj <jsobject>) property)
   (jslet/await ((obj::object jsobj)
                 (property::string property))
-    (result (~ obj property))))
+    (respond (~ obj property))))
 
 (define-method jsobject-property-set! ((jsobj <jsobject>) property val)
   (jslet ((obj::object jsobj)
@@ -1388,7 +1387,7 @@
 (define-method extract-jsobject-properties ((jsobj <jsobject>) (properties <list>))
   (vector->list (jslet/await ((obj::object jsobj)
                               (properties::list))
-                  (result (Graviton.extractJSObjectProperties obj properties)))))
+                  (respond (Graviton.extractJSObjectProperties obj properties)))))
 
 (define-syntax let-jsproperties
   (er-macro-transformer
@@ -1439,14 +1438,14 @@
     (jslet/await ((obj::object jsobj)
                   (method::string)
                   (args::list))
-      (result ((~ (~ obj method) 'apply) obj args))))
+      (respond ((~ (~ obj method) 'apply) obj args))))
   (define (call-jsmethod/json-value-result json-value-class args)
     (json->obj json-value-class
                (jslet/await ((obj::object jsobj)
                              (method::string)
                              (args::list)
                              (rule::json (json-rule json-value-class)))
-                 (result (json-value ((~ (~ obj method) 'apply) obj args) rule)))))
+                 (respond (json-value ((~ (~ obj method) 'apply) obj args) rule)))))
   (cond
     ((eq? result-spec #f)
      (call-jsmethod/void args))

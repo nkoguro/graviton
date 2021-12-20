@@ -149,4 +149,4 @@
 
 (define (media-recorder-is-type-supported? mime-type)
   (jslet/await ((mime-type::string))
-    (result (MediaRecorder.isTypeSupported mime-type))))
+    (respond (MediaRecorder.isTypeSupported mime-type))))

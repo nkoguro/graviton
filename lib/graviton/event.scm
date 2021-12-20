@@ -198,7 +198,7 @@
        ;; Need to unlink the current callback.
        ;; Wait Graviton.requestAnimationFrameServerCallback intentionally to ensure removal of the current callback.
        (jslet/await ((callback))
-         (result (Graviton.requestAnimationFrameServerCallback callback)))
+         (respond (Graviton.requestAnimationFrameServerCallback callback)))
        (unlink-callback cur-callback)
        (window-context-slot-set! 'animation-frame-callback callback))
       (else
@@ -215,7 +215,7 @@
   (let1 cur-callback (window-context-slot-ref 'animation-frame-callback)
     ;; Wait Graviton.requestAnimationFrameServerCallback intentionally to ensure removal of the current callback.
     (jslet/await ()
-      (result (Graviton.requestAnimationFrameServerCallback undefined)))
+      (respond (Graviton.requestAnimationFrameServerCallback undefined)))
     (when cur-callback
       (unlink-callback cur-callback))
     (window-context-slot-set! 'animation-frame-callback #f))
@@ -254,4 +254,4 @@
                                                 (_
                                                  (errorf "malformed prop-specs: ~s" prop-specs)))))
                               (use-capture?))
-                  (Event.registerOneShotEventHandler jsobj type jsproperties (lambda (vals) (result vals)) use-capture?))))
+                  (Event.registerOneShotEventHandler jsobj type jsproperties (lambda (vals) (respond vals)) use-capture?))))

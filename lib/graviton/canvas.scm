@@ -64,7 +64,7 @@
         (let1 ctx (jslet/await ((canvas::object self)
                                 (context-type::string)
                                 (context-attribute::json))
-                    (result (canvas.getContext context-type context-attribute)))
+                    (respond (canvas.getContext context-type context-attribute)))
           (hash-table-put! cache context-type ctx)
           ctx))))
 
@@ -221,17 +221,17 @@
   (unless (f32vector? f32vec)
     (errorf "<f32vector> required, but got ~s" f32vec))
   (jslet/await ((f32vec))
-    (result (DOMMatrix.fromFloat32Array f32vec))))
+    (respond (DOMMatrix.fromFloat32Array f32vec))))
 
 (define (f64vector->dom-matrix f64vec)
   (unless (f64vector? f64vec)
     (errorf "<f64vector> required, but got ~s" f64vec))
   (jslet/await ((f64vec))
-    (result (DOMMatrix.fromFloat64Array f64vec))))
+    (respond (DOMMatrix.fromFloat64Array f64vec))))
 
 (define (dom-matrix-copy dom-matrix)
   (jslet/await ((dom-matrix::object))
-    (result (DOMMatrix.fromMatrix dom-matrix))))
+    (respond (DOMMatrix.fromMatrix dom-matrix))))
 
 
 (define-class <text-metrics> (<jsobject>)

@@ -67,11 +67,11 @@
           (set! img.onload (lambda ()
                              (set! img.onload undefined)
                              (set! img.onerror undefined)
-                             (result img)))
+                             (respond img)))
           (set! img.onerror (lambda ()
                               (set! img.onload undefined)
                               (set! img.onerror undefined)
-                              (result #f)))))
+                              (respond #f)))))
       (case on-error
         ((#f) #f)
         ((:error) (errorf "Failed to load image: ~a" url))
@@ -84,11 +84,11 @@
                            (set! audio.onloadeddata (lambda ()
                                                       (set! audio.onloadeddata undefined)
                                                       (set! audio.onerror undefined)
-                                                      (result audio #f)))
+                                                      (respond audio #f)))
                            (set! audio.onerror (lambda ()
                                                  (set! audio.onloadeddata undefined)
                                                  (set! audio.onerror undefined)
-                                                 (result #f audio.error.message)))))
+                                                 (respond #f audio.error.message)))))
     (or audio
         (case on-error
           ((#f) #f)
@@ -116,7 +116,7 @@
     ((and (window-context)
           (grv-config-parameter 'iframe-window?))
      (jslet/await ()
-       (result (/ window.innerWidth 3) (/ window.innerHeight 3))))
+       (respond (/ window.innerWidth 3) (/ window.innerHeight 3))))
     (else
      (values *min-default-window-width* *min-default-window-height*))))
 

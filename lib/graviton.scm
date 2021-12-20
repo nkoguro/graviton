@@ -593,7 +593,7 @@
 (define-method make-jsobject ((jsclass <string>) :rest args)
   (jslet/await ((jsclass::string)
                 (args (list->vector args)))
-    (result (Graviton.makeJSObject jsclass args))))
+    (respond (Graviton.makeJSObject jsclass args))))
 
 ;;;
 
