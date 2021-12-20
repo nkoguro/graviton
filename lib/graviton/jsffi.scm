@@ -344,6 +344,7 @@
      ((resolve-js-local-var env '%future-id)
       (compile-jsise-stmt env `(begin
                                  (Graviton.notifyValues %future-id ,@vals)
+                                 (set! %future-id #f)
                                  (return))))
      (else
       (error "result is called outside jslet/await.")))))
