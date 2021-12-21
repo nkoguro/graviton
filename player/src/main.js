@@ -15,7 +15,7 @@ for (var i = 0; i < process.argv.length; ++i) {
 }
 
 if (!config) {
-    console.log('No config specified.');;
+    console.log('No config specified.');
     app.exit(1);
 }
 
@@ -35,11 +35,11 @@ function createWindow() {
             nodeIntegration: false
         }
     };
-    if (config['width']) {
-        windowOption['width'] = config['width'];
+    if (config.width) {
+        windowOption.width = config.width;
     }
-    if (config['height']) {
-        windowOption['height'] = config['height'];
+    if (config.height) {
+        windowOption.height = config.height;
     }
     win = new BrowserWindow(windowOption);
     const readyToShowPromise = new Promise(resolve => {
@@ -54,7 +54,7 @@ function createWindow() {
     });
     Promise.all([readyToShowPromise, setBackgroundColorPromise]).then((values) => {
         const [, backgroundColor] = values;
-        if (config['show']) {
+        if (config.show) {
             win.setBackgroundColor(backgroundColor);
             win.show();
         }
@@ -64,7 +64,7 @@ function createWindow() {
         win.openDevTools();
     }
     Menu.setApplicationMenu(null);
-    win.loadURL(config['url']).catch((err) => {
+    win.loadURL(config.url).catch((err) => {
         app.exit(70);
     });
 }

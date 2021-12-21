@@ -1,3 +1,4 @@
+/* jshint browser: true */
 'use strict';
 
 const {clipboard, ipcRenderer} = require('electron');

@@ -1,0 +1,6 @@
+{
+    "browser": true,
+    "devel": true,
+    "esversion": 7,
+    "strict": "global"
+}

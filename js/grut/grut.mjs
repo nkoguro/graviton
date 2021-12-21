@@ -1,3 +1,6 @@
+/* global ResizeObserver */
+'use strict';
+
 /**
  * grut-object-fit-* class handling
  */
@@ -67,7 +70,7 @@ function processGrutSpecialClassInner(element) {
             'center-x-var': containerCenterXVar,
             'center-y-var': containerCenterYVar,
             'handler': handler
-        }
+        };
         containerElement.dataset.grutObjectFitContainerId = containerId;
         objectFitContainerDataTable.set(containerId, containerData);
         handler();
@@ -80,7 +83,7 @@ function processGrutSpecialClassInner(element) {
     const handler = () => {
         element.style.setProperty(objectWidthVar, element.offsetWidth);
         element.style.setProperty(objectHeightVar, element.offsetHeight);
-    }
+    };
     const objectData = {
         'handler': handler
     };

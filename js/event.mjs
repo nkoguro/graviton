@@ -1,4 +1,4 @@
-import { notifyValues } from '/_g/graviton.mjs';
+'use strict';
 
 const eventHandlerTable = new Map();
 
@@ -36,6 +36,6 @@ export function registerOneShotEventHandler(obj, type, props, proc, useCapture) 
         obj.removeEventListener(type, eventHandler, useCapture);
         const vals = props ? extractEventValues(e, props) : [e];
         proc(vals);
-    }
+    };
     obj.addEventListener(type, eventHandler, useCapture);
 }

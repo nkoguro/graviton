@@ -1,8 +1,10 @@
+/* global HTMLSpanElement, customElements */
+'use strict';
+
 import { registerAnimationFrameCallback, logDebugMessage } from "/_g/graviton.mjs";
 import { copyTextToClipboard } from "/_g/grut/clipboard.mjs";
 
 const MAIN_CURSOR_ID = 'grv-main-cursor-id';
-//foo
 class AttributedCharacter {
     constructor(attr, char) {
         this.attribute = attr;
@@ -82,7 +84,7 @@ class TextAttribute {
             if (cssClass.length > 0) {
                 element.classList.add(cssClass);
             }
-        })
+        });
         element.removeAttribute('style');
         Object.keys(this.styleJson).forEach((key) => {
             let value = this.styleJson[key];
@@ -521,7 +523,7 @@ const TEXT_CONSOLE_STYLE = `
     animation-delay: 0s;
     animation-iteration-count: 1;
 }
-`
+`;
 
 const BACKGROUND_COLOR_PROPERTY = '--grv-text-edit-background-color';
 const COLOR_PROPERTY = '--grv-text-edit-color';
@@ -667,14 +669,14 @@ class GrvText extends HTMLElement {
     updateStyle() {
         const viewStyle = window.getComputedStyle(this);
         this.view.style.setProperty(BACKGROUND_COLOR_PROPERTY, viewStyle['background-color']);
-        const color = viewStyle['color'];
+        const color = viewStyle.color;
         this.view.style.setProperty(COLOR_PROPERTY, color);
         const colorRGBA = this.convertColorNameToRGBA(color);
         const cursorColor = `rgba(${colorRGBA[0]},${colorRGBA[1]},${colorRGBA[2]},0.8)`;
         this.view.style.setProperty(CURSOR_COLOR_PROPERTY, cursorColor);
-        const styleTabSize = viewStyle['tabSize'];
+        const styleTabSize = viewStyle.tabSize;
         if (styleTabSize === '') {
-            this.view.style['tabSize'] = '8';
+            this.view.style.tabSize = '8';
             this.tabSize = 8;
         } else {
             this.tabSize = parseInt(styleTabSize);
@@ -787,7 +789,7 @@ class GrvText extends HTMLElement {
     requestUpdateRow(...rows) {
         rows.forEach((row) => {
             this.updatedRowSet.add(row);
-        })
+        });
     }
 
     requestAllUpdate() {
@@ -1188,7 +1190,7 @@ class GrvText extends HTMLElement {
                 proc(text);
             });
         } else if (window.clipboard) {
-            proc(clipboard.readText());
+            proc(window.clipboard.readText());
         } else {
         }
     }
@@ -1373,7 +1375,7 @@ class GrvText extends HTMLElement {
             if (!attrChars) {
                 Array.from(this.view.childNodes).slice(row).forEach((lineDiv) => {
                     this.view.removeChild(lineDiv);
-                })
+                });
                 return;
             }
 
@@ -1554,6 +1556,7 @@ class GrvText extends HTMLElement {
                 if (event.button === 0) {
                     this.focus();
                 }
+                break;
             case 'Move':
                 this.setAutoScroll(event.clientX, event.clientY);
                 break;

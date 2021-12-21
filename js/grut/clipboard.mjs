@@ -1,3 +1,5 @@
+'use strict';
+
 export function copyTextToClipboard(str) {
     const cb = navigator.clipboard || window.clipboard;
     if (cb) {

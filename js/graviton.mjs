@@ -614,11 +614,11 @@ function encodeValue(val) {
         const keys = Object.keys(obj);
         const lenData = encodeNumber(keys.length);
         const keyDataList = [];
-        const keyDataLen = 0;
+        let keyDataLen = 0;
         const valDataList = [];
-        const valDataLen = 0;
+        let valDataLen = 0;
         for (let key in keys) {
-            let keyData = encodeValue(key)
+            let keyData = encodeValue(key);
             keyDataList.push(keyData);
             keyDataLen += keyData.byteLength;
             let valData = encodeValue(obj[key]);
@@ -756,7 +756,7 @@ export function extractJSObjectProperties(obj, props) {
  * animation frame
  */
 
-let animationFrameServerCallback = undefined;
+let animationFrameServerCallback;
 const animationFrameCallbacks = [];
 
 function handleAnimationFrame(timestamp) {
@@ -791,7 +791,7 @@ export function unregisterAnimationFrameCallback(callback) {
 /**
  * Open child window
  */
-let draggingWindow = undefined;
+let draggingWindow;
 let childWindowOffsetX = 0;
 let childWindowOffsetY = 0;
 let windowPositionX = window.innerWidth / 3;

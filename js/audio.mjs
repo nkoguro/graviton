@@ -1,3 +1,6 @@
+/* global AudioContext */
+'use strict';
+
 export let audioContext = new AudioContext();
 
 function registerAudioContextResumeHandler() {

@@ -1,3 +1,5 @@
+'use strict';
+
 import { audioContext } from '/_g/audio.mjs';
 
 const SINE_WAVE = 1;
@@ -6,7 +8,7 @@ const SAWTOOTH_WAVE = 3;
 const TRIANGLE_WAVE = 4;
 const CUSTOM_WAVE = 5;
 
-let customWave = undefined;
+let customWave;
 
 function fillWaveType(oscNode, spec) {
     switch (spec) {
@@ -127,7 +129,7 @@ class Oscillator {
             oscillator.start(startTime + delay);
             oscillator.stop(startTime + len);
             this.childStarters.forEach((starter) => starter(startTime));
-        }
+        };
     }
 }
 
@@ -147,7 +149,7 @@ class OscillatorSoundlet {
         this.starter = (startTime) => {
             osc.starter(startTime);
             childStarters.forEach((starter) => starter(startTime));
-        }
+        };
     }
 
     play(startTime) {
@@ -287,7 +289,7 @@ class SoundTrack {
     }
 }
 
-const OSCILLATOR_SOUND = 1
+const OSCILLATOR_SOUND = 1;
 const COMPOSED_SOUND = 2;
 const NOISE_SOUND = 3;
 const REST_SOUND = 5;
