@@ -153,16 +153,16 @@ export function jsonValue(obj, rule) {
 
 const procedureTable = new Map();
 
-function registerProcedure(futureId, proc) {
-    procedureTable.set(futureId, proc);
+function registerProcedure(notificationId, proc) {
+    procedureTable.set(notificationId, proc);
 }
 
-export function freeProcedure(futureId) {
-    procedureTable.delete(futureId);
+export function freeProcedure(notificationId) {
+    procedureTable.delete(notificationId);
 }
 
-function findProcedure(futureId) {
-    return procedureTable.get(futureId);
+function findProcedure(notificationId) {
+    return procedureTable.get(notificationId);
 }
 
 const VAL_TYPE_UNDEFINED = 1;
@@ -361,13 +361,16 @@ class DataReadStream {
     }
 
     getProcedure() {
-        const futureId = this.getUint32();
-        let proc = findProcedure(futureId);
+        const notificationId = this.getAny();
+        if (!Number.isInteger(notificationId)) {
+            throw `Invalid notification ID: ${notificationId}`;
+        }
+        let proc = findProcedure(notificationId);
         if (!proc) {
             proc = (...args) => {
-                notifyValues(futureId, ...args);
+                notifyValues(notificationId, ...args);
             };
-            registerProcedure(futureId, proc);
+            registerProcedure(notificationId, proc);
         }
         return proc;
     }
@@ -649,16 +652,16 @@ function encodeValue(val) {
     }
 }
 
-function encodeValueList(futureId, vals) {
+function encodeValueList(notificationId, vals) {
+    const notificationIdData = encodeValue(notificationId);
     const encodedValues = vals.map(encodeValue);
-    const dataLen = 4 + encodedValues.reduce((acc, v) => acc + v.byteLength, 0);
+    const dataLen = notificationIdData.byteLength + encodedValues.reduce((acc, v) => acc + v.byteLength, 0);
     const data = new Uint8Array(dataLen);
-    const dataView = new DataView(data.buffer);
-    dataView.setUint32(0, futureId, true);
+    data.set(notificationIdData, 0);
     encodedValues.reduce((offset, v) => {
         data.set(v, offset);
         return offset + v.byteLength;
-    }, 4);
+    }, notificationIdData.byteLength);
     return data;
 }
 
@@ -666,9 +669,9 @@ export function callAction(name, ...args) {
     webSocket.send(JSON.stringify([name].concat(args)));
 }
 
-export function notifyValues(futureId, ...vals) {
-    if (futureId) {
-        const sendData = encodeValueList(futureId, vals);
+export function notifyValues(notificationId, ...vals) {
+    if (Number.isInteger(notificationId)) {
+        const sendData = encodeValueList(notificationId, vals);
         webSocket.send(sendData.buffer);
     }
 }

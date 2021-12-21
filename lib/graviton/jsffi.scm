@@ -95,9 +95,6 @@
           json->obj
           json-rule
 
-          allocate-future-id
-          free-future-id
-
           unlink-callback
           unlink-procedure
           shift-callback*
@@ -341,10 +338,10 @@
 (define-jsstmt respond env
   ((vals ...)
    (cond
-     ((resolve-js-local-var env '%future-id)
+     ((resolve-js-local-var env '%notification-id)
       (compile-jsise-stmt env `(begin
-                                 (Graviton.notifyValues %future-id ,@vals)
-                                 (set! %future-id #f))))
+                                 (Graviton.notifyValues %notification-id ,@vals)
+                                 (set! %notification-id #f))))
      (else
       (error "respond is called outside jslet/await.")))))
 
@@ -662,7 +659,7 @@
             json-alist))
 
 (define (encode-callback callback out)
-  (write-u32 (link-callback callback) out 'little-endian))
+  (encode-integer (link-callback callback) out))
 
 (define (encode-procedure proc out)
   (encode-callback (worker-callback proc) out))
@@ -908,8 +905,6 @@
 (define-jsargtype f64vector getFloat64Array encode-uvector)
 (define-jsargtype json getJson encode-json)
 (define-jsargtype any getAny encode-value)
-(define-jsargtype future getUint32 (lambda (id out)
-                                     (write-u32 id out 'little-endian)))
 (define-jsargtype list getArray (lambda (v out)
                                   (encode-integer (length v) out)
                                   (dolist (e v)
@@ -983,7 +978,7 @@
     (make <jsprocedure> :command-id command-id :types (map (cut list-ref <> 1) var-type-list))))
 
 (define (compile-jslet/async arg-specs body)
-  (compile-jslet (cons '%future-id::future arg-specs) body))
+  (compile-jslet (cons '(%notification-id) arg-specs) body))
 
 (define-jsmacro raise
   ((err)
@@ -996,10 +991,10 @@
 
 (define (jscall/async js-proc :rest args)
   (let* ((gpromise (make-grv-promise))
-         (future-id (allocate-future-id gpromise)))
+         (notification-id (allocate-notification-id gpromise)))
     (call-command (slot-ref js-proc 'command-id)
                   (slot-ref js-proc 'types)
-                  (cons future-id args))
+                  (cons notification-id args))
     (when (disable-async-wait)
       (flush-client-request))
     gpromise))
@@ -1627,54 +1622,54 @@
 (define (decode-received-binary-data data)
   (call-with-input-string (u8vector->string data)
     (lambda (in)
-      (let1 future-id (read-u32 in 'little-endian)
-        (notify-values future-id (lambda ()
-                                   (decode-value-list in)))))))
+      (let1 notification-id (decode-value in)
+        (notify-values notification-id (lambda ()
+                                         (decode-value-list in)))))))
 
 (register-binary-handler! decode-received-binary-data)
 
 ;;;
 
-(define-window-context-slot future-table (make-hash-table 'equal?) (make-id-generator #xffffffff))
+(define-window-context-slot notification-table (make-hash-table 'equal?) (make-id-generator #xffffffff))
 
-(define (with-future-table proc)
-  (window-context-slot-atomic-ref 'future-table proc))
+(define (with-notification-table proc)
+  (window-context-slot-atomic-ref 'notification-table proc))
 
-(define (allocate-future-id receiver)
-  (with-future-table
-    (lambda (tbl future-next-id)
+(define (allocate-notification-id receiver)
+  (with-notification-table
+    (lambda (tbl notification-next-id)
       (define (loop)
-        (let1 id (future-next-id)
+        (let1 id (notification-next-id)
           (cond
             ((hash-table-contains? tbl id)
              (loop))
             (else
              (hash-table-put! tbl id receiver)
-             (log-framework-debug "Allocated future ID: ~8,'0x for ~s" id receiver)
+             (log-framework-debug "Allocated notification ID: ~a for ~s" id receiver)
              id))))
       (loop))))
 
-(define (free-future-id id)
-  (with-future-table
-    (lambda (tbl future-next-id)
+(define (free-notification-id id)
+  (with-notification-table
+    (lambda (tbl notification-next-id)
       (hash-table-delete! tbl id)
-      (log-framework-debug "Freed future ID: ~8,'0x" id))))
+      (log-framework-debug "Freed notification ID: ~a" id))))
 
-(define (notify-values future-id arg-creator)
-  (with-future-table
-    (lambda (tbl future-next-id)
-      (let1 receiver (hash-table-get tbl future-id #f)
+(define (notify-values notification-id arg-creator)
+  (with-notification-table
+    (lambda (tbl notification-next-id)
+      (let1 receiver (hash-table-get tbl notification-id #f)
         (match receiver
           ((? (cut is-a? <> <grv-promise>) gpromise)
-           (log-framework-debug "future ID: #x~8,'0x received. Set values to grv-promise: ~s" future-id gpromise)
+           (log-framework-debug "notification ID: ~a received. Set values to grv-promise: ~s" notification-id gpromise)
            (grv-promise-set-thunk! gpromise arg-creator)
-           ;; We can free this future-id because grv-promise is an one-time object.
-           (free-future-id future-id))
+           ;; We can free this notification-id because grv-promise is an one-time object.
+           (free-notification-id notification-id))
           ((? worker-callback? callback)
-           (log-framework-debug "future ID: #x~8,'0x received. Invoke callback: ~s" future-id callback)
+           (log-framework-debug "notification ID: ~a received. Invoke callback: ~s" notification-id callback)
            (invoke-worker-callback callback arg-creator))
           (else
-           (errorf "[BUG] Invalid receiver for future ID: ~a" future-id)))))))
+           (errorf "[BUG] Invalid receiver for notification ID: ~a" notification-id)))))))
 
 (define-window-context-slot callback->id-table (make-hash-table 'equal?))
 
@@ -1682,9 +1677,9 @@
   (window-context-slot-atomic-ref 'callback->id-table
     (lambda (tbl)
       (or (hash-table-get tbl callback #f)
-          (rlet1 id (allocate-future-id callback)
+          (rlet1 id (allocate-notification-id callback)
             (hash-table-put! tbl callback id)
-            (log-framework-debug "Linked callback: ~s (future ID: #x~8,'0x)" callback id))))))
+            (log-framework-debug "Linked callback: ~s (notification ID: ~a)" callback id))))))
 
 (define (unlink-callback callback)
   (window-context-slot-atomic-ref 'callback->id-table
@@ -1692,9 +1687,9 @@
       (and-let1 id (hash-table-get tbl callback #f)
         (jslet ((id))
           (Graviton.freeProcedure id))
-        (free-future-id id)
+        (free-notification-id id)
         (hash-table-delete! tbl callback)
-        (log-framework-debug "Unlinked callback: ~s (future ID: #x~8,'0x)" callback id)))))
+        (log-framework-debug "Unlinked callback: ~s (notification ID: ~a)" callback id)))))
 
 (define (unlink-procedure proc)
   (for-each unlink-callback
