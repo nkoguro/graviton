@@ -1630,46 +1630,61 @@
 
 ;;;
 
-(define-window-context-slot notification-table (make-hash-table 'equal?) (make-id-generator #xffffffff))
+(define *initial-notification-table-size* 32)
 
-(define (with-notification-table proc)
-  (window-context-slot-atomic-ref 'notification-table proc))
+(define-class <notification-manager> ()
+  ((notification-vector :init-form (make-vector *initial-notification-table-size* #f))
+   (offset :init-value 0)))
+
+(define-window-context-slot notification-manager (make <notification-manager>))
 
 (define (allocate-notification-id receiver)
-  (with-notification-table
-    (lambda (tbl notification-next-id)
-      (define (loop)
-        (let1 id (notification-next-id)
-          (cond
-            ((hash-table-contains? tbl id)
-             (loop))
-            (else
-             (hash-table-put! tbl id receiver)
-             (log-framework-debug "Allocated notification ID: ~a for ~s" id receiver)
-             id))))
-      (loop))))
+  (window-context-slot-atomic-ref 'notification-manager
+    (lambda (notification-manager)
+      (with-slots (notification-vector offset) notification-manager
+          (let loop ((counter 0))
+            (let1 vec-len (vector-length notification-vector)
+              (cond
+                ((= counter vec-len)
+                 ;; Expand notification-vector if there is no room in the vector.
+                 (let ((new-vector (make-vector (* vec-len 2) #f)))
+                   (vector-copy! new-vector 0 notification-vector)
+                   (set! notification-vector new-vector)
+                   (set! offset vec-len)
+                   (log-framework-debug "Expanded notification-vector: ~a -> ~a" vec-len (* vec-len 2))
+                   (loop 0)))
+                ((vector-ref notification-vector (modulo (+ offset counter) vec-len))
+                 (loop (+ counter 1)))
+                (else
+                 (rlet1 index (modulo (+ offset counter) vec-len)
+                   (vector-set! notification-vector index receiver)
+                   (log-framework-debug "Allocated notification ID: ~a for ~s" index receiver)
+                   (set! offset (modulo (+ offset counter 1) vec-len)))))))))))
 
 (define (free-notification-id id)
-  (with-notification-table
-    (lambda (tbl notification-next-id)
-      (hash-table-delete! tbl id)
-      (log-framework-debug "Freed notification ID: ~a" id))))
+  (window-context-slot-atomic-ref 'notification-manager
+    (lambda (notification-manager)
+      (with-slots (notification-vector offset) notification-manager
+        (vector-set! notification-vector id #f)
+        (set! offset id)
+        (log-framework-debug "Freed notification ID: ~a" id)))))
 
 (define (notify-values notification-id arg-creator)
-  (with-notification-table
-    (lambda (tbl notification-next-id)
-      (let1 receiver (hash-table-get tbl notification-id #f)
-        (match receiver
-          ((? (cut is-a? <> <grv-promise>) gpromise)
-           (log-framework-debug "notification ID: ~a received. Set values to grv-promise: ~s" notification-id gpromise)
-           (grv-promise-set-thunk! gpromise arg-creator)
-           ;; We can free this notification-id because grv-promise is an one-time object.
-           (free-notification-id notification-id))
-          ((? worker-callback? callback)
-           (log-framework-debug "notification ID: ~a received. Invoke callback: ~s" notification-id callback)
-           (invoke-worker-callback callback arg-creator))
-          (else
-           (errorf "[BUG] Invalid receiver for notification ID: ~a" notification-id)))))))
+  (window-context-slot-atomic-ref 'notification-manager
+    (lambda (notification-manager)
+      (with-slots (notification-vector offset) notification-manager
+        (let1 receiver (vector-ref notification-vector notification-id)
+          (match receiver
+            ((? (cut is-a? <> <grv-promise>) gpromise)
+             (log-framework-debug "notification ID: ~a received. Set values to grv-promise: ~s" notification-id gpromise)
+             (grv-promise-set-thunk! gpromise arg-creator)
+             ;; We can free this notification-id because grv-promise is an one-time object.
+             (free-notification-id notification-id))
+            ((? worker-callback? callback)
+             (log-framework-debug "notification ID: ~a received. Invoke callback: ~s" notification-id callback)
+             (invoke-worker-callback callback arg-creator))
+            (else
+             (errorf "[BUG] Invalid receiver for notification ID: ~a" notification-id))))))))
 
 (define-window-context-slot callback->id-table (make-hash-table 'equal?))
 
