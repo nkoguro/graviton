@@ -58,7 +58,12 @@
           worker-submit-task
           worker-yield!
           run-concurrent
+          parallel
+          parallel/async
+          parallel/await
           concurrent
+          concurrent/async
+          concurrent/await
           worker-dispatch-event
           <worker-callback>
           <procedure-callback>
@@ -329,7 +334,22 @@
 (define-syntax concurrent
   (syntax-rules ()
     ((_ body ...)
-     (run-concurrent (lambda () body ...)))))
+     (begin
+       (run-concurrent (lambda () body ...))
+       (undefined)))))
+
+(define-syntax concurrent/async
+  (syntax-rules ()
+    ((_ body ...)
+     (let1 gpromise (make-grv-promise)
+       (run-concurrent (lambda () (receive vals (begin body ...)
+                                    (grv-promise-set-values! gpromise vals))))
+       gpromise))))
+
+(define-syntax concurrent/await
+  (syntax-rules ()
+    ((_ body ...)
+     (grv-promise-get (concurrent/async body ...)))))
 
 (define-method worker-fire-event ((worker <worker>) event :rest args)
   (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event #f args)))
@@ -453,6 +473,31 @@
                                   (if (window-context)
                                     (provider)
                                     (make <worker-wrapper> :wparam (make-window-parameter* provider)))))))))))
+
+(define-syntax parallel
+  (syntax-rules ()
+    ((_ body ...)
+     (begin
+       (grv-worker
+        (begin
+          body ...)
+        (worker-close (current-worker)))
+       (undefined)))))
+
+(define-syntax parallel/async
+  (syntax-rules ()
+    ((_ body ...)
+     (let1 gpromise (make-grv-promise)
+       (grv-worker
+        (receive vals (begin body ...)
+          (grv-promise-set-values! gpromise vals))
+        (worker-close (current-worker)))
+       gpromise))))
+
+(define-syntax parallel/await
+  (syntax-rules ()
+    ((_ body ...)
+     (grv-promise-get (parallel/async body ...)))))
 
 (define-method worker-fire-event ((worker-wrapper <worker-wrapper>) event :rest args)
   (apply worker-fire-event (unwrap-worker worker-wrapper) event args))
