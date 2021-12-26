@@ -94,7 +94,7 @@
           make-grv-promise
           grv-promise-set-thunk!
           grv-promise-set-values!
-          grv-promise-get
+          await
           disable-async-wait
           ))
 
@@ -349,7 +349,7 @@
 (define-syntax concurrent/await
   (syntax-rules ()
     ((_ body ...)
-     (grv-promise-get (concurrent/async body ...)))))
+     (await (concurrent/async body ...)))))
 
 (define-method worker-fire-event ((worker <worker>) event :rest args)
   (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event #f args)))
@@ -497,7 +497,7 @@
 (define-syntax parallel/await
   (syntax-rules ()
     ((_ body ...)
-     (grv-promise-get (parallel/async body ...)))))
+     (await (parallel/async body ...)))))
 
 (define-method worker-fire-event ((worker-wrapper <worker-wrapper>) event :rest args)
   (apply worker-fire-event (unwrap-worker worker-wrapper) event args))
@@ -696,7 +696,7 @@
 
 (define disable-async-wait (make-parameter #f))
 
-(define (grv-promise-get gpromise :rest fallback-values)
+(define (await gpromise :rest fallback-values)
   (with-slots (lock condition-variable value-list arg-creator callbacks) gpromise
     (mutex-lock! lock)
     (cond
@@ -718,11 +718,11 @@
           (shift-callback callback
             (push! callbacks callback)
             (mutex-unlock! lock))))
-       (grv-promise-get gpromise))
+       (await gpromise))
       (else
        (begin0
            (apply values fallback-values)
          (mutex-unlock! lock))))))
 
 (define-method object-apply ((grv-promise <grv-promise>))
-  (grv-promise-get grv-promise))
+  (await grv-promise))

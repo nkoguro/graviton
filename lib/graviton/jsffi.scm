@@ -1000,7 +1000,7 @@
     gpromise))
 
 (define (jscall/await js-proc :rest args)
-  (grv-promise-get (apply jscall/async js-proc args)))
+  (await (apply jscall/async js-proc args)))
 
 (define-macro (jslet arg-specs :rest body)
   `(,jscall ,(compile-jslet arg-specs body)
@@ -1017,7 +1017,7 @@
 (define-syntax jslet/await
   (syntax-rules ()
     ((_ arg-specs body ...)
-     (grv-promise-get (jslet/async arg-specs body ...)))))
+     (await (jslet/async arg-specs body ...)))))
 
 (define-class <jsenum> ()
   ((symbol->value-table :init-form (make-hash-table))
