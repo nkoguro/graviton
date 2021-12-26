@@ -11,5 +11,5 @@
     (let1 audio (load-audio "/pipo.mp3")
       (log-format "duration: ~a sec" (~ audio'duration))
       (audio'play)
-      (grv-sleep! 0.5))
+      (asleep 0.5))
     (close-window)))
