@@ -114,6 +114,14 @@
           with-window
           open-window
           close-window
+
+          ;; From jsffi
+          import-js
+          define-jsvar
+          define-jsfn
+          jslet
+          jslet/async
+          jslet/await
           ))
 
 (select-module graviton)
