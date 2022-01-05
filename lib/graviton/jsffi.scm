@@ -476,7 +476,7 @@
      (list (compile-jsise-expr env var) "[" (compile-jsise-expr env i) "]"))
     (('vector-set! (? symbol? var) i v)
      (list "(" (resolve-js-var env var) "[" (compile-jsise-expr env i) "]=" (compile-jsise-expr env v) ")"))
-    (('make klass args ...)
+    (((or 'new 'make) klass args ...)
      (list "(" "new " klass "(" (intersperse "," (map (cut compile-jsise-expr env <>) args)) ")" ")"))
     (('pre++ (? symbol? var))
      (list "(" "++" (resolve-js-var env var) ")"))
