@@ -414,15 +414,15 @@
      (list (construct-json-string obj)))
     (('object (key . val) ...)
      (list "{"
-           (map (lambda (k v)
-                  (unless (string? k)
-                    (errorf "The key of the object must be string, but got ~s" k))
-                  (list (with-output-to-string
-                          (lambda ()
-                            (print-string k)))
-                        ":"
-                        (compile-jsise-expr env v)))
-                key val)
+           (intersperse "," (map (lambda (k v)
+                                   (unless (string? k)
+                                     (errorf "The key of the object must be string, but got ~s" k))
+                                   (list (with-output-to-string
+                                           (lambda ()
+                                             (print-string k)))
+                                         ":"
+                                         (compile-jsise-expr env v)))
+                                 key val))
            "}"))
     (('js-code body ...)
      (letrec ((traverse (lambda (body)
@@ -477,7 +477,7 @@
     (('vector-set! (? symbol? var) i v)
      (list "(" (resolve-js-var env var) "[" (compile-jsise-expr env i) "]=" (compile-jsise-expr env v) ")"))
     (('make klass args ...)
-     (list "(" "new " klass "(" (map (cut compile-jsise-expr env <>) args) ")" ")"))
+     (list "(" "new " klass "(" (intersperse "," (map (cut compile-jsise-expr env <>) args)) ")" ")"))
     (('pre++ (? symbol? var))
      (list "(" "++" (resolve-js-var env var) ")"))
     (('pre-- (? symbol? var))
@@ -515,7 +515,9 @@
 (define-syntax define-jsvar
   (syntax-rules ()
     ((_ name val)
-     (register-jsstmt! (js-current-main-module) '(define name val)))))
+     (register-jsstmt! (js-current-main-module) '(define name val)))
+    ((_ name)
+     (register-jsstmt! (js-current-main-module) `(define name ,(undefined))))))
 
 (define-syntax define-jsfn
   (syntax-rules ()
@@ -1731,6 +1733,8 @@
 
 (define (absolute-js-path js-path)
   (cond
+    ((#/^https?:/i js-path)
+     js-path)
     ((absolute-path? js-path)
      js-path)
     (else
