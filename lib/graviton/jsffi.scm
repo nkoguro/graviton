@@ -351,6 +351,18 @@
   ((val)
    (list "return " (compile-jsise-expr env val) ";")))
 
+(define-jsstmt inc! env
+  ((var)
+   (compile-jsise-stmt env `(set! ,var (+ ,var 1))))
+  ((var delta)
+   (compile-jsise-stmt env `(set! ,var (+ ,var ,delta)))))
+
+(define-jsstmt dec! env
+  ((var)
+   (compile-jsise-stmt env `(set! ,var (- ,var 1))))
+  ((var delta)
+   (compile-jsise-stmt env `(set! ,var (- ,var ,delta)))))
+
 (define-syntax define-jsise-unary
   (syntax-rules ()
     ((_ op js-op)
