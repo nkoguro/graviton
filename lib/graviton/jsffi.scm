@@ -233,6 +233,13 @@
    `(let ((,var ,expr))
       ,@body)))
 
+(define-jsmacro rlet1
+  ((var expr body ...)
+   `((lambda (var)
+       (begin body ...)
+       (return var))
+     expr)))
+
 (define (compile-jsise-stmt env stmt)
   (cond
     ((and (list? stmt)
