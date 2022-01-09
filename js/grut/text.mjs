@@ -4,7 +4,7 @@
 import { registerAnimationFrameCallback, logDebugMessage } from "/_g/graviton.mjs";
 import { copyTextToClipboard } from "/_g/grut/clipboard.mjs";
 
-const MAIN_CURSOR_ID = 'grv-main-cursor-id';
+const MAIN_CURSOR_ID = 'grut-main-cursor-id';
 class AttributedCharacter {
     constructor(attr, char) {
         this.attribute = attr;
