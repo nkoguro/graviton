@@ -4,7 +4,7 @@
 (use math.const)
 
 (define (main args)
-  (with-window (make-canvas-window 150 200)
+  (with-window (grut-canvas-window 150 200)
       (canvas)
     (let1 ctx (canvas'get-context "2d")
       (log-format "window width=~a, height=~a" (~ window'inner-width) (~ window'inner-height))

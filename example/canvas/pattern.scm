@@ -5,7 +5,7 @@
 (bind-url-path "/" (sys-dirname (current-load-path)))
 
 (define (main args)
-  (with-window (make-canvas-window 300 300)
+  (with-window (grut-canvas-window 300 300)
       (canvas)
     (let1 ctx (canvas'get-context "2d")
       (on-jsevent window "keyup" (key)

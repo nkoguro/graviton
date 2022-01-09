@@ -50,8 +50,8 @@
 
           alist->style
 
-          make-canvas-window
-          make-text-window
+          grut-canvas-window
+          grut-text-window
           grut-text+canvas-window))
 
 (select-module graviton.grut)
@@ -121,7 +121,7 @@
     (else
      (values *min-default-window-width* *min-default-window-height*))))
 
-(define (make-canvas-window width height
+(define (grut-canvas-window width height
                             :key
                             (id "canvas")
                             (title #f)
@@ -151,7 +151,7 @@
                   :resizable? resizable?))))
 
 
-(define (make-text-window :key
+(define (grut-text-window :key
                           (id "text")
                           (title #f)
                           (column #f)

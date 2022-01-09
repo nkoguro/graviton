@@ -2,7 +2,7 @@
 (use graviton.grut)
 
 (define (main args)
-  (with-window (make-canvas-window 300 150)
+  (with-window (grut-canvas-window 300 150)
       (canvas)
     (let1 ctx (canvas'get-context "2d")
       (on-jsevent window "keyup" (key)

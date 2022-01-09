@@ -52,7 +52,7 @@
 (define (main args)
   (random-source-randomize! default-random-source)
 
-  (with-window (make-canvas-window *width* *height* :background-color "black")
+  (with-window (grut-canvas-window *width* *height* :background-color "black")
       (canvas)
     (let1 ctx (canvas'get-context "2d")
       (on-jsevent window "keyup" (key)
