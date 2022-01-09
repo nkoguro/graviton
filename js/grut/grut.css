@@ -1,19 +1,3 @@
-.grut-body {
-    position: static;
-    overflow-x: hidden;
-    overflow-y: hidden;
-}
-
-.grut-light {
-    background-color: white;
-    color: black;
-}
-
-.grut-dark {
-    background-color: black;
-    color: white;
-}
-
 .grut-monospace-font {
     font-family: Consolas, SFMono-Regular, 'Roboto Mono', 'Courier New', Courier, monospace;
     font-weight: normal;
