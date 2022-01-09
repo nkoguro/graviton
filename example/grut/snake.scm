@@ -268,7 +268,7 @@
                    :body
                    (html:body
                     :style "background-color: black; color: white"
-                    (html:grv-text :id "text" :column *text-width* :row *text-height* :class "grut-monospace-font grut-fill"))
+                    (html:grut-text :id "text" :column *text-width* :row *text-height* :class "grut-monospace-font grut-fill"))
                    :width 600
                    :height 600)
         (text)

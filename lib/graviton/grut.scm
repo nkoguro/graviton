@@ -169,16 +169,16 @@
                                             ("margin" . "0")
                                             ("overflow-y" . "none")
                                             ("margin" . ,margin)))
-                     (html:grv-text :id id
-                                    :class "grut-monospace-font grut-contain"
-                                    :column column
-                                    :row row
-                                    :style (alist->style `(("width" . "100%")
-                                                           ("height" . "100%")
-                                                           ("box-sizing" . "border-box")
-                                                           ("padding" . "5px")
-                                                           ("overflow-y" . "scroll")
-                                                           ("font-size" . ,font-size)))))
+                     (html:grut-text :id id
+                                     :class "grut-monospace-font grut-contain"
+                                     :column column
+                                     :row row
+                                     :style (alist->style `(("width" . "100%")
+                                                            ("height" . "100%")
+                                                            ("box-sizing" . "border-box")
+                                                            ("padding" . "5px")
+                                                            ("overflow-y" . "scroll")
+                                                            ("font-size" . ,font-size)))))
               :title title
               :width window-width
               :height window-height
@@ -212,16 +212,16 @@
                                                 ("background-color" . ,background-color)
                                                 ("margin" . ,margin)))
                          (html:canvas :id canvas-id :class "grut-contain" :width width :height height)
-                         (html:grv-text :id text-id
-                                        :class "grut-monospace-font grut-contain"
-                                        :column column
-                                        :row row
-                                        :style (alist->style `(("width" . "100%")
-                                                               ("height" . "100%")
-                                                               ("box-sizing" . "border-box")
-                                                               ("padding" . "5px")
-                                                               ("overflow-y" . "hidden")
-                                                               ("font-size" . ,font-size)))))
+                         (html:grut-text :id text-id
+                                         :class "grut-monospace-font grut-contain"
+                                         :column column
+                                         :row row
+                                         :style (alist->style `(("width" . "100%")
+                                                                ("height" . "100%")
+                                                                ("box-sizing" . "border-box")
+                                                                ("padding" . "5px")
+                                                                ("overflow-y" . "hidden")
+                                                                ("font-size" . ,font-size)))))
                   :title title
                   :width window-width
                   :height window-height

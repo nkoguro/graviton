@@ -38,7 +38,7 @@
     :puts (lambda (s)
             (ui-worker'puts s))))
 
-(define (get-text-input-port grv-text out)
+(define (get-text-input-port grut-text out)
   (let1 in #f
     (make <virtual-input-port>
       :getb (lambda ()
@@ -47,7 +47,7 @@
                               (eof-object))))
                 (cond
                   ((eof-object? b)
-                   (set! in (open-input-string (rlet1 str (get-input-text grv-text #t)
+                   (set! in (open-input-string (rlet1 str (get-input-text grut-text #t)
                                                  (display str out)
                                                  (flush out))))
                    (loop (read-byte in)))
@@ -397,9 +397,9 @@
            (html:div
             :id "container"
             :style (alist->style `(("font-size" . ,font-size)))
-            (html:grv-text :id "console")
-            (html:grv-text :id "status"))
-           (html:grv-text :id "completion" :style "visibility: hidden")))
+            (html:grut-text :id "console")
+            (html:grut-text :id "status"))
+           (html:grut-text :id "completion" :style "visibility: hidden")))
         (console status completion)
       (show-cursor console)
 

@@ -8,7 +8,7 @@
                  :body
                  (html:body
                   :style "background-color: black; color: white"
-                  (html:grv-text :id "text" :class "grut-monospace-font grut-contain" :column 42 :row 15)))
+                  (html:grut-text :id "text" :class "grut-monospace-font grut-contain" :column 42 :row 15)))
       (text)
     (on-jsevent window "keyup" (key)
       (when (equal? key "Escape")

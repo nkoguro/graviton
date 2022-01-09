@@ -55,10 +55,10 @@
   (use text.html-lite)
   (use util.match)
 
-  (export html:grv-text
+  (export html:grut-text
           clipboard-text
           <input-context>
-          <grv-text>
+          <grut-text>
 
           get-input-text
 
@@ -179,7 +179,7 @@
                         r))))
     ))
 
-(define-html-elements grv-text)
+(define-html-elements grut-text)
 
 ;;;
 
@@ -345,7 +345,7 @@
   (end-column text-mark-end-column text-mark-end-column-set!)
   (end-row text-mark-end-row text-mark-end-row-set!))
 
-(define-class <grv-text> (<html-element> <virtual-output-port>)
+(define-class <grut-text> (<html-element> <virtual-output-port>)
   ((text-content :jsproperty "textContent")
    (page-size :jsproperty "pageSize")
    (number-of-lines :jsproperty "row")
@@ -357,9 +357,9 @@
    (input-queue :init-form (make-mtqueue))
    (pending-characters :init-value '())
    (text-mark :init-value #f))
-  :jsclass "GrvText")
+  :jsclass "GrutText")
 
-(define-method initialize ((self <grv-text>) initargs)
+(define-method initialize ((self <grut-text>) initargs)
   (next-method)
   (self'set-callbacks
    ;; text-input
@@ -418,7 +418,7 @@
                              (when (eq? (window-context) ctx)
                                (process-byte self (eof-object)))))))
 
-(define-automatic-jsobject-methods <grv-text>
+(define-automatic-jsobject-methods <grut-text>
   "setCallbacks"
   "setKeyEventAvailability"
   "clearKeyEventAvailability"
@@ -466,39 +466,39 @@
   ("computeCharacterPositionAndSize" :result #t)
   )
 
-(define-jsobject-method <grv-text> cursor-column ()
+(define-jsobject-method <grut-text> cursor-column ()
   (jslet/await ((self::object))
     (respond self.cursor.column)))
 
-(define-jsobject-method <grv-text> cursor-row ()
+(define-jsobject-method <grut-text> cursor-row ()
   (jslet/await ((self::object))
     (respond self.cursor.row)))
 
-(define-jsobject-method <grv-text> cursor-position ()
+(define-jsobject-method <grut-text> cursor-position ()
   (jslet/await ((self::object))
     (respond self.cursor.column self.cursor.row)))
 
-(define-jsobject-method <grv-text> set-cursor-position! (col row)
+(define-jsobject-method <grut-text> set-cursor-position! (col row)
   (jslet ((self::object)
           (col)
           (row))
     (set! self.cursor.column col)
     (set! self.cursor.row row)))
 
-(define-jsobject-method <grv-text> show-cursor ()
+(define-jsobject-method <grut-text> show-cursor ()
   (jslet ((self::object))
     (self.cursor.show)))
 
-(define-jsobject-method <grv-text> hide-cursor ()
+(define-jsobject-method <grut-text> hide-cursor ()
   (jslet ((self::object))
     (self.cursor.hide)))
 
-(define-jsobject-method <grv-text> cursor-visible? ()
+(define-jsobject-method <grut-text> cursor-visible? ()
   (jslet/await ((self::object))
     (respond self.cursor.visible)))
 
-(define (enqueue-input grv-text type :rest args)
-  (with-slots (input-queue) grv-text
+(define (enqueue-input grut-text type :rest args)
+  (with-slots (input-queue) grut-text
     (case type
       ((text)
        (for-each (lambda (str)
@@ -508,19 +508,19 @@
       ((key)
        (enqueue! input-queue (cons type args))))))
 
-(define (dequeue-input grv-text :optional (wait? #f))
-  (with-slots (input-queue) grv-text
+(define (dequeue-input grut-text :optional (wait? #f))
+  (with-slots (input-queue) grut-text
     (if wait?
       (dequeue/wait! input-queue)
       (dequeue! input-queue #f))))
 
-(define (clear-input-buffer! grv-text)
-  (with-slots (input-queue) grv-text
+(define (clear-input-buffer! grut-text)
+  (with-slots (input-queue) grut-text
     (dequeue-all! input-queue))
   (undefined))
 
-(define (get-input-text grv-text :optional (wait? #f))
-  (match (dequeue-input grv-text wait?)
+(define (get-input-text grut-text :optional (wait? #f))
+  (match (dequeue-input grut-text wait?)
     (('text str)
      str)
     (('key key clipboard)
@@ -582,7 +582,7 @@
     (_
      (values #f params))))
 
-(define (make-text-processor grv-text)
+(define (make-text-processor grut-text)
   (let ((string-port #f)
         (data '())
         (params '())
@@ -590,12 +590,12 @@
 
     (define (output-byte b)
       (unless string-port
-        (set! string-port (open-output-string :name (format "(~s text-processor)" grv-text))))
+        (set! string-port (open-output-string :name (format "(~s text-processor)" grut-text))))
       (write-byte b string-port))
 
     (define (flush-string)
       (when string-port
-        (grv-text'write-line (get-output-string string-port)))
+        (grut-text'write-line (get-output-string string-port)))
       (set! string-port #f))
 
     (define (hold-param-data b)
@@ -630,12 +630,12 @@
               (set! intensity? #f)
               (loop (cdr params)
                     (cons (lambda ()
-                            (grv-text'update-text-attribute "color" #f)
-                            (grv-text'update-text-attribute "background-color" #f)
-                            (grv-text'update-text-attribute "font-style" #f)
-                            (grv-text'update-text-attribute "text-decoration" #f)
-                            (grv-text'update-text-attribute "filter" #f)
-                            (grv-text'update-text-attribute "background" #f))
+                            (grut-text'update-text-attribute "color" #f)
+                            (grut-text'update-text-attribute "background-color" #f)
+                            (grut-text'update-text-attribute "font-style" #f)
+                            (grut-text'update-text-attribute "text-decoration" #f)
+                            (grut-text'update-text-attribute "filter" #f)
+                            (grut-text'update-text-attribute "background" #f))
                           updaters)))
              ((1)                       ; Increased intensity
               (set! intensity? #t)
@@ -646,86 +646,86 @@
              ((3)                       ; Italic
               (loop (cdr params)
                     (cons (lambda ()
-                            (grv-text'update-text-attribute "font-style" "italic"))
+                            (grut-text'update-text-attribute "font-style" "italic"))
                           updaters)))
              ((4)                       ; Underline
               (loop (cdr params)
                     (cons (lambda ()
-                            (grv-text'update-text-attribute "text-decoration" "underline"))
+                            (grut-text'update-text-attribute "text-decoration" "underline"))
                           updaters)))
              ((7)                       ; Reverse video
               (loop (cdr params)
                     (cons (lambda ()
                             ;; This style is different from "Reverse video". But there is no easy way to implement it in CSS.
-                            (grv-text'update-text-attribute "filter" "invert(1)")
+                            (grut-text'update-text-attribute "filter" "invert(1)")
                             ;; background-color style can't be used here because TextAttribute.updateSpan will update
-                            ;; --grv-text-edit-background-color var.
-                            (grv-text'update-text-attribute "background" "var(--grv-text-edit-background-color)"))
+                            ;; --grut-text-edit-background-color var.
+                            (grut-text'update-text-attribute "background" "var(--grut-text-edit-background-color)"))
                           updaters)))
              ((22)                      ; Normal color or intensity
               (set! intensity? #f)
               (loop (cdr params)
                     (cons (lambda ()
-                            (grv-text'update-text-attribute "color" #f)
-                            (grv-text'update-text-attribute "background-color" #f)
-                            (grv-text'update-text-attribute "filter" #f)
-                            (grv-text'update-text-attribute "background" #f))
+                            (grut-text'update-text-attribute "color" #f)
+                            (grut-text'update-text-attribute "background-color" #f)
+                            (grut-text'update-text-attribute "filter" #f)
+                            (grut-text'update-text-attribute "background" #f))
                           updaters)))
              ((23)                      ; Not italic
               (loop (cdr params)
                     (cons (lambda ()
-                            (grv-text'update-text-attribute "font-style" #f))
+                            (grut-text'update-text-attribute "font-style" #f))
                           updaters)))
              ((24)                      ; Underline off
               (loop (cdr params)
                     (cons (lambda ()
-                            (grv-text'update-text-attribute "text-decoration" #f))
+                            (grut-text'update-text-attribute "text-decoration" #f))
                           updaters)))
              ((27)                      ; Reverse off
               (loop (cdr params)
                     (cons (lambda ()
-                            (grv-text'update-text-attribute "filter" #f)
-                            (grv-text'update-text-attribute "background" #f))
+                            (grut-text'update-text-attribute "filter" #f)
+                            (grut-text'update-text-attribute "background" #f))
                           updaters)))
              ((30 31 32 33 34 35 36 37) ; Set foreground color
               (loop (cdr params)
                     (cons (lambda ()
-                            (grv-text'update-text-attribute "color"
+                            (grut-text'update-text-attribute "color"
                                                             (parse-basic-color (+ (- (car params) 30) (if intensity? 8 0)))))
                           updaters)))
              ((38)                ; Set foreground color (8 or 24 bit)
               (receive (color rest) (parse-color (cdr params))
                 (loop rest
                       (cons (lambda ()
-                              (grv-text'update-text-attribute "color" color))
+                              (grut-text'update-text-attribute "color" color))
                             updaters))))
              ((39)                      ; Default foreground color
               (loop (cdr params)
                     (cons (lambda ()
-                            (grv-text'update-text-attribute "color" #f))
+                            (grut-text'update-text-attribute "color" #f))
                           updaters)))
              ((40 41 42 43 44 45 46 47) ; Set background color
               (loop (cdr params)
                     (cons (lambda ()
-                            (grv-text'update-text-attribute "background-color" (parse-basic-color (- (car params) 40))))
+                            (grut-text'update-text-attribute "background-color" (parse-basic-color (- (car params) 40))))
                           updaters)))
              ((48)                ; Set background color (8 or 24 bit)
               (receive (color rest) (parse-color (cdr params))
                 (loop rest
                       (cons (lambda ()
-                              (grv-text'update-text-attribute "background-color" color))
+                              (grut-text'update-text-attribute "background-color" color))
                             updaters))))
              ((49)                      ; Default background color
               (loop (cdr params)
                     (cons (lambda ()
-                            (grv-text'update-text-attribute "background-color" #f))
+                            (grut-text'update-text-attribute "background-color" #f))
                           updaters)))
              (else
               (loop (cdr params) updaters)))))))
 
     (define (make-state proc)
       (letrec ((state (lambda (b)
-                        (slot-set! grv-text 'processor-state (cond
+                        (slot-set! grut-text 'processor-state (cond
                                                                ((eof-object? b)
                                                                 (flush-string)
                                                                 state)
@@ -738,13 +738,13 @@
                     (case b
                       ((#x08)           ; BS
                        (flush-string)
-                       (grv-text'move-cursor-back 1)
-                       (grv-text'write-line " " #t)
-                       (grv-text'move-cursor-back 1)
+                       (grut-text'move-cursor-back 1)
+                       (grut-text'write-line " " #t)
+                       (grut-text'move-cursor-back 1)
                        char-state)
                       ((#x0a)           ; LF
                        (flush-string)
-                       (grv-text'move-cursor-next-line 1)
+                       (grut-text'move-cursor-next-line 1)
                        char-state)
                       ((#x0d)           ; CR
                        (flush-string)
@@ -768,43 +768,43 @@
                     (case b
                       ((#x41)           ; ESC [ n A : Cursor Up
                        (push-param)
-                       (grv-text'move-cursor-up (get-param 0 1))
+                       (grut-text'move-cursor-up (get-param 0 1))
                        char-state)
                       ((#x42)           ; ESC [ n B : Cursor Down
                        (push-param)
-                       (grv-text'move-cursor-down (get-param 0 1))
+                       (grut-text'move-cursor-down (get-param 0 1))
                        char-state)
                       ((#x43)           ; ESC [ n C : Cursor Forward
                        (push-param)
-                       (grv-text'move-cursor-forward (get-param 0 1))
+                       (grut-text'move-cursor-forward (get-param 0 1))
                        char-state)
                       ((#x44)           ; ESC [ n D : Cursor Back
                        (push-param)
-                       (grv-text'move-cursor-back (get-param 0 1))
+                       (grut-text'move-cursor-back (get-param 0 1))
                        char-state)
                       ((#x45)           ; ESC [ n E : Cursor Next Line
                        (push-param)
-                       (grv-text'move-cursor-next-line (get-param 0 1))
+                       (grut-text'move-cursor-next-line (get-param 0 1))
                        char-state)
                       ((#x46)       ; ESC [ n F : Cursor Previous Line
                        (push-param)
-                       (grv-text'move-cursor-previous-line (get-param 0 1))
+                       (grut-text'move-cursor-previous-line (get-param 0 1))
                        char-state)
                       ((#x47) ; ESC [ n G : Cursor Horizontal Absolute
                        (push-param)
-                       (grv-text'move-cursor-horizontal-absolute (- (get-param 0 1) 1))
+                       (grut-text'move-cursor-horizontal-absolute (- (get-param 0 1) 1))
                        char-state)
                       ((#x48)          ; ESC [ n;m H : Cursor Position
                        (push-param)
-                       (grv-text'move-cursor (- (get-param 1 1) 1) (- (get-param 0 1) 1))
+                       (grut-text'move-cursor (- (get-param 1 1) 1) (- (get-param 0 1) 1))
                        char-state)
                       ((#x4a)           ; ESC [ n J : Erase in Display
                        (push-param)
-                       (grv-text'erase-display (get-param 0 0))
+                       (grut-text'erase-display (get-param 0 0))
                        char-state)
                       ((#x4b)           ; ESC [ n K : Erase in Line
                        (push-param)
-                       (grv-text'erase-line (get-param 0 0))
+                       (grut-text'erase-line (get-param 0 0))
                        char-state)
                       ((#x6d) ; ESC [ n(;n;...) m : Select Graphic Redition
                        (push-param)
@@ -820,26 +820,26 @@
                        char-state)))))
     char-state))
 
-(define (process-byte grv-text b)
-  (with-slots (processor-state) grv-text
+(define (process-byte grut-text b)
+  (with-slots (processor-state) grut-text
     (processor-state b)))
 
-(define (process-text grv-text text)
+(define (process-text grut-text text)
   (let ((gen (port->byte-generator (open-input-string text))))
     (let loop ((b (gen)))
-      (process-byte grv-text b)
+      (process-byte grut-text b)
       (unless (eof-object? b)
         (loop (gen))))))
 
-(define (process-char grv-text c)
-  (process-text grv-text (string c)))
+(define (process-char grut-text c)
+  (process-text grut-text (string c)))
 
-(define-jsobject-method <grv-text> print-text (text)
+(define-jsobject-method <grut-text> print-text (text)
   (process-text self text))
 
 (define-constant CALL-WITH-CLIPBOARD-TEXT 2)
 
-(define-jsobject-method <grv-text> bind-key (key thunk :key (use-clipboard-text? #f))
+(define-jsobject-method <grut-text> bind-key (key thunk :key (use-clipboard-text? #f))
   (with-slots (keymap) self
     (cond
       ((procedure? thunk)
@@ -881,49 +881,49 @@
     ("F12" . KEY_F12)
     ("Escape" . #\x1b)))
 
-(define (init-console-keys grv-text mode)
+(define (init-console-keys grut-text mode)
   (let* ((special-keys (map car special-key-alist))
          (ctrls (map (^x (string-append "C-" x)) (map string (char-set->list #[a-zA-Z]))))
          (alts (map (^x (string-append "A-" x)) (append (map string (char-set->list #[!-~]))
                                                         ctrls
                                                         special-keys))))
-    (grv-text'clear-key-event-availability)
+    (grut-text'clear-key-event-availability)
     (for-each (lambda (key)
-                (grv-text'set-key-event-availability key 0))
+                (grut-text'set-key-event-availability key 0))
               (case mode
                 ((raw)
                  (append special-keys ctrls alts))
                 ((rare cooked)
                  special-keys)))))
 
-(define-method call-with-console ((grv-text <grv-text>) proc :key (mode 'rare))
-  (grv-text'save-key-event-availability)
-  (grv-text'focus)
+(define-method call-with-console ((grut-text <grut-text>) proc :key (mode 'rare))
+  (grut-text'save-key-event-availability)
+  (grut-text'focus)
   (unwind-protect
       (begin
-        (init-console-keys grv-text mode)
-        (proc grv-text))
-    (grv-text'restore-key-event-availability)))
+        (init-console-keys grut-text mode)
+        (proc grut-text))
+    (grut-text'restore-key-event-availability)))
 
-(define-method putch ((grv-text <grv-text>) c)
-  (grv-text'print-text (string c)))
+(define-method putch ((grut-text <grut-text>) c)
+  (grut-text'print-text (string c)))
 
-(define-method putstr ((grv-text <grv-text>) str)
-  (grv-text'print-text str))
+(define-method putstr ((grut-text <grut-text>) str)
+  (grut-text'print-text str))
 
-(define-method beep ((grv-text <grv-text>))
+(define-method beep ((grut-text <grut-text>))
   (let-values (((audio? visual?) (apply values (assoc-ref '(("all" #t #t)
                                                             ("audible" #t #f)
                                                             ("visual" #f #t)
                                                             ("none" #f #f))
-                                                          (~ grv-text'bell-style)
+                                                          (~ grut-text'bell-style)
                                                           '(#f #f)))))
     (when audio?
       (play-beep 1000 0.1))
     (when visual?
-      (grv-text'visual-bell))))
+      (grut-text'visual-bell))))
 
-(define (%getch grv-text wait?)
+(define (%getch grut-text wait?)
   (define (key->ch key)
     (match-let1 (stem . modifiers) (reverse (string-split key "-"))
       (let loop ((stem stem)
@@ -943,14 +943,14 @@
           (else
            #f)))))
 
-  (with-slots (pending-characters) grv-text
+  (with-slots (pending-characters) grut-text
     (cond
       ((not (null? pending-characters))
        (rlet1 c (car pending-characters)
          (set! pending-characters (cdr pending-characters))))
       (else
        ;; TODO: Rewrite to use partcont.
-       (or (match (dequeue-input grv-text wait?)
+       (or (match (dequeue-input grut-text wait?)
              (('key key clipboard)
               (key->ch key))
              (('text str)
@@ -960,14 +960,14 @@
              (_
               #f))
            (and wait?
-                (%getch grv-text wait?)))))))
+                (%getch grut-text wait?)))))))
 
-(define-method getch ((grv-text <grv-text>))
-  (%getch grv-text #t))
+(define-method getch ((grut-text <grut-text>))
+  (%getch grut-text #t))
 
-(define-method chready? ((grv-text <grv-text>))
-  (with-slots (pending-characters) grv-text
-    (let1 ch (%getch grv-text #f)
+(define-method chready? ((grut-text <grut-text>))
+  (with-slots (pending-characters) grut-text
+    (let1 ch (%getch grut-text #f)
       (cond
         (ch
          (push! pending-characters ch)
@@ -975,66 +975,66 @@
         (else
          #f)))))
 
-(define-method query-cursor-position ((grv-text <grv-text>))
-  (grv-text'cursor-position))
+(define-method query-cursor-position ((grut-text <grut-text>))
+  (grut-text'cursor-position))
 
-(define-method move-cursor-to ((grv-text <grv-text>) row column)
-  (flush grv-text)
-  (grv-text'move-cursor column row))
+(define-method move-cursor-to ((grut-text <grut-text>) row column)
+  (flush grut-text)
+  (grut-text'move-cursor column row))
 
-(define-method reset-terminal ((grv-text <grv-text>))
-  (clear-screen grv-text)
-  (reset-character-attribute grv-text))
+(define-method reset-terminal ((grut-text <grut-text>))
+  (clear-screen grut-text)
+  (reset-character-attribute grut-text))
 
-(define-method clear-screen ((grv-text <grv-text>))
-  (flush grv-text)
-  (grv-text'move-cursor 0 0)
-  (grv-text'erase-display 2))
+(define-method clear-screen ((grut-text <grut-text>))
+  (flush grut-text)
+  (grut-text'move-cursor 0 0)
+  (grut-text'erase-display 2))
 
-(define-method clear-to-eol ((grv-text <grv-text>))
-  (flush grv-text)
-  (grv-text'erase-line 0))
+(define-method clear-to-eol ((grut-text <grut-text>))
+  (flush grut-text)
+  (grut-text'erase-line 0))
 
-(define-method clear-to-eos ((grv-text <grv-text>))
-  (flush grv-text)
-  (grv-text'erase-display 0))
+(define-method clear-to-eos ((grut-text <grut-text>))
+  (flush grut-text)
+  (grut-text'erase-display 0))
 
-(define-method hide-cursor ((grv-text <grv-text>))
-  (flush grv-text)
-  (grv-text'hide-cursor))
+(define-method hide-cursor ((grut-text <grut-text>))
+  (flush grut-text)
+  (grut-text'hide-cursor))
 
-(define-method show-cursor ((grv-text <grv-text>))
-  (flush grv-text)
-  (grv-text'show-cursor))
+(define-method show-cursor ((grut-text <grut-text>))
+  (flush grut-text)
+  (grut-text'show-cursor))
 
-(define-method query-screen-size ((grv-text <grv-text>))
-  (match-let1 #(w h) (grv-text'query-screen-size)
+(define-method query-screen-size ((grut-text <grut-text>))
+  (match-let1 #(w h) (grut-text'query-screen-size)
     (values w h)))
 
-(define-method cursor-down/scroll-up ((grv-text <grv-text>))
-  (let-values (((w h) (query-screen-size grv-text))
-               ((col row) (query-cursor-position grv-text)))
+(define-method cursor-down/scroll-up ((grut-text <grut-text>))
+  (let-values (((w h) (query-screen-size grut-text))
+               ((col row) (query-cursor-position grut-text)))
     (cond
       ((< (+ row 1) h)
        (move-cursor-to (+ row 1) col))
       (else
        (move-cursor-to (+ row 1) col)
-       (dotimes (_ (max 0 (- (~ grv-text'number-of-lines) h)))
-         (grv-text'remove-line 0))))))
+       (dotimes (_ (max 0 (- (~ grut-text'number-of-lines) h)))
+         (grut-text'remove-line 0))))))
 
-(define-method cursor-up/scroll-down ((grv-text <grv-text>))
-  (let-values (((w h) (query-screen-size grv-text))
-               ((col row) (query-cursor-position grv-text)))
+(define-method cursor-up/scroll-down ((grut-text <grut-text>))
+  (let-values (((w h) (query-screen-size grut-text))
+               ((col row) (query-cursor-position grut-text)))
     (cond
       ((< 0 row)
        (move-cursor-to (- row 1) col))
       (else
-       (grv-text'insert-line 0)
+       (grut-text'insert-line 0)
        (move-cursor-to 0 col)
-       (dotimes (_ (max 0 (- (~ grv-text'number-of-lines) h)))
-         (grv-text'remove-line h))))))
+       (dotimes (_ (max 0 (- (~ grut-text'number-of-lines) h)))
+         (grut-text'remove-line h))))))
 
-(define-method set-character-attribute ((grv-text <grv-text>) spec)
+(define-method set-character-attribute ((grut-text <grut-text>) spec)
   (define (color->code col bg?)
     (or (and-let1 code (assq-ref '((black . 30)
                                    (red . 31)
@@ -1060,61 +1060,61 @@
       ((fgcolor #f)
        (bgcolor #f)
        . opts)
-    (format grv-text
+    (format grut-text
             "\x1b[~am"
             (string-join (map number->string
                               (delete 0 (list* (color->code fgcolor #f) (color->code bgcolor #t) (map option->code opts))))
                          ";"))))
 
-(define-method reset-character-attribute ((grv-text <grv-text>))
-  (format grv-text "\x1b[m"))
+(define-method reset-character-attribute ((grut-text <grut-text>))
+  (format grut-text "\x1b[m"))
 
-(define-method with-character-attribute ((grv-text <grv-text>) attrs thunk)
-  (flush grv-text)
-  (grv-text'save-text-attribute)
-  (let-values (((col row) (query-cursor-position grv-text)))
-    (let1 visible? (grv-text'cursor-visible?)
+(define-method with-character-attribute ((grut-text <grut-text>) attrs thunk)
+  (flush grut-text)
+  (grut-text'save-text-attribute)
+  (let-values (((col row) (query-cursor-position grut-text)))
+    (let1 visible? (grut-text'cursor-visible?)
       (unwind-protect
           (begin
-            (set-character-attribute grv-text attrs)
+            (set-character-attribute grut-text attrs)
             (thunk))
         (if visible?
-          (show-cursor grv-text)
-          (hide-cursor grv-text))
-        (move-cursor-to grv-text row col)
-        (grv-text'restore-text-attribute)))))
+          (show-cursor grut-text)
+          (hide-cursor grut-text))
+        (move-cursor-to grut-text row col)
+        (grut-text'restore-text-attribute)))))
 
 ;;;
 
-(define (set-line-style! grv-text row key val)
-  (grv-text'set-line-style row key val))
+(define (set-line-style! grut-text row key val)
+  (grut-text'set-line-style row key val))
 
-(define (scroll-up grv-text :optional (n 1))
-  (grv-text'scroll-up n))
+(define (scroll-up grut-text :optional (n 1))
+  (grut-text'scroll-up n))
 
-(define (scroll-down grv-text :optional (n 1))
-  (grv-text'scroll-down n))
+(define (scroll-down grut-text :optional (n 1))
+  (grut-text'scroll-down n))
 
-(define (scroll-to grv-text row :optional (align-to-top #t))
-  (grv-text'scroll-to row align-to-top))
+(define (scroll-to grut-text row :optional (align-to-top #t))
+  (grut-text'scroll-to row align-to-top))
 
 ;;;
 
-(define-method set-mark! ((grv-text <grv-text>) start-col start-row end-col end-row)
-  (with-slots (text-mark) grv-text
+(define-method set-mark! ((grut-text <grut-text>) start-col start-row end-col end-row)
+  (with-slots (text-mark) grut-text
     (let1 mark (make-text-mark start-col start-row end-col end-row)
       (set! text-mark mark)
-      (grv-text'set-mark start-col start-row end-col end-row))))
+      (grut-text'set-mark start-col start-row end-col end-row))))
 
-(define-method set-mark! ((grv-text <grv-text>) col row)
-  (with-slots (text-mark) grv-text
+(define-method set-mark! ((grut-text <grut-text>) col row)
+  (with-slots (text-mark) grut-text
     (cond
       (text-mark
        (text-mark-end-column-set! text-mark col)
        (text-mark-end-row-set! text-mark row))
       (else
        (set! text-mark (make-text-mark col row col row))))
-    (grv-text'set-mark (text-mark-start-column text-mark)
+    (grut-text'set-mark (text-mark-start-column text-mark)
                        (text-mark-start-row text-mark)
                        (text-mark-end-column text-mark)
                        (text-mark-end-row text-mark))))
@@ -1131,10 +1131,10 @@
   (with-slots (cursor-column cursor-row) input-context
     (set-mark! input-context cursor-column cursor-row)))
 
-(define-method clear-mark! ((grv-text <grv-text>))
-  (with-slots (text-mark) grv-text
+(define-method clear-mark! ((grut-text <grut-text>))
+  (with-slots (text-mark) grut-text
     (set! text-mark #f)
-    (grv-text'clear-mark)))
+    (grut-text'clear-mark)))
 
 (define-method clear-mark! ((input-context <input-context>))
   (with-slots (text-element) input-context
@@ -1153,8 +1153,8 @@
 
 ;;;
 
-(define (compute-character-position&size grv-text column row)
-  (apply values (vector->list (grv-text'compute-character-position-and-size column row))))
+(define (compute-character-position&size grut-text column row)
+  (apply values (vector->list (grut-text'compute-character-position-and-size column row))))
 
 ;;;
 
@@ -1555,7 +1555,7 @@
 
 ;;;
 
-(define (read-text/edit grv-text
+(define (read-text/edit grut-text
                         :key
                         (prompt "")
                         (keymap (global-keymap))
@@ -1566,10 +1566,10 @@
                         (on-change #f)
                         (on-input #f)
                         (data-alist '()))
-  (let* ((row (grv-text'cursor-row))
-         (cursor-visibility (grv-text'cursor-visible?))
+  (let* ((row (grut-text'cursor-row))
+         (cursor-visibility (grut-text'cursor-visible?))
          (input-context (make <input-context>
-                          :text-element grv-text
+                          :text-element grut-text
                           :row row
                           :input-continues input-continues
                           :keymap keymap
@@ -1620,26 +1620,26 @@
                  (input-context-data-put! input-context key val)))
               data-alist)
 
-    (with-slots (input-hook clipboard-hook mouse-hook) grv-text
+    (with-slots (input-hook clipboard-hook mouse-hook) grut-text
       (unwind-protect
           (with-slots (offset cursor-column cursor-row edit-cont keymap this-key start-row end-row) input-context
             (add-hook! input-hook input-proc)
             (add-hook! clipboard-hook clipboard-proc)
             (add-hook! mouse-hook mouse-proc)
 
-            (grv-text'save-key-event-availability)
+            (grut-text'save-key-event-availability)
             (switch-keymap input-context keymap)
 
-            (grv-text'move-cursor-horizontal-absolute 0)
-            (grv-text'erase-line 0)
-            (grv-text'print-text (get-prompt input-context row))
-            (grv-text'set-start-column)
-            (set! offset (grv-text'cursor-column))
+            (grut-text'move-cursor-horizontal-absolute 0)
+            (grut-text'erase-line 0)
+            (grut-text'print-text (get-prompt input-context row))
+            (grut-text'set-start-column)
+            (set! offset (grut-text'cursor-column))
             (set! cursor-column offset)
 
             (when initial-text
-              (clear-input-buffer! grv-text)
-              (enqueue-input grv-text 'text initial-text)
+              (clear-input-buffer! grut-text)
+              (enqueue-input grut-text 'text initial-text)
               (process-queued-input input-context)
               ;; Reset the content version.
               (set! (~ input-context'version) 0))
@@ -1651,8 +1651,8 @@
 
             (draw-input-area input-context)
 
-            (grv-text'focus)
-            (grv-text'show-cursor)
+            (grut-text'focus)
+            (grut-text'show-cursor)
             (let-values (((text reason) (shift-callback callback
                                           (set! edit-cont callback))))
               (case reason
@@ -1660,9 +1660,9 @@
                  text)
                 (else
                  #f))))
-        (grv-text'restore-key-event-availability)
+        (grut-text'restore-key-event-availability)
         (delete-hook! input-hook input-proc)
         (delete-hook! clipboard-hook clipboard-proc)
         (delete-hook! mouse-hook mouse-proc)
         (unless cursor-visibility
-          (grv-text'hide-cursor))))))
+          (grut-text'hide-cursor))))))

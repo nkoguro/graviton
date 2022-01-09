@@ -52,8 +52,8 @@
                    :body
                    (html:body
                     (html:div :id "container"
-                              (html:grv-text :id "buffer")
-                              (html:grv-text :id "status"))))
+                              (html:grut-text :id "buffer")
+                              (html:grut-text :id "status"))))
         (buffer status)
       (let ((filename #f)
             (status-keymap (make-keymap (global-keymap))))

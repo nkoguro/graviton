@@ -336,14 +336,14 @@ class TextEditRefreshController {
         this.textEdits = new Set();
 
         window.addEventListener('focus', (e) => {
-            this.textEdits.forEach((grvText) => {
-                grvText.requestUpdateRow(grvText.cursor.row);
+            this.textEdits.forEach((grutText) => {
+                grutText.requestUpdateRow(grutText.cursor.row);
             });
         });
 
         window.addEventListener('blur', (e) => {
-            this.textEdits.forEach((grvText) => {
-                grvText.requestUpdateRow(grvText.cursor.row);
+            this.textEdits.forEach((grutText) => {
+                grutText.requestUpdateRow(grutText.cursor.row);
             });
         });
 
@@ -423,13 +423,13 @@ const TEXT_CONSOLE_STYLE = `
 
 @keyframes block-cursor-blink-animation {
     0% {
-        background: var(--grv-text-edit-background-color);
+        background: var(--grut-text-edit-background-color);
     }
     50% {
-        background: var(--grv-text-edit-cursor-color);
+        background: var(--grut-text-edit-cursor-color);
     }
     100% {
-        background: var(--grv-text-edit-background-color);
+        background: var(--grut-text-edit-background-color);
     }
 }
 
@@ -442,18 +442,18 @@ const TEXT_CONSOLE_STYLE = `
 }
 
 .block-cursor {
-    background: var(--grv-text-edit-cursor-color)
+    background: var(--grut-text-edit-cursor-color)
 }
 
 @keyframes underline-cursor-blink-animation {
     0% {
-        background: var(--grv-text-edit-background-color);
+        background: var(--grut-text-edit-background-color);
     }
     50% {
-        background: linear-gradient(0deg, var(--grv-text-edit-cursor-color), var(--grv-text-edit-cursor-color) 10%, var(--grv-text-edit-background-color) 10%, var(--grv-text-edit-background-color));
+        background: linear-gradient(0deg, var(--grut-text-edit-cursor-color), var(--grut-text-edit-cursor-color) 10%, var(--grut-text-edit-background-color) 10%, var(--grut-text-edit-background-color));
     }
     100% {
-        background: var(--grv-text-edit-background-color);
+        background: var(--grut-text-edit-background-color);
     }
 }
 
@@ -466,18 +466,18 @@ const TEXT_CONSOLE_STYLE = `
 }
 
 .underline-cursor {
-    background: linear-gradient(0deg, var(--grv-text-edit-cursor-color), var(--grv-text-edit-cursor-color) 10%, var(--grv-text-edit-background-color) 10%, var(--grv-text-edit-background-color));
+    background: linear-gradient(0deg, var(--grut-text-edit-cursor-color), var(--grut-text-edit-cursor-color) 10%, var(--grut-text-edit-background-color) 10%, var(--grut-text-edit-background-color));
 }
 
 @keyframes vertical-cursor-blink-animation {
     0% {
-        background: var(--grv-text-edit-background-color);
+        background: var(--grut-text-edit-background-color);
     }
     50% {
-        background: linear-gradient(90deg, var(--grv-text-edit-cursor-color), var(--grv-text-edit-cursor-color) 4px, var(--grv-text-edit-background-color) 4px, var(--grv-text-edit-background-color));
+        background: linear-gradient(90deg, var(--grut-text-edit-cursor-color), var(--grut-text-edit-cursor-color) 4px, var(--grut-text-edit-background-color) 4px, var(--grut-text-edit-background-color));
     }
     100% {
-        background: var(--grv-text-edit-background-color);
+        background: var(--grut-text-edit-background-color);
     }
 }
 
@@ -490,7 +490,7 @@ const TEXT_CONSOLE_STYLE = `
 }
 
 .vertical-cursor {
-    background: linear-gradient(90deg, var(--grv-text-edit-cursor-color), var(--grv-text-edit-cursor-color) 4px, var(--grv-text-edit-background-color) 4px, var(--grv-text-edit-background-color));
+    background: linear-gradient(90deg, var(--grut-text-edit-cursor-color), var(--grut-text-edit-cursor-color) 4px, var(--grut-text-edit-background-color) 4px, var(--grut-text-edit-background-color));
 }
 
 .text-edit {
@@ -512,7 +512,7 @@ const TEXT_CONSOLE_STYLE = `
 @keyframes visual-bell-animation {
     100% {
         filter: invert(100);
-        background: var(--grv-text-edit-background-color);
+        background: var(--grut-text-edit-background-color);
     }
 }
 
@@ -525,9 +525,9 @@ const TEXT_CONSOLE_STYLE = `
 }
 `;
 
-const BACKGROUND_COLOR_PROPERTY = '--grv-text-edit-background-color';
-const COLOR_PROPERTY = '--grv-text-edit-color';
-const CURSOR_COLOR_PROPERTY = '--grv-text-edit-cursor-color';
+const BACKGROUND_COLOR_PROPERTY = '--grut-text-edit-background-color';
+const COLOR_PROPERTY = '--grut-text-edit-color';
+const CURSOR_COLOR_PROPERTY = '--grut-text-edit-cursor-color';
 
 const PREFIX_KEY = 1;
 const CALLBACK_WITH_CLIPBOARD = 2;
@@ -536,7 +536,7 @@ const CLIPBOARD_CUT = 1;
 const CLIPBOARD_COPY = 2;
 const CLIPBOARD_PASTE = 3;
 
-class GrvText extends HTMLElement {
+class GrutText extends HTMLElement {
     constructor() {
         super();
 
@@ -1583,4 +1583,4 @@ class GrvText extends HTMLElement {
     }
 }
 
-customElements.define('grv-text', GrvText);
+customElements.define('grut-text', GrutText);
