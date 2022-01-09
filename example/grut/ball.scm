@@ -2,6 +2,7 @@
 (use graviton)
 (use graviton.grut)
 (use graviton.misc)
+(use text.console)
 
 (import-js ("https://cdn.skypack.dev/three" :as THREE))
 
@@ -78,8 +79,6 @@
     (let1 directionalLight (new THREE.DirectionalLight #xffffff 1.0)
       (directionalLight.position.set -1 0 1.7)
       (set! directionalLight.castShadow #t)
-      (set! directionalLight.shadow.mapSize.width 1024)
-      (set! directionalLight.shadow.mapSize.height 1024)
       (scene.add directionalLight))))
 
 (define (scene-add-field!)
@@ -137,16 +136,27 @@
     (set! renderer.shadowMap.enabled #t)
     (renderer.setAnimationLoop proc)))
 
+(define (update-text text)
+  (clear-screen text)
+  (when (equal? (~ audio-context'state) "suspended")
+    (putstr text "Hit any key to enable audio.")))
+
 (define (main args)
-  (with-window (make-canvas-window 1024 768 :background-color "black" :margin 0)
-      (canvas)
+  (with-window (grut-text+canvas-window 1024 768 :margin 0 :font-size "24px")
+      (text canvas)
     (on-jsevent window "keyup" (key)
       (when (equal? key "Escape")
         (grv-exit 0)))
+
+    (on-jsevent audio-context "statechange" ()
+      (update-text text))
 
     (setup-camera (/. (~ canvas'width) (~ canvas'height)))
     (setup-scene)
     (setup-renderer (let1 ball (make <ball>)
                       (lambda (t)
                         (update-ball-position! ball)
-                        (draw-ball ball))))))
+                        (draw-ball ball))))
+
+    (update-text text)))
+

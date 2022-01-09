@@ -51,7 +51,8 @@
           alist->style
 
           make-canvas-window
-          make-text-window))
+          make-text-window
+          grut-text+canvas-window))
 
 (select-module graviton.grut)
 
@@ -182,3 +183,46 @@
               :width window-width
               :height window-height
               :resizable? resizable?))
+
+(define (grut-text+canvas-window width height
+                                 :key
+                                 (text-id "text")
+                                 (canvas-id "canvas")
+                                 (column #f)
+                                 (row #f)
+                                 (font-size #f)
+                                 (title #f)
+                                 (color "white")
+                                 (background-color "black")
+                                 (margin #f)
+                                 (window-width #f)
+                                 (window-height #f)
+                                 (resizable? #t))
+  (let-values (((default-width default-height) (min-default-window-size)))
+    (let* ((window-width (or window-width
+                             (and window-height
+                                  (ceiling->exact (* window-height (/. width height))))
+                             (if (< (/ height default-height) (/ width default-width))
+                               (max width default-width)
+                               (ceiling->exact (* (max height default-height) (/. width height))))))
+           (window-height (or window-height
+                              (ceiling->exact (* window-width (/. height width))))))
+      (grv-window :body (html:body
+                         :style (alist->style `(("color" . ,color)
+                                                ("background-color" . ,background-color)
+                                                ("margin" . ,margin)))
+                         (html:canvas :id canvas-id :class "grut-contain" :width width :height height)
+                         (html:grv-text :id text-id
+                                        :class "grut-monospace-font grut-contain"
+                                        :column column
+                                        :row row
+                                        :style (alist->style `(("width" . "100%")
+                                                               ("height" . "100%")
+                                                               ("box-sizing" . "border-box")
+                                                               ("padding" . "5px")
+                                                               ("overflow-y" . "hidden")
+                                                               ("font-size" . ,font-size)))))
+                  :title title
+                  :width window-width
+                  :height window-height
+                  :resizable? resizable?))))
