@@ -39,3 +39,37 @@ export function registerOneShotEventHandler(obj, type, props, proc, useCapture) 
     };
     obj.addEventListener(type, eventHandler, useCapture);
 }
+
+/**
+ * animation frame
+ */
+
+let animationFrameServerCallbacks = [];
+let animationFrameHandleId;
+
+function handleAnimationFrame(timestamp) {
+    animationFrameServerCallbacks.forEach((callback) => {
+        callback(timestamp);
+    });
+    if (animationFrameServerCallbacks.length > 0) {
+        animationFrameHandleId = window.requestAnimationFrame(handleAnimationFrame);
+    }
+}
+
+export function requestAnimationFrameServerCallback(callback) {
+    animationFrameServerCallbacks.push(callback);
+    if (!animationFrameHandleId && animationFrameServerCallbacks.length > 0) {
+        animationFrameHandleId = window.requestAnimationFrame(handleAnimationFrame);
+    }
+}
+
+export function cancelAnimationFrameServerCallback(callback) {
+    const i = animationFrameServerCallbacks.findIndex(x => x === callback);
+    if (i >= 0) {
+        animationFrameServerCallbacks.splice(i, 1);
+    }
+    if (animationFrameServerCallbacks.length === 0) {
+        window.cancelAnimationFrame(animationFrameHandleId);
+        animationFrameHandleId = undefined;
+    }
+}

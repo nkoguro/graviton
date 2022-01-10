@@ -753,42 +753,6 @@ export function extractJSObjectProperties(obj, props) {
 }
 
 /**
- * animation frame
- */
-
-let animationFrameServerCallback;
-const animationFrameCallbacks = [];
-
-function handleAnimationFrame(timestamp) {
-    if (animationFrameServerCallback) {
-        animationFrameServerCallback(timestamp);
-        animationFrameServerCallback = undefined;
-    }
-
-    animationFrameCallbacks.forEach((callback) => {
-        callback(timestamp);
-    });
-
-    window.requestAnimationFrame(handleAnimationFrame);
-}
-
-export function requestAnimationFrameServerCallback(callback) {
-    animationFrameServerCallback = callback;
-}
-
-export function registerAnimationFrameCallback(callback) {
-    animationFrameCallbacks.push(callback);
-}
-
-export function unregisterAnimationFrameCallback(callback) {
-    const i = animationFrameCallbacks.findIndex((x) => x === callback);
-    if (i < 0) {
-        return;
-    }
-    animationFrameCallbacks.splice(i, 1);
-}
-
-/**
  * Open child window
  */
 let draggingWindow;
@@ -967,7 +931,3 @@ function startMoveWindow(event) {
     layer.addEventListener('touchend', endMoveWindow);
     layer.addEventListener('touchcancel', endMoveWindow);
 }
-
-window.addEventListener('load', () => {
-    window.requestAnimationFrame(handleAnimationFrame);
-});

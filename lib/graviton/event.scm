@@ -122,17 +122,16 @@
 
 (define-method jsevent-callback-delete! ((jsobj <jsobject>) event-type :key (use-capture? #f))
   (and-let1 callback (window-context-slot-atomic-ref 'jsevent-callback-table
-                      (lambda (tbl)
-                        (let1 key (list jsobj event-type)
-                          (begin0
-                              (hash-table-get tbl key #f)
-                            (hash-table-delete! tbl key)))))
+                       (lambda (tbl)
+                         (let1 key (list jsobj event-type)
+                           (begin0
+                               (hash-table-get tbl key #f)
+                             (hash-table-delete! tbl key)))))
     (jslet ((obj::object jsobj)
             (event-type::string)
             (callback)
             (use-capture?))
       (Event.unregisterEventHandler obj event-type callback use-capture?))
-    (unlink-callback callback)
     (undefined)))
 
 (define-method jsevent-callback-delete! ((jsobj-provider <jsobject-provider>) event-type :key (use-capture? #f))
@@ -173,49 +172,19 @@
         ((_ jsobj type (? list? arg-specs) body ...)
          (receive (args props) (parse-arg-specs arg-specs)
            (quasirename rename `(jsevent-callback-set! ,jsobj ,type ,props (lambda ,args ,@body)))))
-        ((_ jsobj (type ':use-capture? use-capture?) #f)
-         (quasirename rename `(jsevent-callback-delete! ,jsobj ,type ,:use-capture? ,use-capture?)))
-        ((_ jsobj type #f)
-         (quasirename rename `(jsevent-callback-delete! ,jsobj ,type)))
         (_
          (errorf "malformed on-jsevent: ~s" form))))))
 
-(define-window-context-slot animation-frame-callback #f)
+(define (request-animation-frame-callback! proc)
+  (jslet ((proc proc))
+    (Event.requestAnimationFrameServerCallback proc)))
 
-(define-method request-animation-frame-callback! ((callback <worker-callback>))
-  (let1 cur-callback (window-context-slot-ref 'animation-frame-callback)
-    (cond
-      ((and cur-callback (not (equal? cur-callback callback)))
-       ;; Need to unlink the current callback.
-       ;; Wait Graviton.requestAnimationFrameServerCallback intentionally to ensure removal of the current callback.
-       (jslet/await ((callback))
-         (respond (Graviton.requestAnimationFrameServerCallback callback)))
-       (unlink-callback cur-callback)
-       (window-context-slot-set! 'animation-frame-callback callback))
-      (else
-       (jslet ((callback))
-         (Graviton.requestAnimationFrameServerCallback callback))
-       (unless cur-callback
-         (window-context-slot-set! 'animation-frame-callback callback)))))
-  (undefined))
-
-(define-method request-animation-frame-callback! ((proc <procedure>))
-  (animation-frame-callback-set! (worker-callback proc)))
-
-(define (cancel-animation-frame-callback!)
-  (let1 cur-callback (window-context-slot-ref 'animation-frame-callback)
-    ;; Wait Graviton.requestAnimationFrameServerCallback intentionally to ensure removal of the current callback.
-    (jslet/await ()
-      (respond (Graviton.requestAnimationFrameServerCallback undefined)))
-    (when cur-callback
-      (unlink-callback cur-callback))
-    (window-context-slot-set! 'animation-frame-callback #f))
-  (undefined))
+(define (cancel-animation-frame-callback! proc)
+  (jslet ((proc proc))
+    (Event.requestAnimationFrameServerCallback proc)))
 
 (define-syntax on-repaint
   (syntax-rules (:priority)
-    ((_ #f)
-     (cancel-animation-frame-callback!))
     ((_ :priority priority (sec-per-frame) body ...)
      (let1 prev-time #f
        (letrec ((callback (worker-callback (lambda (cur-time)
@@ -223,7 +192,6 @@
                                                                    (/. (- cur-time prev-time) 1000)
                                                                    0)
                                                body ...)
-                                             (request-animation-frame-callback! callback)
                                              (set! prev-time cur-time))
                                            :priority priority)))
          (request-animation-frame-callback! callback))))
