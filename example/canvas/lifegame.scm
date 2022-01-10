@@ -6,7 +6,6 @@
 (define *width* 200)
 (define *height* 200)
 (define *init-density* 0.5)
-(define *interval* 0.05)
 
 (define (render-field ctx field)
   (set! (~ ctx'fill-style) "black")
@@ -63,10 +62,6 @@
         (dotimes (_ (round->exact (* (* *width* *height*) *init-density*)))
           (hash-table-put! field (cons (random-integer *width*) (random-integer *height*)) #t))
 
-        (let1 sec *interval*
-          (on-repaint (sec-per-frame)
-            (inc! sec sec-per-frame)
-            (when (< *interval* sec)
-              (render-field ctx field)
-              (set! field (compute-new-field field))
-              (set! sec 0))))))))
+        (on-animation-frame (t)
+          (render-field ctx field)
+          (set! field (compute-new-field field)))))))

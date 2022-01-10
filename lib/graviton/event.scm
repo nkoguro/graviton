@@ -54,7 +54,7 @@
           on-jsevent
           request-animation-frame-callback!
           cancel-animation-frame-callback!
-          on-repaint
+          on-animation-frame
 
           jsevent-await
           ))
@@ -183,20 +183,14 @@
   (jslet ((proc proc))
     (Event.requestAnimationFrameServerCallback proc)))
 
-(define-syntax on-repaint
+(define-syntax on-animation-frame
   (syntax-rules (:priority)
-    ((_ :priority priority (sec-per-frame) body ...)
+    ((_ :priority priority (t) body ...)
      (let1 prev-time #f
-       (letrec ((callback (worker-callback (lambda (cur-time)
-                                             (let1 sec-per-frame (if prev-time
-                                                                   (/. (- cur-time prev-time) 1000)
-                                                                   0)
-                                               body ...)
-                                             (set! prev-time cur-time))
-                                           :priority priority)))
+       (letrec ((callback (worker-callback (lambda (t) body ...) :priority priority)))
          (request-animation-frame-callback! callback))))
-    ((_ (sec-per-frame) body ...)
-     (on-repaint :priority #f (sec-per-frame) body ...))))
+    ((_ (t) body ...)
+     (on-animation-frame :priority #f (t) body ...))))
 
 (define (jsevent-await jsobj type prop-specs :key (use-capture? #f))
   (vector->list (jslet/await ((jsobj::object)
