@@ -1,10 +1,11 @@
 /* global HTMLSpanElement, customElements */
 'use strict';
 
-import { registerAnimationFrameCallback, logDebugMessage } from "/_g/graviton.mjs";
+import { logDebugMessage } from "/_g/graviton.mjs";
 import { copyTextToClipboard } from "/_g/grut/clipboard.mjs";
 
 const MAIN_CURSOR_ID = 'grut-main-cursor-id';
+
 class AttributedCharacter {
     constructor(attr, char) {
         this.attribute = attr;
@@ -346,10 +347,6 @@ class TextEditRefreshController {
                 grutText.requestUpdateRow(grutText.cursor.row);
             });
         });
-
-        registerAnimationFrameCallback((timestamp) => {
-            this.refresh();
-        });
     }
 
     register(textEdit) {
@@ -607,15 +604,26 @@ class GrutText extends HTMLElement {
         this.mouseEventCallback = undefined;
         this.pressingMouseButton = undefined;
 
+        this.refreshTimeoutId = undefined;
+
         this.refresh();
     }
 
     connectedCallback() {
-        textEditRefreshController.register(this);
+        this.focusChangeEventCallback = (e) => {
+            this.requestUpdateRow(this.cursor.row);
+        };
+        window.addEventListener('focus', this.focusChangeEventCallback);
+        window.addEventListener('blur', this.focusChangeEventCallback);
         this.updateStyle();
     }
 
     disconnectedCallback() {
+        if (this.focusChangeEventCallback) {
+            window.removeEventListener('focus', this.focusChangeEventCallback);
+            window.removeEventListener('blur', this.focusChangeEventCallback);
+            this.focusChangeEventCallback = undefined;
+        }
         textEditRefreshController.remove(this);
     }
 
@@ -790,12 +798,14 @@ class GrutText extends HTMLElement {
         rows.forEach((row) => {
             this.updatedRowSet.add(row);
         });
+        this.requestRefresh();
     }
 
     requestAllUpdate() {
         for (let i = 0; i < this.rows; ++i) {
             this.updatedRowSet.add(i);
         }
+        this.requestRefresh();
     }
 
     line(row = this.cursor.row) {
@@ -1361,6 +1371,8 @@ class GrutText extends HTMLElement {
     }
 
     refresh() {
+        this.refreshTimeoutId = undefined;
+
         if (this.updatedRowSet.size === 0) {
             return;
         }
@@ -1397,6 +1409,15 @@ class GrutText extends HTMLElement {
         if (isActive) {
             this.focus();
         }
+    }
+
+    requestRefresh() {
+        if (this.refreshTimeoutId) {
+            return;
+        }
+        this.refreshTimeoutId = window.setTimeout(() => {
+            this.refresh();
+        }, 0);
     }
 
     // Keyboard event
