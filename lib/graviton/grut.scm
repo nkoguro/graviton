@@ -41,6 +41,7 @@
 
   (extend graviton.grut.audio
           graviton.grut.clipboard
+          graviton.grut.speech
           graviton.grut.text)
 
   (export load-image
