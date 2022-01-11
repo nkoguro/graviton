@@ -62,6 +62,6 @@
         (dotimes (_ (round->exact (* (* *width* *height*) *init-density*)))
           (hash-table-put! field (cons (random-integer *width*) (random-integer *height*)) #t))
 
-        (on-animation-frame (t)
+        (on-animation-frame :priority 'low (t)
           (render-field ctx field)
           (set! field (compute-new-field field)))))))
