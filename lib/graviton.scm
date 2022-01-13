@@ -634,11 +634,15 @@
 
 (define *grv-config* #f)
 
+(define (player-exists?)
+  (file-is-executable? (graviton-config 'graviton-player-path)))
+
 (define (grv-config :key
                     (host "localhost")
                     (protocol "http")
-                    ;; TODO: Check graviton-player existence.
-                    (client 'player)
+                    (client (if (player-exists?)
+                              'player
+                              'browser))
                     (port (case client
                             ((browser)
                              8080)
@@ -688,18 +692,20 @@
          (player-path (graviton-config 'graviton-player-path))
          (stdout-filename (build-path (temporary-directory) (format "graviton-player.~a.out" (sys-getpid))))
          (stderr-filename (build-path (temporary-directory) (format "graviton-player.~a.err" (sys-getpid)))))
-    (let1 player-process (cond
-                           ((file-exists? player-path)
+    (let1 player-process (case (grv-config-parameter 'client)
+                           ((player)
                             (run-process `(,player-path "--config" ,config-file)
                                          :input :null
                                          :output stdout-filename
                                          :error stderr-filename))
-                           (else
+                           ((dev-player)
                             (run-process `("npx" "electron" "." "--config" ,config-file)
                                          :directory "./player/src"
                                          :input :null
                                          :output stdout-filename
-                                         :error stderr-filename)))
+                                         :error stderr-filename))
+                           (else
+                            (errorf "Invalid client: ~s" (grv-config-parameter 'client))))
       (thread-start! (make-thread (lambda ()
                                     (process-wait player-process)
                                     (let* ((status (process-exit-status player-process))
@@ -726,7 +732,8 @@
                         (if (absolute-path? filename)
                           filename
                           (simplify-path (build-path (current-directory) filename))))))
-    (if (graviton-config 'wsl)
+    (if (and (graviton-config 'wsl)
+             (eq? (grv-config-parameter 'client) 'player))
       (process-output->string `("wslpath" "-w" ,config-file))
       config-file)))
 
@@ -767,7 +774,7 @@
                  #f
                  "/"))
          (win-controller (make-window-controller path (~ win'page) thunk))
-         (use-player? (eq? (grv-config-parameter 'client) 'player))
+         (use-player? (memq (grv-config-parameter 'client) '(player dev-player)))
          (width (~ win'width))
          (height (~ win'height))
          (resizable? (~ win'resizable?)))
