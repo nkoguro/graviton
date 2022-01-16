@@ -126,16 +126,16 @@ class Oscillator {
         this.lengthSec = len;
         this.node = gain;
         this.starter = (startTime) => {
+            this.childStarters.forEach((starter) => starter(startTime));
             oscillator.start(startTime + delay);
             oscillator.stop(startTime + len);
-            this.childStarters.forEach((starter) => starter(startTime));
         };
     }
 }
 
 class OscillatorSoundlet {
-    constructor(freqSpec, waveSpec, detuneSpec, len, delay, release, depthSpec, panSpec) {
-        const osc = new Oscillator(freqSpec, waveSpec, detuneSpec, len, delay, depthSpec);
+    constructor(freqSpec, waveSpec, detuneSpec, len, margin, release, depthSpec, panSpec) {
+        const osc = new Oscillator(freqSpec, waveSpec, detuneSpec, len + release, 0, depthSpec);
         const stereoPanner = audioContext.createStereoPanner();
         osc.node.connect(stereoPanner).connect(audioContext.destination);
 
@@ -144,11 +144,11 @@ class OscillatorSoundlet {
             this.childStarters.push(...decorateAudioParam(stereoPanner.pan, panSpec, len + release));
         }
 
-        this.soundLength = osc.lengthSec;
-        this.soundTotalLength = osc.lengthSec + release;
+        this.soundLength = len + margin;
+        this.soundTotalLength = len + release + margin;
         this.starter = (startTime) => {
-            osc.starter(startTime);
             childStarters.forEach((starter) => starter(startTime));
+            osc.starter(startTime);
         };
     }
 
@@ -172,7 +172,7 @@ class ComposedSoundlet {
 let noiseBuffer = null;
 
 class NoiseSoundlet {
-    constructor(len, release, depthSpec, panSpec) {
+    constructor(len, margin, release, depthSpec, panSpec) {
         if (!noiseBuffer) {
             noiseBuffer = audioContext.createBuffer(2, audioContext.sampleRate, audioContext.sampleRate);
             for (let i = 0; i < 2; ++i) {
@@ -194,12 +194,12 @@ class NoiseSoundlet {
         childStarters.push(...decorateAudioParam(gain.gain, depthSpec, len + release));
         childStarters.push(...decorateAudioParam(stereoPanner.pan, panSpec, len + release));
 
-        this.soundLength = len;
-        this.soundTotalLength = len + release;
+        this.soundLength = len + margin;
+        this.soundTotalLength = len + margin + release;
         this.starter = (startTime) => {
-            bufferSource.start(startTime);
-            bufferSource.stop(startTime + this.soundTotalLength);
             childStarters.forEach((starter) => starter(startTime));
+            bufferSource.start(startTime);
+            bufferSource.stop(startTime + len + margin);
         };
     }
 

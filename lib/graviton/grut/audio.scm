@@ -32,6 +32,7 @@
 
 (define-module graviton.grut.audio
   (use gauche.collection)
+  (use gauche.sequence)
   (use gauche.uvector)
   (use graviton.async)
   (use graviton.jsffi)
@@ -189,6 +190,7 @@
          (%dots ($lift length ($many ($. "."))))
          (%note-length ($lift (^(x n) (* x (- 2 (expt 0.5 n)))) %note-base-length %dots))
          (%note-total-length ($lift (cut apply + <> <>) %note-length ($many ($seq ($. #[+^]) %note-length))))
+         (%slur ($or ($->symbol ($. "&")) ($->symbol ($. "^"))))
          (%rest ($->symbol ($. "r")))
          (%noise ($->symbol ($. "x")))
          (%tempo ($->symbol ($. "t")))
@@ -199,17 +201,20 @@
          (%volume ($->symbol ($. "v")))
          (%pan ($->symbol ($. "p")))
          (%note1 ($lift (^(x y) (if y (+ x y) x)) %stem ($optional %accidental))))
-    ($or ($lift (lambda (rels len eos)
-                  (list (map-accum (lambda (rel prev)
-                                     (let1 r (if (< rel prev)
-                                               (+ rel 12)
-                                               rel)
-                                       (values r r)))
-                                   0
-                                   rels)
-                        len
-                        eos))
-                ($many %note1 1) ($optional %note-total-length) ($eos))
+    ($or ($lift (lambda (rels+len-list eos)
+                  (cons 'note-seq (map (match-lambda
+                                         ((rels len)
+                                          (list (values-ref (map-accum (lambda (rel prev)
+                                                                         (let1 r (if (< rel prev)
+                                                                                   (+ rel 12)
+                                                                                   rel)
+                                                                           (values r r)))
+                                                                       0
+                                                                       rels)
+                                                            0)
+                                                len)))
+                                       rels+len-list)))
+                ($sep-by ($list ($many %note1 1) ($optional %note-total-length)) %slur) ($eos))
          ($lift list %rest ($optional %note-total-length) ($eos))
          ($lift list %noise ($optional %note-total-length) ($eos))
          ($lift list %tempo %number ($eos))
@@ -230,25 +235,34 @@
          (stereo-pan (assq-ref env 'stereo-pan 0))
          (envelope (assq-ref env 'envelope (lambda (vol len) vol)))
          (release (assq-ref env 'release 0))
-         (detune (assq-ref env 'detune 0)))
+         (detune (assq-ref env 'detune 0))
+         (gate/step (assq-ref env 'gate/step (/. 7 8))))
     (match (peg-parse-string %note (symbol->string note))
-      (((note-rels ...) len-mag _)
-       (let1 len (* length-unit (or len-mag default-mag))
-         `((chord ,@(map (lambda (rel)
-                           `(note ,(+ note-offset rel)
-                                  ,wave-form
-                                  ,detune
-                                  ,len
-                                  0
-                                  ,release
-                                  ,(envelope volume len)
-                                  ,stereo-pan))
-                         note-rels)))))
+      (('note-seq notes+len ...)
+       (map-with-index (match-lambda*
+                         ((i ((note-rels ...) len-mag))
+                          (let* ((len (* length-unit (or len-mag default-mag)))
+                                 (gate/step (if (= i (- (length notes+len) 1))
+                                              gate/step
+                                              1))
+                                 (gate-len (* len gate/step)))
+                            `(chord ,@(map (lambda (rel)
+                                             `(note ,(+ note-offset rel)
+                                                    ,wave-form
+                                                    ,detune
+                                                    ,gate-len
+                                                    ,(- len gate-len)
+                                                    ,release
+                                                    ,(envelope volume gate-len)
+                                                    ,stereo-pan))
+                                           note-rels)))))
+                       notes+len))
       (('r len-mag _)
        `((rest ,(* length-unit (or len-mag default-mag)))))
       (('x len-mag _)
-       (let1 len (* length-unit (or len-mag default-mag))
-         `((noise ,len ,release ,(envelope volume len) ,stereo-pan))))
+       (let* ((len (* length-unit (or len-mag default-mag)))
+              (gate-len (* len gate/step)))
+         `((noise ,gate-len ,(- len gate-len) ,release ,(envelope volume len) ,stereo-pan))))
       (('t tempo _)
        `(:tempo ,tempo))
       (('l len _)
@@ -266,6 +280,8 @@
       (_
        (errorf "Invalid note: ~a" note)))))
 
+(debug-print-width #f)
+
 (define (parse-mml env expr)
   (let loop ((env '())
              (expr expr)
@@ -273,7 +289,7 @@
     (match expr
       (()
        (list->vector (reverse sound-data-list)))
-      ((('oscillator freq-spec wave-form detune-spec len delay release depth-spec pan-spec) rest ...)
+      ((('oscillator freq-spec wave-form detune-spec len margin release depth-spec pan-spec) rest ...)
        (loop env
              rest
              (cons (vector OSCILLATOR-SOUND
@@ -281,12 +297,12 @@
                            (parse-wave-form wave-form)
                            (parse-control detune-spec)
                            len
-                           delay
+                           margin
                            release
                            (parse-control depth-spec)
                            (parse-control pan-spec))
                    sound-data-list)))
-      ((('note note-spec wave-form detune-spec len delay release depth-spec pan-spec) rest ...)
+      ((('note note-spec wave-form detune-spec len margin release depth-spec pan-spec) rest ...)
        (loop env
              rest
              (cons (vector OSCILLATOR-SOUND
@@ -294,15 +310,15 @@
                            (parse-wave-form wave-form)
                            (parse-control detune-spec)
                            len
-                           delay
+                           margin
                            release
                            (parse-control depth-spec)
                            (parse-control pan-spec))
                    sound-data-list)))
-      ((('noise len release depth-spec pan-spec) rest ...)
+      ((('noise len margin release depth-spec pan-spec) rest ...)
        (loop env
              rest
-             (cons (vector NOISE-SOUND len release depth-spec pan-spec)
+             (cons (vector NOISE-SOUND len margin release depth-spec pan-spec)
                    sound-data-list)))
       ((('chord (and soundlets ((or 'oscillator 'note 'noise) _ ...)) ...) rest ...)
        (loop env
@@ -315,6 +331,11 @@
        (loop env
              rest
              (cons (vector REST-SOUND len) sound-data-list)))
+      ((('begin expr ...) rest ...)
+       (loop env
+             rest
+             (append (reverse (vector->list (parse-mml env expr)))
+                     sound-data-list)))
 
       ((':tempo tempo rest ...)
        (loop (assq-set! env 'tempo tempo)
@@ -348,9 +369,9 @@
       ((':adsr (attack decay sustain release) rest ...)
        (loop (list* `(envelope . ,(lambda (vol len)
                                     `(:set-value-at-time (0 0)
-                                                         :linear-ramp-to-value-at-time (,vol ,attack)
-                                                         :linear-ramp-to-value-at-time (,(* sustain vol) ,(+ attack decay))
-                                                         :linear-ramp-to-value-at-time (0 ,(+ len release)))))
+                                      :linear-ramp-to-value-at-time (,vol ,attack)
+                                      :linear-ramp-to-value-at-time (,(* sustain vol) ,(+ attack decay))
+                                      :linear-ramp-to-value-at-time (0 ,(+ len release)))))
                     `(release . ,release)
                     env)
              rest
@@ -361,6 +382,10 @@
              sound-data-list))
       ((':detune d rest ...)
        (loop (assq-set! env 'detune d)
+             rest
+             sound-data-list))
+      ((':gate/step v rest ...)
+       (loop (assq-set! env 'gate/step v)
              rest
              sound-data-list))
       (((? (^x (and (symbol? x) (not (keyword? x)))) note) rest ...)
