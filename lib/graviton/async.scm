@@ -56,7 +56,6 @@
           worker-wait
           all-workers
           worker-submit-task
-          worker-yield!
           run-concurrent
           parallel
           parallel/async
@@ -579,14 +578,15 @@
 
 (define (asleep time-or-sec)
   (shift-callback callback
-    (apply scheduler-add! callback
-           (cond
-             ((time? time-or-sec)
-              (list :at time-or-sec))
-             ((real? time-or-sec)
-              (list :after time-or-sec))
-             (else
-              (errorf "<time> or <real> required, but got ~s" time-or-sec))))))
+    (cond
+      ((time? time-or-sec)
+       (scheduler-add! callback :at time-or-sec))
+      ((and (real? time-or-sec) (zero? time-or-sec))
+       (worker-submit-task (~ callback'worker) (~ callback'procedure) :priority (~ callback'priority)))
+      ((real? time-or-sec)
+       (scheduler-add! callback :after time-or-sec))
+      (else
+       (errorf "<time> or <real> required, but got ~s" time-or-sec)))))
 
 ;;;
 
