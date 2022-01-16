@@ -63,7 +63,6 @@
           window
 
           <screen>
-          <event>
           <blob>
           <html-media-element>
           <html-audio-element>

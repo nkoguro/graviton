@@ -47,8 +47,6 @@
   (export load-image
           load-audio
 
-          copy-text-to-clipboard
-
           alist->style
 
           grut-canvas-window
