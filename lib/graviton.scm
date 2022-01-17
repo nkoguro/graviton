@@ -74,9 +74,7 @@
 
   (extend graviton.async graviton.browser-objects graviton.event graviton.canvas graviton.audio)
 
-  (export grv-exit
-
-          grv-start-player
+  (export grv-start-player
           grv-start-server
 
           grv-title
