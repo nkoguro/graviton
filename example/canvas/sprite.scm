@@ -91,7 +91,7 @@
         (canvas)
       (on-jsevent window "keyup" (key)
         (when (equal? key "Escape")
-          (grv-exit 0)))
+          (close-window)))
 
       (let ((sprite (document'create-element "canvas"))
             (balls (list-ec (: i *num-sprites*)

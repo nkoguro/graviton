@@ -6,7 +6,7 @@
       (text)
     (on-jsevent window "keyup" (key)
       (when (equal? key "Escape")
-        (grv-exit 0)))
+        (close-window)))
 
     (let1 voice (query-voice :default #t)
       (format text "Type ~atext message. Press ESC to exit.\n" (if voice #"~(~ voice'lang) " ""))

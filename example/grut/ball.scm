@@ -146,7 +146,7 @@
       (text canvas)
     (on-jsevent window "keyup" (key)
       (when (equal? key "Escape")
-        (grv-exit 0)))
+        (close-window)))
 
     (on-jsevent audio-context "statechange" ()
       (update-text text))

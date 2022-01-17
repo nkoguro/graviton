@@ -7,4 +7,4 @@
     ;; Waits for a keyup event.
     (jsevent-await window "keyup" ())
     ;; Closes this window if possible.
-    (grv-exit 0)))
+    (close-window)))
