@@ -69,27 +69,29 @@
               snake)))
 
 (define (move-snake state)
-  (set! (~ state'snake)
-        (let* ((field (~ state'field))
-               (snake (~ state'snake))
-               (snake-body snake)
-               (snake-head (car snake))
-               (x (+ (car snake-head) (~ state'dx)))
-               (y (+ (cdr snake-head) (~ state'dy)))
-               (new-head (cons x y)))
-          (case (field-get field x y)
-            ((wall body)
-             (play-beep 100 0.1)
-             (scene-change state 'gameover)
-             (cons new-head (drop-right snake-body 1)))
-            ((food)
-             (inc! (~ state'score) 10)
-             (play-beep 2000 0.05)
-             (put-food state)
-             (cons new-head snake-body))
-            (else
-             (cons new-head (drop-right snake-body 1))))))
-  (draw-snake state))
+  (let1 hit? #f
+    (set! (~ state'snake)
+          (let* ((field (~ state'field))
+                 (snake (~ state'snake))
+                 (snake-body snake)
+                 (snake-head (car snake))
+                 (x (+ (car snake-head) (~ state'dx)))
+                 (y (+ (cdr snake-head) (~ state'dy)))
+                 (new-head (cons x y)))
+            (case (field-get field x y)
+              ((wall body)
+               (play-beep 100 0.1)
+               (set! hit? #t)
+               (cons new-head (drop-right snake-body 1)))
+              ((food)
+               (inc! (~ state'score) 10)
+               (play-beep 2000 0.05)
+               (put-food state)
+               (cons new-head snake-body))
+              (else
+               (cons new-head (drop-right snake-body 1))))))
+    (draw-snake state)
+    hit?))
 
 (define (put-food state)
   (let1 field (~ state'field)
@@ -164,7 +166,7 @@
    (dx :init-value -1)
    (dy :init-value 0)
    (score :init-value 0)
-   (scene :init-value 'title)
+   (scene :init-value 'start)
    (text :init-keyword :text)))
 
 (define (init-game state)
@@ -199,11 +201,11 @@
     (match (and (chready? text)
                 (getch text))
       (#f
-       #f)
+       'title)
       (#\x1b
        (close-window))
       (_
-       (scene-change state 'game)))))
+       'game))))
 
 (define (scene-game state)
   (let ((field (~ state'field))
@@ -234,29 +236,35 @@
        (close-window))
       (_
        #f))
-    (move-snake state)
-
-    (render state)))
+    (let1 hit? (move-snake state)
+      (render state)
+      (if hit?
+        'gameover
+        'game))))
 
 (define (scene-gameover state)
   (let1 text (~ state'text)
     (match (and (chready? text)
                 (getch text))
       (#f
-       #f)
+       'gameover)
       (#\x1b
        (close-window))
       (_
-       (scene-change state 'game)))))
+       'game))))
 
 (define (scene-dispatch state)
-  (case (~ state'scene)
-    ((title)
-     (scene-title state))
-    ((game)
-     (scene-game state))
-    ((gameover)
-     (scene-gameover state))))
+  (let1 next-scene (case (~ state'scene)
+                     ((start)
+                      'title)
+                     ((title)
+                      (scene-title state))
+                     ((game)
+                      (scene-game state))
+                     ((gameover)
+                      (scene-gameover state)))
+    (unless (eq? (~ state'scene) next-scene)
+      (scene-change state next-scene))))
 
 (define *interval-sec* 0.2)
 
@@ -273,7 +281,6 @@
                    :height 600)
         (text)
       (let1 state (make <game-state> :text text)
-        (scene-change state 'title)
         (call-with-console text
           (lambda (con)
             (while #t
