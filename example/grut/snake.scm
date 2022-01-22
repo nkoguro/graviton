@@ -33,6 +33,13 @@
   (hash-table-clear! (~ field'object-table))
   (hash-table-clear! (~ field'update-table)))
 
+(define (field-all-update! field)
+  (let ((obj-tbl (~ field'object-table))
+        (upd-tbl (~ field'update-table)))
+    (hash-table-clear! upd-tbl)
+    (hash-table-for-each obj-tbl (lambda (key obj) (hash-table-put! upd-tbl key obj)))
+    (hash-table-clear! obj-tbl)))
+
 (define (field-updates-for-each field proc)
   (let ((obj-tbl (~ field'object-table))
         (upd-tbl (~ field'update-table)))
@@ -81,6 +88,7 @@
             (case (field-get field x y)
               ((wall body)
                (play-beep 100 0.1)
+               (wait-all-tracks)
                (set! hit? #t)
                (cons new-head (drop-right snake-body 1)))
               ((food)
@@ -188,9 +196,18 @@
       ((title)
        (show-title text))
       ((game)
-       (init-game state))
+       (init-game state)
+       (show-string-in-center text "START !!" 8)
+       (play-mml :main '(t180 :adsr (0 0 1 0.01) dbg r8 b16 r16 > g r8 < b16 r16 > g16 r16 < b16 r16 > g16 r16 b16 r16 > d r4
+                              c r8 < a16 r16 > c r8 < a16 r16 > c16 r16 < a16 r16 f+16 r16 a16 r16 < b r8))
+       (wait-all-tracks)
+       (field-all-update! (~ state'field))
+       (clear-screen text)
+       (render state))
       ((gameover)
-       (show-gameover text))
+       (show-gameover text)
+       (play-mml :main '(t120 :adsr (0 0 1 0.01) < b- b-8. b-16 b- > d-8. c16 c8. < b-16 b-8. b-16 b-2))
+       (wait-all-tracks))
       (else
        #f))
 
