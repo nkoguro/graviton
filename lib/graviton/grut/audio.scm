@@ -200,6 +200,7 @@
          (%octave-- ($->symbol ($. "<")))
          (%volume ($->symbol ($. "v")))
          (%pan ($->symbol ($. "p")))
+         (%gate ($->symbol ($. "q")))
          (%note1 ($lift (^(x y) (if y (+ x y) x)) %stem ($optional %accidental))))
     ($or ($lift (lambda (rels+len-list eos)
                   (cons 'note-seq (map (match-lambda
@@ -223,6 +224,7 @@
          ($lift list %octave++ ($eos))
          ($lift list %octave-- ($eos))
          ($lift list %pan %number)
+         ($lift list %gate %number)
          ($lift list %volume %number ($eos)))))
 
 (define (parse-note env note)
@@ -277,6 +279,8 @@
        `(:octave ,(- octave 1)))
       (('p pan)
        `(:stereo-pan ,pan))
+      (('q gate/step)
+       `(:gate/step ,gate/step))
       (_
        (errorf "Invalid note: ~a" note)))))
 
