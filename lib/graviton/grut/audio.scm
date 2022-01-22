@@ -375,6 +375,7 @@
                                     `(:set-value-at-time (0 0)
                                       :linear-ramp-to-value-at-time (,vol ,attack)
                                       :linear-ramp-to-value-at-time (,(* sustain vol) ,(+ attack decay))
+                                      :set-value-at-time (,(* sustain vol) ,len)
                                       :linear-ramp-to-value-at-time (0 ,(+ len release)))))
                     `(release . ,release)
                     env)
