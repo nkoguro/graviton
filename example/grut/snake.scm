@@ -289,16 +289,10 @@
   (let-args (cdr args) ((use-browser? "b|browser" #f))
     (grv-config :client (if use-browser? 'browser 'player))
 
-    (with-window (grv-window
-                   :body
-                   (html:body
-                    :style "background-color: black; color: white"
-                    (html:grut-text :id "text" :column *text-width* :row *text-height* :class "grut-monospace-font grut-fill"))
-                   :width 600
-                   :height 600)
-        (text)
-      (let1 state (make <game-state> :text text)
-        (call-with-console text
+    (with-window (grut-text-window :column *text-width* :row *text-height* :fit 'fill :window-width 600 :window-height 600)
+        (text-console)
+      (let1 state (make <game-state> :text text-console)
+        (call-with-console text-console
           (lambda (con)
             (while #t
               (scene-dispatch state)

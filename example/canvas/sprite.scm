@@ -87,7 +87,7 @@
                           'browser
                           'player))
 
-    (with-window (grut-canvas-window *canvas-width* *canvas-height* :background-color "black" :margin 0)
+    (with-window (grut-canvas-window *canvas-width* *canvas-height* :background-color "black")
         (canvas)
       (on-jsevent window "keyup" (key)
         (when (equal? key "Escape")

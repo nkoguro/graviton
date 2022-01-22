@@ -142,7 +142,7 @@
     (putstr text-console "Hit any key to enable audio.")))
 
 (define (main args)
-  (with-window (grut-text+canvas-window 1024 768 :margin 0 :font-size "24px")
+  (with-window (grut-text+canvas-window 1024 768 :font-size "24px" :padding "5px")
       (text-console canvas)
     (on-jsevent window "keyup" (key)
       (when (equal? key "Escape")

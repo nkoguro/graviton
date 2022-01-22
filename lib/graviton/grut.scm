@@ -120,16 +120,29 @@
     (else
      (values *min-default-window-width* *min-default-window-height*))))
 
+(define (fit->css-name fit-type)
+  (case fit-type
+    ((contain)
+     "grut-contain")
+    ((cover)
+     "grut-cover")
+    ((fill)
+     "grut-fill")
+    ((none)
+     "grut-none")
+    (else
+     (errorf "Invalid fit type: ~s" fit-type))))
+
 (define (grut-canvas-window width height
                             :key
                             (id "canvas")
                             (title #f)
                             (color #f)
                             (background-color #f)
-                            (margin #f)
                             (window-width #f)
                             (window-height #f)
-                            (resizable? #t))
+                            (resizable? #t)
+                            (fit 'contain))
   (let-values (((default-width default-height) (min-default-window-size)))
     (let* ((window-width (or window-width
                              (and window-height
@@ -142,13 +155,12 @@
       (grv-window :body (html:body
                          :style (alist->style `(("color" . ,color)
                                                 ("background-color" . ,background-color)
-                                                ("margin" . ,margin)))
-                         (html:canvas :id id :class "grut-contain" :width width :height height))
+                                                ("margin" . 0)))
+                         (html:canvas :id id :class (fit->css-name fit) :width width :height height))
                   :title title
                   :width window-width
                   :height window-height
                   :resizable? resizable?))))
-
 
 (define (grut-text-window :key
                           (id "text-console")
@@ -158,25 +170,28 @@
                           (font-size #f)
                           (color "white")
                           (background-color "black")
-                          (margin #f)
                           (window-width #f)
                           (window-height #f)
-                          (resizable? #t))
+                          (resizable? #t)
+                          (fit 'contain)
+                          (scrollbar? #f)
+                          (padding #f))
   (grv-window :body (html:body
                      :style (alist->style `(("color" . ,color)
                                             ("background-color" . ,background-color)
-                                            ("margin" . "0")
-                                            ("overflow-y" . "none")
-                                            ("margin" . ,margin)))
+                                            ("margin" . 0)
+                                            ("overflow-y" . "hidden")))
                      (html:grut-text :id id
-                                     :class "grut-monospace-font grut-contain"
+                                     :class (string-join (list "grut-monospace-font" (fit->css-name fit)) " ")
                                      :column column
                                      :row row
                                      :style (alist->style `(("width" . "100%")
                                                             ("height" . "100%")
                                                             ("box-sizing" . "border-box")
-                                                            ("padding" . "5px")
-                                                            ("overflow-y" . "scroll")
+                                                            ("padding" . ,padding)
+                                                            ("overflow-y" . ,(if scrollbar?
+                                                                               "scroll"
+                                                                               "hidden"))
                                                             ("font-size" . ,font-size)))))
               :title title
               :width window-width
@@ -193,10 +208,12 @@
                                  (title #f)
                                  (color "white")
                                  (background-color "black")
-                                 (margin #f)
                                  (window-width #f)
                                  (window-height #f)
-                                 (resizable? #t))
+                                 (resizable? #t)
+                                 (fit 'contain)
+                                 (scrollbar? #f)
+                                 (padding #f))
   (let-values (((default-width default-height) (min-default-window-size)))
     (let* ((window-width (or window-width
                              (and window-height
@@ -209,17 +226,20 @@
       (grv-window :body (html:body
                          :style (alist->style `(("color" . ,color)
                                                 ("background-color" . ,background-color)
-                                                ("margin" . ,margin)))
-                         (html:canvas :id canvas-id :class "grut-contain" :width width :height height)
+                                                ("margin" . 0)
+                                                ("overflow-y" . "hidden")))
+                         (html:canvas :id canvas-id :class (fit->css-name fit) :width width :height height)
                          (html:grut-text :id text-id
-                                         :class "grut-monospace-font grut-contain"
+                                         :class (string-join (list "grut-monospace-font" (fit->css-name fit)) " ")
                                          :column column
                                          :row row
                                          :style (alist->style `(("width" . "100%")
                                                                 ("height" . "100%")
                                                                 ("box-sizing" . "border-box")
-                                                                ("padding" . "5px")
-                                                                ("overflow-y" . "hidden")
+                                                                ("padding" . ,padding)
+                                                                ("overflow-y" . ,(if scrollbar?
+                                                                                   "scroll"
+                                                                                   "hidden"))
                                                                 ("font-size" . ,font-size)))))
                   :title title
                   :width window-width

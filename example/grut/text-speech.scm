@@ -2,7 +2,7 @@
 (use graviton.grut)
 
 (define (main args)
-  (with-window (grut-text-window)
+  (with-window (grut-text-window :padding "5px" :scrollbar? #t)
       (text-console)
     (on-jsevent window "keyup" (key)
       (when (equal? key "Escape")
