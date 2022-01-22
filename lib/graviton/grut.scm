@@ -151,7 +151,7 @@
 
 
 (define (grut-text-window :key
-                          (id "text")
+                          (id "text-console")
                           (title #f)
                           (column #f)
                           (row #f)
@@ -185,7 +185,7 @@
 
 (define (grut-text+canvas-window width height
                                  :key
-                                 (text-id "text")
+                                 (text-id "text-console")
                                  (canvas-id "canvas")
                                  (column #f)
                                  (row #f)

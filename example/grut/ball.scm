@@ -136,20 +136,20 @@
     (set! renderer.shadowMap.enabled #t)
     (renderer.setAnimationLoop proc)))
 
-(define (update-text text)
-  (clear-screen text)
+(define (update-text text-console)
+  (clear-screen text-console)
   (when (equal? (~ audio-context'state) "suspended")
-    (putstr text "Hit any key to enable audio.")))
+    (putstr text-console "Hit any key to enable audio.")))
 
 (define (main args)
   (with-window (grut-text+canvas-window 1024 768 :margin 0 :font-size "24px")
-      (text canvas)
+      (text-console canvas)
     (on-jsevent window "keyup" (key)
       (when (equal? key "Escape")
         (close-window)))
 
     (on-jsevent audio-context "statechange" ()
-      (update-text text))
+      (update-text text-console))
 
     (setup-camera (/. (~ canvas'width) (~ canvas'height)))
     (setup-scene)
@@ -158,5 +158,5 @@
                         (update-ball-position! ball)
                         (draw-ball ball))))
 
-    (update-text text)))
+    (update-text text-console)))
 
