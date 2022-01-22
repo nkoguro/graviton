@@ -74,6 +74,8 @@
           scheduler-add!
           scheduler-delete!
           asleep
+          ayield
+          abandon
           main-worker
           grv-worker
           worker-event-loop-hook
@@ -587,6 +589,21 @@
        (scheduler-add! callback :after time-or-sec))
       (else
        (errorf "<time> or <real> required, but got ~s" time-or-sec)))))
+
+(define *prev-yield-sec* (make-window-parameter 0))
+
+(define (ayield :optional sec)
+  (cond
+    ((undefined? sec)
+     (asleep 0))
+    (else
+     (let1 cur-sec (now-seconds)
+       (when (< sec (- cur-sec (*prev-yield-sec*)))
+         (set! (*prev-yield-sec*) cur-sec)
+         (asleep 0))))))
+
+(define (abandon)
+  (shift-callback callback #f))
 
 ;;;
 
