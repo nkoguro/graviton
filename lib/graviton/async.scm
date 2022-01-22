@@ -74,8 +74,7 @@
           scheduler-add!
           scheduler-delete!
           asleep
-          ayield
-          abandon
+          when-time-passed
           main-worker
           grv-worker
           worker-event-loop-hook
@@ -590,17 +589,18 @@
       (else
        (errorf "<time> or <real> required, but got ~s" time-or-sec)))))
 
-(define *prev-yield-sec* (make-window-parameter 0))
-
-(define (ayield :optional sec)
-  (cond
-    ((undefined? sec)
-     (asleep 0))
-    (else
-     (let1 cur-sec (now-seconds)
-       (when (< sec (- cur-sec (*prev-yield-sec*)))
-         (set! (*prev-yield-sec*) cur-sec)
-         (asleep 0))))))
+(define-syntax when-time-passed
+  (er-macro-transformer
+    (lambda (form rename id=?)
+      (match form
+        ((_ sec body ...)
+         (let1 prev-sec-box (box 0)
+           (quasirename rename `(let1 cur-sec (,now-seconds)
+                                  (when (<= ,sec (- cur-sec (unbox ,prev-sec-box)))
+                                    (set-box! ,prev-sec-box cur-sec)
+                                    ,@body)))))
+        (_
+         (errorf "malformed when-time-passed: ~s" form))))))
 
 (define (abandon)
   (shift-callback callback #f))

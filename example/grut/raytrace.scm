@@ -59,7 +59,8 @@
               (set! (~ ctx'fill-style) (format "rgb(~a,~a,~a)" r g b))
               (set! fill-color color-name)))
           (ctx'fill-rect (round->exact (* (+ x 50) x-res)) (round->exact (* (+ y 50) y-res)) 2 2)
-          (ayield 0.1))))))
+          (when-time-passed 0.1
+            (asleep 0)))))))
 
 (define (color-at x y)
   (receive (xr yr zr) (unit-vector (- x (x-of eye)) (- y (y-of eye)) (- 0 (z-of eye)))
