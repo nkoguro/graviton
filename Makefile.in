@@ -50,7 +50,9 @@ clean:
 	rm -rf core $(TARGET) $(GENERATED) *~ test.log
 
 distclean: clean
+	(cd player; make distclean)
 	rm -rf $(CONFIG_GENERATED)
 
 maintainer-clean: clean
+	(cd player; make maintainer-clean)
 	rm -rf $(CONFIG_GENERATED) VERSION

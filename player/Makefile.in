@@ -1,4 +1,4 @@
-.PHONY: build-all zip-all build install clean
+.PHONY: build-all zip-all build install clean distclean maintainer-clean
 
 PLATFORM_ARCHS := win32-x64 win32-ia32 darwin-x64 linux-x64 linux-armv7l linux-arm64
 DEFAULT_PLATFORM_ARCH := @GRAVITON_PLAYER_ARCH@
@@ -16,6 +16,9 @@ define player-template
 .PHONY: build-$(1)
 
 .build-$(1).done: $(SRCS)
+	if [ ! -d src/node_modules ]; then \
+	  (cd src; npm ci) \
+	fi
 	(cd src; npx electron-packager . graviton-player --platform=$(word 1,$(subst -, ,$(1))) --arch=$(word 2,$(subst -, ,$(1))) --out=.. --verbose --overwrite)
 	touch .build-$(1).done
 
@@ -44,3 +47,9 @@ install: build
 
 clean:
 	rm -Rf graviton-player-* .build-*.done
+
+distclean:
+	rm -Rf src/node_modules
+
+maintainer-clean: clean
+	rm -Rf src/node_modules
