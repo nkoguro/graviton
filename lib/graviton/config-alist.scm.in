@@ -1,6 +1,8 @@
 (define *config-alist*
   `(
     (prefix . "@prefix@")
+    (exec_prefix . "@exec_prefix@")
+    (libdir . "@libdir@")
     (datarootdir . "@datarootdir@")
     (datadir . "@datadir@")
 
@@ -11,9 +13,10 @@
                 (else
                  wsl))))
 
+    (graviton-lib-dir . "${libdir}/graviton")
     (graviton-data-dir . "${datadir}/graviton")
     (graviton-player-arch . "@GRAVITON_PLAYER_ARCH@")
     (graviton-player-executable . "@GRAVITON_PLAYER_EXECUTABLE@")
     (graviton-player-install-dir . "@GRAVITON_PLAYER_INSTALL_DIR@")
     (graviton-player-path . "${graviton-player-install-dir}/graviton-player-${graviton-player-arch}/${graviton-player-executable}")
-    ))
+    (graviton-js-dir . "${graviton-data-dir}/js")))

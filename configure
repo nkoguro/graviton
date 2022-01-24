@@ -53,7 +53,7 @@
                                                                      "gauche-graviton")))
                                        player-path))
                                  (current-directory curdir))))
-                           "${graviton-data-dir}/player"))))
+                           "${graviton-lib-dir}/player"))))
 
 ;; Initialize configure.  This creates the global context, parses
 ;; command-line args and sets up default values.
@@ -89,7 +89,7 @@
             (wsl
              "graviton-player.exe")
             (else
-             (string-join (list "graviton-player" (gauche-config "--executable-suffix")) "."))))
+             (string-join (delete "" (list "graviton-player" (gauche-config "--executable-suffix"))) "."))))
 
 ;; Output
 (cf-output-default "lib/graviton/config-alist.scm"

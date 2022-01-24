@@ -61,12 +61,12 @@
      val)))
 
 (define (graviton-config param)
-  (cond
-    ((and (equal? param 'graviton-data-dir)
-          (not *graviton-installed?*))
-     *graviton-top-dir*)
-    (else
-     (replace-param (assoc-ref *config-alist* param)))))
+  (replace-param (assoc-ref *config-alist* param)))
 
 (define (graviton-js-directory)
-  (build-path (graviton-config 'graviton-data-dir) "js"))
+  (cond
+    ((not *graviton-installed?*)
+     ;; To use js/ in the repository.
+     (build-path *graviton-top-dir* "js"))
+    (else
+     (graviton-config 'graviton-js-dir))))

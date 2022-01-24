@@ -8,7 +8,7 @@ ZIP_TARGETS :=
 
 SRCS := src/main.js src/renderer.js
 
-PLAYER_INSTALL_DIR := @GRAVITON_PLAYER_INSTALL_DIR@
+PLAYER_INSTALL_DIR := $(shell gosh -I ../lib -ugraviton.config -e "(print (graviton-config 'graviton-player-install-dir)) (exit 0)")
 
 .DEFAULT_GOAL := build
 
