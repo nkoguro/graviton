@@ -41,7 +41,9 @@ GAUCHE_PKGARCHDIR = "$(DESTDIR)@GAUCHE_PKGARCHDIR@"
 .PHONY: all clean distclean maintainer-clean
 
 all:
-	(cd player; make build-$(GRAVITON_PLAYER_ARCH))
+
+install-player:
+	(cd player; make install)
 
 clean:
 	(cd player; make clean)
