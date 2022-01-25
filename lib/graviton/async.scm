@@ -368,7 +368,7 @@
      (add-message-handler! 'message (lambda (arg ...) body ...)))
     ((_ message args :priority priority body ...)
      (add-message-handler! 'message (lambda args body ...) :priority priority))
-    ((_ messag args body ...)
+    ((_ message args body ...)
      (add-message-handler! 'message (lambda args body ...)))))
 
 (define-class <worker-callback> ()
