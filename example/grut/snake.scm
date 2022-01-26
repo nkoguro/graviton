@@ -198,15 +198,15 @@
       ((game)
        (init-game state)
        (show-string-in-center text "START !!" 8)
-       (play-mml :main '(t180 :adsr (0 0 1 0.01) dbg r8 b16 r16 > g r8 < b16 r16 > g16 r16 < b16 r16 > g16 r16 b16 r16 > d r4
-                              c r8 < a16 r16 > c r8 < a16 r16 > c16 r16 < a16 r16 f+16 r16 a16 r16 < b r8))
+       (play-mml :main '(t180 v0.4 :adsr (0 0 1 0.01) dbg r8 > d16 r16 g r8 d16 r16 g16 r16 d16 r16 g16 r16 b16 r16 > d r4
+                              c r8 < a16 r16 > c r8 < a16 r16 > c16 r16 < a16 r16 f+16 r16 a16 r16 d r8))
        (wait-all-tracks)
        (field-all-update! (~ state'field))
        (clear-screen text)
        (render state))
       ((gameover)
        (show-gameover text)
-       (play-mml :main '(t120 :adsr (0 0 1 0.01) < b- b-8. b-16 b- > d-8. c16 c8. < b-16 b-8. b-16 b-2))
+       (play-mml :main '(t120 v0.7 :adsr (0 0 1 0.01) < b- b-8. b-16 b- > d-8. c16 c8. < b-16 b-8. b-16 b-2))
        (wait-all-tracks))
       (else
        #f))
