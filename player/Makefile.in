@@ -1,5 +1,7 @@
 .PHONY: build-all zip-all build install clean distclean maintainer-clean
 
+DESTDIR =
+
 PLATFORM_ARCHS := win32-x64 win32-ia32 darwin-x64 linux-x64 linux-armv7l linux-arm64
 DEFAULT_PLATFORM_ARCH := @GRAVITON_PLAYER_ARCH@
 
@@ -8,7 +10,9 @@ ZIP_TARGETS :=
 
 SRCS := src/main.js src/renderer.js
 
-PLAYER_INSTALL_DIR := $(shell gosh -I ../lib -ugraviton.config -e "(print (graviton-config 'graviton-player-install-dir)) (exit 0)")
+CONFIG_GENERATED = Makefile
+
+PLAYER_INSTALL_DIR := "$(DESTDIR)$(shell gosh -I ../lib -ugraviton.config -e "(print (graviton-config 'graviton-player-install-dir)) (exit 0)")"
 
 .DEFAULT_GOAL := build
 
@@ -45,11 +49,14 @@ install: build
 	mkdir -p $(PLAYER_INSTALL_DIR)
 	cp -R graviton-player-$(DEFAULT_PLATFORM_ARCH) $(PLAYER_INSTALL_DIR)
 
+uninstall:
+	rm -Rf $(PLAYER_INSTALL_DIR)/graviton-player-$(DEFAULT_PLATFORM_ARCH)
+
 clean:
 	rm -Rf graviton-player-* .build-*.done
 
 distclean:
-	rm -Rf src/node_modules
+	rm -Rf $(CONFIG_GENERATED) src/node_modules
 
 maintainer-clean: clean
-	rm -Rf src/node_modules
+	rm -Rf $(CONFIG_GENERATED) src/node_modules

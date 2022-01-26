@@ -14,45 +14,50 @@ DESTDIR        =
 GOSH           = "@GOSH@"
 GAUCHE_CONFIG  = "@GAUCHE_CONFIG@"
 GAUCHE_PACKAGE = "@GAUCHE_PACKAGE@"
-INSTALL        = "@GAUCHE_INSTALL@" -C
-
-# Other parameters
-SOEXT  = @SOEXT@
-OBJEXT = @OBJEXT@
-EXEEXT = @EXEEXT@
-LOCAL_PATHS = "@LOCAL_PATHS@"
+INSTALL        = "@GAUCHE_INSTALL@"
 
 # Module-specific stuff
 PACKAGE   = graviton
 
-GRAVITON_PLAYER_ARCH = @GRAVITON_PLAYER_ARCH@
-ARCHFILES =
-SCMFILES  = $(srcdir)/lib/graviton.scm $(srcdir)/lib/graviton/config.scm $(srcdir)/lib/graviton/config-alist.scm $(srcdir)/lib/graviton/jsise.scm
-HEADERS   =
-
-TARGET    = $(ARCHFILES)
 GENERATED =
-CONFIG_GENERATED = Makefile config.log lib/graviton/config-alist.scm $(PACKAGE).gpd
+CONFIG_GENERATED = Makefile config.log $(PACKAGE).gpd
 
 GAUCHE_PKGINCDIR  = "$(DESTDIR)@GAUCHE_PKGINCDIR@"
 GAUCHE_PKGLIBDIR  = "$(DESTDIR)@GAUCHE_PKGLIBDIR@"
 GAUCHE_PKGARCHDIR = "$(DESTDIR)@GAUCHE_PKGARCHDIR@"
 
-.PHONY: all clean distclean maintainer-clean
+.PHONY: all install uninstall install-player uninstall-player clean distclean maintainer-clean
 
 all:
+
+install:
+	(cd lib; make install)
+	(cd js; make install)
+
+uninstall: uninstall-player
+	(cd lib; make uninstall)
+	(cd js; make uninstall)
 
 install-player:
 	(cd player; make install)
 
+uninstall-player:
+	(cd player; make uninstall)
+
 clean:
+	(cd js; make clean)
+	(cd lib; make clean)
 	(cd player; make clean)
 	rm -rf core $(TARGET) $(GENERATED) *~ test.log
 
 distclean: clean
+	(cd js; make distclean)
+	(cd lib; make distclean)
 	(cd player; make distclean)
 	rm -rf $(CONFIG_GENERATED)
 
 maintainer-clean: clean
+	(cd js; make maintainer-distclean)
+	(cd lib; make maintainer-distclean)
 	(cd player; make maintainer-clean)
 	rm -rf $(CONFIG_GENERATED) VERSION

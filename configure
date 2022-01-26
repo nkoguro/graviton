@@ -92,8 +92,7 @@
              (string-join (delete "" (list "graviton-player" (gauche-config "--executable-suffix"))) "."))))
 
 ;; Output
-(cf-output-default "lib/graviton/config-alist.scm"
-                   "player/Makefile")
+(cf-output-default "lib/graviton/config-alist.scm")
 
 ;; Local variables:
 ;; mode: scheme
