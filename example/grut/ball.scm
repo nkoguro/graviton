@@ -31,8 +31,10 @@
    (floor-bounce-sound :init-form (load-audio "/bounce1.wav"))
    (side-bounce-sound :init-form (load-audio "/bounce2.wav"))))
 
-(define (update-ball-position! ball)
-  (with-slots (angle angular-velocity x y vx vy floor-bounce-sound side-bounce-sound) ball
+(define *ball* (make-window-parameter #f))
+
+(define (update-ball-position!)
+  (with-slots (angle angular-velocity x y vx vy floor-bounce-sound side-bounce-sound) (*ball*)
     (let1 nx (+ x vx)
       (cond
         ((<= field-left nx field-right)
@@ -51,10 +53,10 @@
          (floor-bounce-sound'play))))
     (inc! angle angular-velocity)))
 
-(define (draw-ball ball)
-  (jslet ((angle (~ ball'angle))
-          (x (~ ball'x))
-          (y (~ ball'y)))
+(define (draw-ball)
+  (jslet ((angle (~ (*ball*)'angle))
+          (x (~ (*ball*)'x))
+          (y (~ (*ball*)'y)))
     (ballMesh.quaternion.setFromEuler (new THREE.Euler 0 angle (- (/ Math.PI 6)) "ZYX"))
     (set! ballMesh.position.x x)
     (set! ballMesh.position.y y)
@@ -151,12 +153,13 @@
     (on-jsevent audio-context "statechange" ()
       (update-text text-console))
 
+    (*ball* (make <ball>))
+
     (setup-camera (/. (~ canvas'width) (~ canvas'height)))
     (setup-scene)
-    (setup-renderer (let1 ball (make <ball>)
-                      (lambda (t)
-                        (update-ball-position! ball)
-                        (draw-ball ball))))
+    (setup-renderer (lambda (t)
+                      (update-ball-position!)
+                      (draw-ball)))
 
     (update-text text-console)))
 
