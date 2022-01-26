@@ -43,8 +43,7 @@
 (load "graviton/config-alist.scm")
 
 (define *graviton-installed?*
-  (and (current-load-path)
-       (equal? (gauche-site-library-directory) (sys-dirname (current-load-path)))))
+  (not (file-exists? (build-path (sys-dirname (current-load-path)) "config-alist.scm.in"))))
 
 (define *graviton-top-dir* (simplify-path (build-path (sys-dirname (current-load-path)) ".." "..")))
 
@@ -63,10 +62,12 @@
 (define (graviton-config param)
   (replace-param (assoc-ref *config-alist* param)))
 
+(define *repository-dir* (simplify-path (build-path (sys-dirname (current-load-path)) ".." "..")))
+
 (define (graviton-js-directory)
   (cond
     ((not *graviton-installed?*)
      ;; To use js/ in the repository.
-     (build-path *graviton-top-dir* "js"))
+     (build-path *repository-dir* "js"))
     (else
      (graviton-config 'graviton-js-dir))))
