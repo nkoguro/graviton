@@ -58,10 +58,8 @@
           worker-submit-task
           run-concurrent
           parallel
-          parallel/async
           parallel/await
           concurrent
-          concurrent/async
           concurrent/await
           worker-dispatch-event
           <worker-callback>
@@ -334,13 +332,6 @@
 (define-syntax concurrent
   (syntax-rules ()
     ((_ body ...)
-     (begin
-       (run-concurrent (lambda () body ...))
-       (undefined)))))
-
-(define-syntax concurrent/async
-  (syntax-rules ()
-    ((_ body ...)
      (let1 gpromise (make-grv-promise)
        (run-concurrent (lambda () (receive vals (begin body ...)
                                     (grv-promise-set-values! gpromise vals))))
@@ -475,16 +466,6 @@
                                     (make <worker-wrapper> :wparam (make-window-parameter* provider)))))))))))
 
 (define-syntax parallel
-  (syntax-rules ()
-    ((_ body ...)
-     (begin
-       (grv-worker
-        (begin
-          body ...)
-        (worker-close (current-worker)))
-       (undefined)))))
-
-(define-syntax parallel/async
   (syntax-rules ()
     ((_ body ...)
      (let1 gpromise (make-grv-promise)
