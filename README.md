@@ -497,64 +497,198 @@ Waits for <i>event-type</i> of <i>jsobj</i>, and returns the properties of the e
 
 ### Worker
 
-current-worker
-current-priority
-<worker>
-make-worker
-worker-run
-worker-close
-worker-active?
-worker-shutdown
-worket-wait
-all-workers
+Graviton provides Worker (`<grv-worker>`) to support an asynchronous mechanism. Worker can run code, and the code can yield its execution to other code.
+One worker is created when a window is opened. It is called "main worker". You can create a worker yourselves to run code in the background.
 
-worker-event-wait-timeout
-worker-event-loop-hook
+Worker also has a messaging mechanism. Each worker can communicate with other workers.
 
-main-worker
+<dl>
+<dt><code>(make-worker <i>thunk</i> :key <i>name</i> <i>size</i>)</code></dt>
+<dd>
+Makes new worker. <i>thunk</i> will run when the worker starts.
 
-grv-worker
+You can specify these keyword parameters.
+  <dl>
+    <dt><code>name</code></dt>
+    <dd>
+      The name of the worker.
+    </dd>
+    <dt><code>size</code></dt>
+    <dd>
+      The number of threads. The default is 1.
+    </dd>
+  </dl>
+</dd>
 
-add-message-handler!
-delete-message-handler!
-define-message
+<dt><code>(worker-run <i>worker</i>)</code></dt>
+<dd>
+Executes <i>worker</i>.
+</dd>
+
+<dt><code>(grv-worker [:name <i>name</i>] [:size <i>size</i>] <i>body ...</i>)</code></dt>
+<dd>
+This is a handy macro to make and run new worker. The keyword parameters are the same as <code>make-worker</code>. 
+</dd>
+
+<dt><code>(current-worker)</code></dt>
+<dd>
+Returns the current worker in which the current code runs.
+</dd>
+
+<dt><code>(main-worker)</code></dt>
+<dd>
+Returns the main worker.
+</dd>
+
+<dt><code>(worker-close <i>worker</i>)</code></dt>
+<dd>
+Stops receiving messages of <i>worker</i>. Pending messages will be processed. 
+</dd>
+
+<dt><code>(worker-shutdown <i>worker</i>)</code></dt>
+<dd>
+Stops receiving messages of <i>worker</i>, and discards pending messages.
+</dd>
+
+<dt><code>(worker-active? <i>worker</i>)</code></dt>
+<dd>
+Returns whether <i>worker</i> can receive a message or not. <code>(worker-active? <i>worker</i>)</code> returns <code>#f</code> after <code>(worker-close <i>worker</i>)</code> is called.
+
+
+<dt><code>(current-priority)</code></dt>
+<dd>
+Returns the current priority of the current running code.
+</dd>
+
+<dt><code>(add-message-handler! <i>message</i> <i>proc</i> :key <i>priority</i>)</code></dt>
+<dd>
+Registers a message handler <i>proc</i> for <i>message</i>.
+
+The received messages will be processed from higher priority. You can specify <i>priority</i> of this event. <i>priority</i> must be one of <code>'low</code>, <code>'default</code> or <code>'high</code>.  
+</dd>
+
+<dt><code>(delete-message-handler! <i>message</i>)</code></dt>
+<dd>
+Removes a message handler for <i>message</i>.
+</dd>
+
+<dt><code>(define-message <i>message</i> (<i>arg ...</i>) [:priority <i>priority</i>] <i>body ...</i>)</code></dt>
+<dd>
+This is a handy macro to define a message handler, same as <code>add-message-handler!</code>. 
+</dd>
+
+<dt><code>(object-apply (<i>worker</i> &lt;grv-worker&gt;) <i>message</i> <i>arg ...</i>)</code></dt>
+<dd>
+Sends <i>message</i> to <i>worker</i>, and returns <code>&lt;grv-promise&gt;</code> object which will hold the results of the message handler. You extract the results with <code>(await <i>promise</i>)</code>. 
+</dd>
+</dl>
 
 
 ### Asynchronous utilities
 
-asleep
-when-time-passed
+<dl>
+<dt><code>(asleep <i>time</i>)</code></dt>
+<dt><code>(asleep <i>sec</i>)</code></dt>
+<dd>
+Suspends the current running code until the time <i>time</i> is reached or the number of seconds <i>sec</i> elapses.
+</dd>
+
+<dt><code>(when-time-passed <i>sec</i> <i>body ...</i>)</code></dt>
+<dd>
+Executes <i>body ...</i> when the number of seconds <i>sec</i> passed after the last execution.
+
+For example, <i>body ...</i> will run every 0.1 second in this case.
+<pre>
+<code>
+(while #t
+  (when-time-passed 0.1
+    <i>body ...</i>))
+</code>
+</pre>
+</dd>
+</dl>
 
 #### Graviton promise
-<grv-promise>
-await
-disable-async-wait
+
+<dl>
+<dt><code>(await <i>promise</i>)</code></dt>
+<dd>
+Waits until <i>promise</i> has values, then returns the values.
+</dd>
+
+<dt><code>(disable-async-wait)</code></dt>
+<dt><code>(disable-async-wait <i>bool</i>)</code></dt>
+<dd>
+<code>disable-async-wait</code> is a parameter to control whether <code>await</code> can yield the right of execution to other code or not. If this parameter is <code>#t</code>, <code>await</code> blocks the current thread until values are set in <code>&lt;grv-promise&gt;</code>.
+
+The default is <code>#f</code> (can yield, don't block), and you don't need to change the parameter. However, you may change the parameter to <code>#t</code> if someone calls <code>(reset ...)</code>. Graviton's asynchronous mechanism is built on a partial continuation in worker, but another partial contitnuation can break the asynchronous mechanism (for example, implicit delimited contiations by <code>Scm_Eval</code>).   
+</dd>
+</dl>
 
 #### Channel
 
-<channel>
-make-channel
-channel-send
-channel-close
-channel-closed?
-channel-recv
+<code>&lt;channel&gt;</code> is a queue which supports Graviton's asynchronous mechanism. You can use it for inter-worker communication.
+
+<dl>
+<dt><code>(make-channel)</code></dt>
+<dd>
+Makes a channel.
+</dd>
+
+<dt><code>(channel-send <i>channel</i> <i>value ...</i>)</code></dt>
+<dd>
+Adds <i>value ...</i> to <i>channel</i>.
+</dd>
+
+<dt><code>(channel-recv <i>channel</i> :optional <i>fallback</i>)</code></dt>
+<dd>
+Retrieves a value from <i>channel</i>. 
+If no values exist in it, waits until a value is added or <i>fallback</i> is returned.
+
+If <i>channel</i> is closed, returns <code>&lt;eof-object&gt;</code>.
+</dd>
+
+<dt><code>(channel-close <i>channel</i>)</code></dt>
+<dd>
+Closes <i>channel</i>.
+</dd>
+
+<dt><code>(channel-closed? <i>channel</i>)</code></dt>
+<dd>
+Returns whether <i>channel</i> is closed or not.
+</dd>
+</dl>
 
 
 ### Concurrency and Parallelism
 
-run-concurrent
-concurrent
-concurrent/async
-concurrent/await
+<dl>
+<dt><code>(concurrent <i>body ...</i>)</code></dt>
+<dd>
+Executes <i>body ...</i> in concurrent. It means the <i>body</i> will be executed in the current worker after the current code yields the execution.
 
-parallel
-parallel/async
-parallel/await
+This macro returns <code>&lt;grv-promise&gt;</code>, so that you can get the results of <i>body ...</i> from it.
 
+NOTE: <i>body ...</i> may be executed in parallel if the current worker has multiple threads.
+</dd>
 
+<dt><code>(concurrent/await <i>body ...</i>)</code></dt>
+<dd>
+It is identical to <code>(await (concurrent <i>body ...</i>))</code>.
+</dd>
 
+<dt><code>(parallel <i>body ...</i>)</code></dt>
+<dd>
+Executes <i>body ...</i> in parallel. It means the <i>body</i> is executed in newly created worker.
 
+This macro returns <code>&lt;grv-promise&gt;</code>, so that you can get the results of <i>body ...</i> from it.
+</dd>
 
+<dt><code>(parallel/await <i>body ...</i>)</code></dt>
+<dd>
+It is identical to <code>(await (parallel <i>body ...</i>)</code>.
+</dd>
+</dl>
 
 
 ## Module: graviton.grut
