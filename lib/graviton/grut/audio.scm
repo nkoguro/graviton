@@ -206,11 +206,11 @@
                   (cons 'note-seq (map (match-lambda
                                          ((rels len)
                                           (list (values-ref (map-accum (lambda (rel prev)
-                                                                         (let1 r (if (< rel prev)
+                                                                         (let1 r (if (<= rel prev)
                                                                                    (+ rel 12)
                                                                                    rel)
                                                                            (values r r)))
-                                                                       0
+                                                                       -1
                                                                        rels)
                                                             0)
                                                 len)))
