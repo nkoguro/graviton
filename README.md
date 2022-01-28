@@ -223,7 +223,7 @@ Returns a window.
 <dt><code>(with-window <i>window</i> (<i>elements ...</i>) <i>body ...</i>)</code></dt>
 <dd>
 Opens <i>window</i>, then execute <i>body ...</i> in a newly created worker.
-<i>elements ...</i> are IDs of HTML elements, which will be binded to the same names of local variables before the execution.
+<i>elements ...</i> are IDs of HTML elements, which will be bound to the same names of local variables before the execution. <code>#f</code> will be bound to the variable if the element is not found. 
 </dd>
 
 <dt><code>(grv-title)</code></dt>
@@ -466,10 +466,10 @@ Deletes the listener of the specified event.
 <dt><code>(on-jsevent <i>jsobj</i> <i>event-type</i> (<i>arg ...</i>) <i>body ...</i>)</code></dt>
 <dt><code>(on-jsevent <i>jsobj</i> (<i>event-type</i> :use-capture? <i>use-capture?</i>) (<i>arg ...</i>) <i>body ...</i>)</code></dt>
 <dd>
-This is a convenient macro to set an event listener. When an event is triggered, the properties of the event are binded to <i>arg ...</i>, then <i>body ...</i> are executed.
+This is a convenient macro to set an event listener. When an event is triggered, the properties of the event are bound to <i>arg ...</i>, then <i>body ...</i> are executed.
 
-The property of the event will be binded to corresponding <i>arg</i>. For example, <code>event.key</code> will be binded to <i>arg</i> if <i>arg</i> is <code>key</code>. 
-You can also use a kebab-case symbol like <code>related-target</code>. <code>event.relatedTarget</code> will be binded in this case.
+The property of the event will be bound to corresponding <i>arg</i>. For example, <code>event.key</code> will be bound to <i>arg</i> if <i>arg</i> is <code>key</code>. 
+You can also use a kebab-case symbol like <code>related-target</code>. <code>event.relatedTarget</code> will be bound in this case.
 If you want to specify the property name explicitly, use <code>(<i>arg</i> <i>"eventName"</i>)</code> style.
 </dd>
 
@@ -847,9 +847,9 @@ The latter statement is translated to <code>import {<i>only-export</i>, <i>renam
 
 <dt><code>(jslet ((<i>jsvar</i> <i>[value]</i>) <i>...</i>) <i>body ...</i>)</code></dt>
 <dd>
-Embeds JavaScript code. <i>value</i> is an object in Scheme world. It is transferred to JavaScript world and binded to <i>jsvar</i>. <code>jslet</code> doesn't return a meaningful value. Currently, it returns <code>#&lt;undef&gt;</code>.
+Embeds JavaScript code. <i>value</i> is an object in Scheme world. It is transferred to JavaScript world and bound to <i>jsvar</i>. <code>jslet</code> doesn't return a meaningful value. Currently, it returns <code>#&lt;undef&gt;</code>.
 
-If <i>value</i> is omitted, an object which is referenced by the same name <i>jsvar</i> in Scheme world, is binded.
+If <i>value</i> is omitted, an object which is referenced by the same name <i>jsvar</i> in Scheme world, is bound.
 
 In run-time, <code>jslet</code> sends a request to the client (browser or graviton-player) to execute <i>body ...</i>. But the request is buffered until the current continuation finishes. If you want to send the request immediately, call <code>(asleep 0)</code>.
 </dd>
