@@ -287,7 +287,7 @@
 (debug-print-width #f)
 
 (define (parse-mml env expr)
-  (let loop ((env '())
+  (let loop ((env env)
              (expr expr)
              (sound-data-list '()))
     (match expr
@@ -335,39 +335,39 @@
        (loop env
              rest
              (cons (vector REST-SOUND len) sound-data-list)))
-      ((('begin expr ...) rest ...)
+      ((('scope expr ...) rest ...)
        (loop env
              rest
              (append (reverse (vector->list (parse-mml env expr)))
                      sound-data-list)))
 
       ((':tempo tempo rest ...)
-       (loop (assq-set! env 'tempo tempo)
+       (loop (assoc-adjoin env 'tempo tempo)
              rest
              sound-data-list))
       ((':length len rest ...)
-       (loop (assq-set! env 'length-magnifier (/. 1 len))
+       (loop (assoc-adjoin env 'length-magnifier (/. 1 len))
              rest
              sound-data-list))
       ((':octave octave rest ...)
-       (loop (assq-set! env 'octave octave)
+       (loop (assoc-adjoin env 'octave octave)
              rest
              sound-data-list))
       ((':volume volume rest ...)
-       (loop (assq-set! env 'volume volume)
+       (loop (assoc-adjoin env 'volume volume)
              rest
              sound-data-list))
       ((':stereo-pan pan rest ...)
-       (loop (assq-set! env 'stereo-pan pan)
+       (loop (assoc-adjoin env 'stereo-pan pan)
              rest
              sound-data-list))
       ((':wave-form ((? f32vector? real) (? f32vector? imag)) rest ...)
-       (loop (assq-set! env 'wave-form 'custom)
+       (loop (assoc-adjoin env 'wave-form 'custom)
              rest
              (cons (vector SET-CUSTOM-WAVE real imag)
                    sound-data-list)))
       ((':wave-form wave-form rest ...)
-       (loop (assq-set! env 'wave-form wave-form)
+       (loop (assoc-adjoin env 'wave-form wave-form)
              rest
              sound-data-list))
       ((':adsr (attack decay sustain release) rest ...)
@@ -386,11 +386,11 @@
              rest
              sound-data-list))
       ((':detune d rest ...)
-       (loop (assq-set! env 'detune d)
+       (loop (assoc-adjoin env 'detune d)
              rest
              sound-data-list))
       ((':gate/step v rest ...)
-       (loop (assq-set! env 'gate/step v)
+       (loop (assoc-adjoin env 'gate/step v)
              rest
              sound-data-list))
       (((? (^x (and (symbol? x) (not (keyword? x)))) note) rest ...)
