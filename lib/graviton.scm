@@ -639,9 +639,7 @@
 (define (grv-config :key
                     (host "localhost")
                     (protocol "http")
-                    (client (if (player-exists?)
-                              'player
-                              'browser))
+                    (client #f)
                     (port (case client
                             ((browser)
                              8080)
@@ -655,7 +653,10 @@
                          :port port
                          :host host
                          :protocol protocol
-                         :client client
+                         :client (or client
+                                     (if (player-exists?)
+                                       'player
+                                       'browser))
                          :access-log access-log
                          :error-log error-log
                          :iframe-window? iframe-window?))))

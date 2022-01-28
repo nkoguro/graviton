@@ -134,7 +134,7 @@ Configures Graviton.
     </dd>
     <dt><code>client</code>
     <dd>
-      Client type. The default is <code>'player</code> if graviton-player is installed. Otherwise, 'browser.
+      Client type. The default is <code>'player</code> if graviton-player is installed. Otherwise, <code>'browser</code>.
       <dl>
         <dt><code>'browser</code></dt>
         <dd>
@@ -143,6 +143,10 @@ Configures Graviton.
         <dt><code>'player</code></dt>
         <dd>
           graviton-player. The program opens a main window with graviton-player, and it exits if the window is closed.
+        </dd>
+        <dt><code>#f</code></dt>
+        <dd>
+          <code>'player</code> if graviton-player is installed. Otherwise, <code>'browser</code>.
         </dd>
       </dl>
     </dd>
