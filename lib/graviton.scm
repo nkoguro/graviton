@@ -458,7 +458,10 @@
            `(let () ,@body)))
         ((_ ((? symbol? id) rest ...) body ...)
          (quasirename rename
-           `(let1 ,id (document'get-element-by-id ,(symbol->string id))
+           `(let1 ,id (let1 element (document'get-element-by-id ,(symbol->string id))
+                        (if (eq? element 'null)
+                          #f
+                          element))
               (let-elements ,rest ,@body))))
         ((_ (((? symbol? var) name) rest ...) body ...)
          (quasirename rename
