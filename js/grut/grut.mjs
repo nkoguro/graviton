@@ -56,8 +56,7 @@ function processGrutSpecialClassInner(element) {
         const handler = () => {
             const rect = containerElement.getBoundingClientRect();
             const width = rect.width;
-            // The height of document.body can be 0 on Firefox. This is a workaround for the case.
-            const height = (containerElement === document.body && rect.height === 0) ? window.innerHeight : rect.height;
+            const height = rect.height;
             const centerX = rect.left + width / 2;
             const centerY = rect.top + height / 2;
             containerElement.style.setProperty(containerWidthVar, width);

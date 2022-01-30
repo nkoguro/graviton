@@ -155,7 +155,9 @@
       (grv-window :body (html:body
                          :style (alist->style `(("color" . ,color)
                                                 ("background-color" . ,background-color)
-                                                ("margin" . 0)))
+                                                ("margin" . 0)
+                                                ("width" . "100%")
+                                                ("height" . "100%")))
                          (html:canvas :id id :class (fit->css-name fit) :width width :height height))
                   :title title
                   :width window-width
@@ -180,6 +182,8 @@
                      :style (alist->style `(("color" . ,color)
                                             ("background-color" . ,background-color)
                                             ("margin" . 0)
+                                            ("width" . "100%")
+                                            ("height" . "100%")
                                             ("overflow-y" . "hidden")))
                      (html:grut-text :id id
                                      :class (string-join (list "grut-monospace-font" (fit->css-name fit)) " ")
@@ -227,6 +231,8 @@
                          :style (alist->style `(("color" . ,color)
                                                 ("background-color" . ,background-color)
                                                 ("margin" . 0)
+                                                ("width" . "100%")
+                                                ("height" . "100%")
                                                 ("overflow-y" . "hidden")))
                          (html:canvas :id canvas-id :class (fit->css-name fit) :width width :height height)
                          (html:grut-text :id text-id
