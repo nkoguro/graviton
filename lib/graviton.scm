@@ -640,26 +640,28 @@
                     (host "localhost")
                     (protocol "http")
                     (client #f)
-                    (port (case client
-                            ((browser)
-                             8080)
-                            (else
-                             0)))
+                    (port #f)
                     (access-log #f)
                     (error-log #f)
                     (iframe-window? (eq? client 'browser)))
   (unless *server-started?*
-    (set! *grv-config* (make <grv-config>
-                         :port port
-                         :host host
-                         :protocol protocol
-                         :client (or client
-                                     (if (player-exists?)
-                                       'player
-                                       'browser))
-                         :access-log access-log
-                         :error-log error-log
-                         :iframe-window? iframe-window?))))
+    (let1 client-type (or client
+                          (if (player-exists?)
+                            'player
+                            'browser))
+      (set! *grv-config* (make <grv-config>
+                           :port (or port
+                                     (case client-type
+                                       ((browser)
+                                        8080)
+                                       (else
+                                        0)))
+                           :host host
+                           :protocol protocol
+                           :client client-type
+                           :access-log access-log
+                           :error-log error-log
+                           :iframe-window? iframe-window?)))))
 
 (define (grv-config-parameter name)
   (case name
