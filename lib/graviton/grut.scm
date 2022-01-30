@@ -157,7 +157,9 @@
                                                 ("background-color" . ,background-color)
                                                 ("margin" . 0)
                                                 ("width" . "100%")
-                                                ("height" . "100%")))
+                                                ("height" . "100%")
+                                                ("overflow-x" . "hidden")
+                                                ("overflow-y" . "hidden")))
                          (html:canvas :id id :class (fit->css-name fit) :width width :height height))
                   :title title
                   :width window-width
@@ -184,6 +186,7 @@
                                             ("margin" . 0)
                                             ("width" . "100%")
                                             ("height" . "100%")
+                                            ("overflow-x" . "hidden")
                                             ("overflow-y" . "hidden")))
                      (html:grut-text :id id
                                      :class (string-join (list "grut-monospace-font" (fit->css-name fit)) " ")
@@ -233,6 +236,7 @@
                                                 ("margin" . 0)
                                                 ("width" . "100%")
                                                 ("height" . "100%")
+                                                ("overflow-x" . "hidden")
                                                 ("overflow-y" . "hidden")))
                          (html:canvas :id canvas-id :class (fit->css-name fit) :width width :height height)
                          (html:grut-text :id text-id

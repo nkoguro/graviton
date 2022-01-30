@@ -693,14 +693,14 @@ class GrutText extends HTMLElement {
 
         const widthColumn = parseInt(this.getAttribute('column'));
         if (widthColumn) {
-            this.style.width = this.characterWidth * widthColumn;
+            this.style.width = this.characterWidth * widthColumn + parseFloat(viewStyle.paddingLeft) + parseFloat(viewStyle.paddingRight);
             this.widthCharacter = widthColumn;
         } else {
             this.widthCharacter = undefined;
         }
         const heightRow = parseInt(this.getAttribute('row'));
         if (heightRow) {
-            this.style.height = this.lineHeight * heightRow;
+            this.style.height = this.lineHeight * heightRow + parseFloat(viewStyle.paddingTop) + parseFloat(viewStyle.paddingBottom);
             this.heightCharacter = heightRow;
         } else {
             this.heightCharacter = undefined;
