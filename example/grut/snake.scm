@@ -286,8 +286,13 @@
 (define *interval-sec* 0.2)
 
 (define (main args)
-  (let-args (cdr args) ((use-browser? "b|browser" #f))
-    (grv-config :client (if use-browser? 'browser 'player))
+  (let-args (cdr args)
+      ((force-player? "player" #f)
+       (force-browser? "browser" #f))
+    (grv-config :client (cond
+                          (force-player? 'player)
+                          (force-browser? 'browser)
+                          (else #f)))
 
     (with-window (grut-text-window :column *text-width* :row *text-height* :fit 'fill :window-width 600 :window-height 600)
         (text-console)

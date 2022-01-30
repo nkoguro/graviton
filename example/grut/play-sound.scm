@@ -23,8 +23,9 @@
       (parameterize ((current-output-port (or text-console (current-output-port))))
         (display "Musette D-Dur BWV Anh.126\n")
         (when (is-browser?)
-          (display "\nHit any key to play.\n")
-          (jsevent-await window "keyup" ()))
+          (display "\nHit space key to play.\n")
+          (while (not (equal? (jsevent-await window "keyup" '(key)) " "))
+            #t))
 
         (play-mml :right '(:adsr (0.01 0.1 0.1 0.1)
                            :wave-form (#f32(0.77 0.06 0.08 0.03 0.03 0.01 0.01) #f32(0 0 0 0 0 0 0))

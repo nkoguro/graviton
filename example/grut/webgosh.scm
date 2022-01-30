@@ -379,13 +379,16 @@
 ;;;
 
 (define (main args)
-  (let-args (cdr args) ((use-browser? "b|browser" #f)
-                        (font-size "font-size=s" #f))
+  (let-args (cdr args)
+      ((force-player? "player" #f)
+       (force-browser? "browser" #f)
+       (font-size "font-size=s" #f))
     (grv-log-config :log-level 1)
 
-    (if use-browser?
-      (grv-config :client 'browser)
-      (grv-config :client 'player))
+    (grv-config :client (cond
+                          (force-player? 'player)
+                          (force-browser? 'browser)
+                          (else #f)))
 
     (with-window
         (grv-window

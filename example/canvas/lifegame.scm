@@ -1,3 +1,4 @@
+(use gauche.parseopt)
 (use graviton)
 (use graviton.grut)
 (use srfi-27)
@@ -51,18 +52,25 @@
 (define (main args)
   (random-source-randomize! default-random-source)
 
-  (with-window (grut-canvas-window *width* *height* :background-color "black")
-      (canvas)
-    (let1 ctx (canvas'get-context "2d")
-      (on-jsevent window "keyup" (key)
-        (when (equal? key "Escape")
-          (close-window)))
+  (let-args (cdr args)
+      ((force-player? "player" #f)
+       (force-browser? "browser" #f))
+    (grv-config :client (cond
+                          (force-player? 'player)
+                          (force-browser? 'browser)
+                          (else #f)))
+    (with-window (grut-canvas-window *width* *height* :background-color "black")
+        (canvas)
+      (let1 ctx (canvas'get-context "2d")
+        (on-jsevent window "keyup" (key)
+          (when (equal? key "Escape")
+            (close-window)))
 
-      (let1 field (make-hash-table 'equal?)
-        (dotimes (_ (round->exact (* (* *width* *height*) *init-density*)))
-          (hash-table-put! field (cons (random-integer *width*) (random-integer *height*)) #t))
+        (let1 field (make-hash-table 'equal?)
+          (dotimes (_ (round->exact (* (* *width* *height*) *init-density*)))
+            (hash-table-put! field (cons (random-integer *width*) (random-integer *height*)) #t))
 
-        (on-animation-frame (t)
-          (when-time-passed 0.05
-            (render-field ctx field)
-            (set! field (compute-new-field field))))))))
+          (on-animation-frame (t)
+            (when-time-passed 0.05
+              (render-field ctx field)
+              (set! field (compute-new-field field)))))))))

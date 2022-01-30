@@ -1,4 +1,6 @@
+(use gauche.parseopt)
 (use graviton)
+(use graviton.grut)
 
 (define (make-node freq)
   (let1 oscillator (audio-context'create-oscillator)
@@ -21,9 +23,31 @@
           (~ audio-context'current-time)
           nodes)))
 
+(define (is-browser?)
+    (eq? (grv-config-parameter 'client) 'browser))
+
 (define (main args)
-  (with-window #f
-      ()
-    (play-wave '((2000 0.1) (1000 0.1)))
-    (asleep 1.0)
-    (close-window)))
+  (let-args (cdr args)
+      ((force-player? "player" #f)
+       (force-browser? "browser" #f))
+    (grv-config :client (cond
+                          (force-player? 'player)
+                          (force-browser? 'browser)
+                          (else #f)))
+
+    (with-window (cond
+                   ((is-browser?)
+                    (grut-text-window :font-size 24 :padding 5))
+                   (else
+                    #f))
+        (text-console)
+      (parameterize ((current-output-port (or text-console (current-output-port))))
+        (when (is-browser?)
+          (display "Hit space key to play.\n")
+          (while (not (equal? (jsevent-await window "keyup" '(key)) " "))
+            #t))
+        (play-wave '((2000 0.1) (1000 0.1)))
+        (asleep 1.0)
+        (when (is-browser?)
+          (display "done."))
+        (close-window)))))

@@ -1,7 +1,16 @@
+(use gauche.parseopt)
 (use graviton)
 (use graviton.grut)
 
 (define (main args)
+  (let-args (cdr args)
+      ((force-player? "player" #f)
+       (force-browser? "browser" #f))
+    (grv-config :client (cond
+                          (force-player? 'player)
+                          (force-browser? 'browser)
+                          (else #f)))
+
   (with-window (grut-text-window :padding "5px" :scrollbar? #t)
       (text-console)
     (on-jsevent window "keyup" (key)
@@ -18,4 +27,4 @@
         (let1 msg (read-text/edit text-console :prompt ">")
           (unless (= (string-length msg) 0)
             (format text-console "Speaking \"~a\".~%" msg)
-            (speak msg)))))))
+            (speak msg))))))))

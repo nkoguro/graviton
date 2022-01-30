@@ -41,12 +41,12 @@
 
 (define (main args)
   (let-args (cdr args)
-      ((browser? "browser" #f))
-
-    (grv-config :client (if browser?
-                          'browser
-                          'player))
-
+      ((force-player? "player" #f)
+       (force-browser? "browser" #f))
+    (grv-config :client (cond
+                          (force-player? 'player)
+                          (force-browser? 'browser)
+                          (else #f)))
     (with-window (grv-window
                    :css "/editor.css"
                    :body

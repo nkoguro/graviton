@@ -2,6 +2,7 @@
 ;; Compute Mandelbrot set.
 ;;
 
+(use gauche.parseopt)
 (use graviton)
 (use graviton.grut)
 (use util.combinations)
@@ -40,39 +41,46 @@
        ((main-worker)'draw-tile pixels)))))
 
 (define (main args)
-  (with-window (grut-canvas-window *width* *height* :background-color "black")
-      (canvas)
-    (let1 ctx (canvas'get-context "2d")
-      (on-jsevent window "keyup" (key)
-        (when (equal? key "Escape")
-          (close-window)))
+  (let-args (cdr args)
+      ((force-player? "player" #f)
+       (force-browser? "browser" #f))
+    (grv-config :client (cond
+                          (force-player? 'player)
+                          (force-browser? 'browser)
+                          (else #f)))
+    (with-window (grut-canvas-window *width* *height* :background-color "black")
+        (canvas)
+      (let1 ctx (canvas'get-context "2d")
+        (on-jsevent window "keyup" (key)
+          (when (equal? key "Escape")
+            (close-window)))
 
-      (define-message draw-tile (pixels)
-        :priority 'low
-        (fold (lambda (pixel prev-color)
-                (match-let1 (x y color) pixel
-                  (unless (equal? prev-color color)
-                    (set! (~ ctx'fill-style) color))
-                  (ctx'fill-rect x y 1 1)
-                  color))
-              #f
-              pixels))
+        (define-message draw-tile (pixels)
+          :priority 'low
+          (fold (lambda (pixel prev-color)
+                  (match-let1 (x y color) pixel
+                    (unless (equal? prev-color color)
+                      (set! (~ ctx'fill-style) color))
+                    (ctx'fill-rect x y 1 1)
+                    color))
+                #f
+                pixels))
 
-      (let* ((delta-x (/. 3 *width*))
-             (delta-y (/. 3 *height*))
-             (mesh-x 16)
-             (mesh-y 16)
-             (mesh-w (round->exact (/. *width* mesh-x)))
-             (mesh-h (round->exact (/. *height* mesh-y))))
-        (for-each (match-lambda
-                    ((i j)
-                     (compute-worker'compute mesh-w
-                                             mesh-h
-                                             (* mesh-w i)
-                                             (* mesh-h j)
-                                             -2
-                                             -1.5
-                                             delta-x
-                                             delta-y
-                                             *max-n*)))
-                  (cartesian-product (list (iota mesh-x) (iota mesh-y))))))))
+        (let* ((delta-x (/. 3 *width*))
+               (delta-y (/. 3 *height*))
+               (mesh-x 16)
+               (mesh-y 16)
+               (mesh-w (round->exact (/. *width* mesh-x)))
+               (mesh-h (round->exact (/. *height* mesh-y))))
+          (for-each (match-lambda
+                      ((i j)
+                       (compute-worker'compute mesh-w
+                                               mesh-h
+                                               (* mesh-w i)
+                                               (* mesh-h j)
+                                               -2
+                                               -1.5
+                                               delta-x
+                                               delta-y
+                                               *max-n*)))
+                    (cartesian-product (list (iota mesh-x) (iota mesh-y)))))))))
