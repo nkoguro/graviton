@@ -6,6 +6,5 @@ VERSION
 lib/graviton/config-alist.scm
 player/.build-*.done
 player/Makefile
-player/graviton-player-linux-x64/
-player/graviton-player-win32-x64/
+player/graviton-player-*/
 player/src/node_modules
