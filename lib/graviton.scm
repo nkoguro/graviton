@@ -107,6 +107,9 @@
 
           grv-config
           grv-config-parameter
+          client-is-player?
+          client-is-browser?
+
           with-window
           open-window
           close-window
@@ -674,6 +677,12 @@
     ((iframe-window?) (~ *grv-config*'iframe-window?))
     (else
      (errorf "Invalid parameter name: ~s" name))))
+
+(define (client-is-player?)
+  (eq? (grv-config-parameter 'client) 'player))
+
+(define (client-is-browser?)
+  (eq? (grv-config-parameter 'client) 'browser))
 
 ;; Set default config.
 (grv-config)

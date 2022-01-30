@@ -181,6 +181,16 @@ Configures Graviton.
 Returns the current value of the setting. <i>name</i> must be one of these symbols,
 <code>port</code>, <code>host</code>, <code>protocol</code>, <code>client</code>, <code>access-log</code>, <code>error-log</code> or <code>iframe-window?</code>.
 </dd>
+
+<dt><code>(client-is-player)</code></dt>
+<dd>
+Returns <code>#t</code> if the current client setting is graviton-player.
+</dd>
+
+<dt><code>(client-is-browser)</code></dt>
+<dd>
+Returns <code>#t</code> if the current client setting is Web browser.
+</dd>
 </dl>
 
 ### Window
