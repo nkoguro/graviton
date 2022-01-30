@@ -188,7 +188,7 @@ Returns the current value of the setting. <i>name</i> must be one of these symbo
 When Graviton receives a request from the client, it creates a new window instance and assigns a thread (called "worker") to the window instance. The code running in the worker can operate the associated window only.
 
 <dl>
-<dt><code>(grv-window <i>:key title css js head body width height resizable?</i>)</code></dt>
+<dt><code>(grv-window <i>:key title css js head body width height resizable? show?</i>)</code></dt>
 <dd>
 Returns a window.
   <dl>
@@ -223,6 +223,10 @@ Returns a window.
     <dt><code>resizable?</code></dt>
     <dd>
       Whether this window is resizable or not.
+    </dd>
+    <dt><code>show?</code></dt>
+    <dd>
+      Whether this window is visible or not. The default is <code>#t</code>. This option works only for graviton-player.
     </dd>
   </dl>
 </dd>
