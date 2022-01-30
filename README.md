@@ -24,6 +24,13 @@ $ make install
 $ make install-player  # if you want to install graviton-player.
 ```
 
+### Note for WSL user
+
+If you use WSL, the configure script sets graviton-player architecture to win32-x64. You need to install Wine to build the windows binary on WSL. 
+
+If you want to use linux-x64 graviton-player with WSLg, you need to specify "--with-wsl=" (no args to this option) for the configure script (`./configure --with-wsl=`).
+
+
 ## Getting started
 
 This simple program opens the "Hello, world" window. This window is closed if you press any keys.
