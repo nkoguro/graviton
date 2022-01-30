@@ -4,17 +4,13 @@
 (use text.html-lite)
 
 (define (main args)
-  (with-window (grv-window
-                 :body
-                 (html:body
-                  :style "background-color: black; color: white"
-                  (html:grut-text :id "text" :class "grut-monospace-font grut-contain" :column 42 :row 15)))
-      (text)
+  (with-window (grut-text-window :column 42 :row 15 :fit 'contain)
+      (text-console)
     (on-jsevent window "keyup" (key)
       (when (equal? key "Escape")
         (close-window)))
 
-    (with-output-to-port text
+    (with-output-to-port text-console
       (lambda ()
         (display "System colors:\n")
         (do-ec (: color 8)
