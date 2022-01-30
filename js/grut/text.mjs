@@ -499,7 +499,6 @@ const TEXT_CONSOLE_STYLE = `
     opacity: 0;
     outline: none;
     caret-color: transparent;
-    display: inline-block;
     white-space: pre;
     /* For IME */
     color: black;
