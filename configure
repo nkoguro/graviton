@@ -84,11 +84,14 @@
                ""))))
 
 (cf-subst 'GRAVITON_PLAYER_EXECUTABLE
-          (cond
-            (wsl
-             "graviton-player.exe")
-            (else
-             (string-join (delete "" (list "graviton-player" (gauche-config "--executable-suffix"))) "."))))
+          (let1 platform (gauche-config "--arch")
+            (cond
+              (wsl
+               "graviton-player.exe")
+              ((#/.*-(darwin|macos)/i platform)
+               "graviton-player.app/Contents/MacOS/graviton-player")
+              (else
+               (string-join (delete "" (list "graviton-player" (gauche-config "--executable-suffix"))) ".")))))
 
 ;; Output
 (cf-output-default "lib/graviton/config-alist.scm")
