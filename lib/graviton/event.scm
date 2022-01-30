@@ -193,18 +193,24 @@
      (on-animation-frame :priority #f (t) body ...))))
 
 (define (jsevent-await jsobj type prop-specs :key (use-capture? #f))
-  (vector->list (jslet/await ((jsobj::object)
-                              (type::string)
-                              (jsproperties (let loop ((specs prop-specs)
-                                                       (props '()))
-                                              (match specs
-                                                (()
-                                                 (list->vector (reverse props)))
-                                                (((? symbol? prop) rest ...)
-                                                 (loop rest (cons (estimate-prop-spec prop) props)))
-                                                (((? string? prop-spec) rest ...)
-                                                 (loop rest (cons (parse-prop-spec prop-spec) props)))
-                                                (_
-                                                 (errorf "malformed prop-specs: ~s" prop-specs)))))
-                              (use-capture?))
-                  (Event.registerOneShotEventHandler jsobj type jsproperties (lambda (vals) (respond vals)) use-capture?))))
+  (let1 vals (vector->list (jslet/await ((jsobj::object)
+                                         (type::string)
+                                         (jsproperties (let loop ((specs prop-specs)
+                                                                  (props '()))
+                                                         (match specs
+                                                           (()
+                                                            (list->vector (reverse props)))
+                                                           (((? symbol? prop) rest ...)
+                                                            (loop rest (cons (estimate-prop-spec prop) props)))
+                                                           (((? string? prop-spec) rest ...)
+                                                            (loop rest (cons (parse-prop-spec prop-spec) props)))
+                                                           (_
+                                                            (errorf "malformed prop-specs: ~s" prop-specs)))))
+                                         (use-capture?))
+                             (Event.registerOneShotEventHandler jsobj
+                                                                type
+                                                                jsproperties
+                                                                (lambda (vals) (respond vals)) use-capture?)))
+    (if (null? vals)
+      (undefined)
+      (apply values vals))))

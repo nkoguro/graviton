@@ -494,6 +494,8 @@ This is a convenient macro to register an animation frame callback.
 <dt><code>(jsevent-await <i>jsobj</i> <i>event-type</i> <i>prop-specs</i> :key <i>use-capture?</i>)</code></dt>
 <dd>
 Waits for <i>event-type</i> of <i>jsobj</i>, and returns the properties of the event, which are specified by <i>prop-specs</i>.
+
+If prop-specs is <code>'()</code>, returns <code>#&lt;undef&gt;</code>.
 </dd>
 </dl>
 
