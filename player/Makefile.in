@@ -2,7 +2,7 @@
 
 DESTDIR =
 
-PLATFORM_ARCHS := win32-x64 win32-ia32 darwin-x64 linux-x64 linux-armv7l linux-arm64
+PLATFORM_ARCHS := win32-x64 win32-ia32 darwin-x64 darwin-arm64 linux-x64 linux-armv7l linux-arm64
 DEFAULT_PLATFORM_ARCH := @GRAVITON_PLAYER_ARCH@
 
 BUILD_TARGETS :=

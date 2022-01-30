@@ -76,6 +76,8 @@
                "win32-ia32")
               ((#/x86_64-.*(darwin|macos)/i platform)
                "darwin-x64")
+              ((#/arm64-.*(darwin|macos)/i platform)
+               "darwin-arm64")
               ((#/armv7l-.*linux/i platform)
                "linux-armv7l")
               ((#/arm64-.*linux/i platform)
