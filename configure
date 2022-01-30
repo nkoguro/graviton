@@ -65,30 +65,23 @@
 
 (cf-subst 'GRAVITON_PLAYER_ARCH
           (let1 platform (gauche-config "--arch")
-            (match-let1 (arch _ os _) (string-split platform "-" 4)
-              (cond
-                (wsl
-                 "win32-x64")
-                ((and (#/x86_64/i arch)
-                      (#/linux/i os))
-                 "linux-x64")
-                ((and (#/x86_64/i arch)
-                      (#/mingw/i os))
-                 "win32-x64")
-                ((and (#/x86/i arch)
-                      (#/mingw/i os))
-                 "win32-ia32")
-                ((and (#/x86_64/i arch)
-                      (#/darwin|macos/i os))
-                 "darwin-x64")
-                ((and (#/armv7l/i arch)
-                      (#/linux/i os))
-                 "linux-armv7l")
-                ((and (#/arm64/i arch)
-                      (#/linux/i os))
-                 "linux-arm64")
-                (else
-                 "")))))
+            (cond
+              (wsl
+               "win32-x64")
+              ((#/x86_64-.*linux/i platform)
+               "linux-x64")
+              ((#/x86_64-.*w64/i platform)
+               "win32-x64")
+              ((#/x86-.*w32/i platform)
+               "win32-ia32")
+              ((#/x86_64-.*(darwin|macos)/i platform)
+               "darwin-x64")
+              ((#/armv7l-.*linux/i platform)
+               "linux-armv7l")
+              ((#/arm64-.*linux/i platform)
+               "linux-arm64")
+              (else
+               ""))))
 
 (cf-subst 'GRAVITON_PLAYER_EXECUTABLE
           (cond
