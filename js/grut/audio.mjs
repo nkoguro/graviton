@@ -1,6 +1,7 @@
 'use strict';
 
 import { audioContext } from '/_g/audio.mjs';
+import { isSafari } from "/_g/graviton.mjs";
 
 const SINE_WAVE = 1;
 const SQUARE_WAVE = 2;
@@ -269,7 +270,7 @@ class SoundTrack {
 
                 // If the browser doesn't support AudioContext.getOutputTimestamp(), 100 ms is used as latency. 
                 let latency = 0.1;
-                if (audioContext.getOutputTimestamp) {
+                if (!isSafari() && audioContext.getOutputTimestamp) {
                     latency = audioContext.currentTime - audioContext.getOutputTimestamp().contextTime;
                 }
                 if (this.soundletQueue.length === 0 && (this.completionTime + latency) < now) {

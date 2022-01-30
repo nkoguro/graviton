@@ -1,5 +1,7 @@
 'use strict';
 
+import { isSafari } from "/_g/graviton.mjs";
+
 export function speak(text, lang, voiceName) {
     const synth = window.speechSynthesis;
     const uttr = new SpeechSynthesisUtterance(text);
@@ -17,11 +19,6 @@ export function speak(text, lang, voiceName) {
         }
     }
     synth.speak(uttr);
-}
-
-function isSafari() {
-    const userAgent = window.navigator.userAgent;
-    return userAgent.includes("Safari") && !userAgent.includes('Chrome');
 }
 
 export function fetchAllVoices(proc, isWait) {

@@ -931,3 +931,13 @@ function startMoveWindow(event) {
     layer.addEventListener('touchend', endMoveWindow);
     layer.addEventListener('touchcancel', endMoveWindow);
 }
+
+
+/**
+ * Helper functions
+ */
+
+export function isSafari() {
+    const userAgent = window.navigator.userAgent;
+    return userAgent.includes("Safari") && !userAgent.includes('Chrome');
+}
