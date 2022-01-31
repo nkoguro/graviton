@@ -60,7 +60,7 @@
 
 ;;;
 
-(define (load-image url :key (content-type #f) (on-error :error))
+(define (load-image url :key (on-error :error))
   (or (jslet/await ((url::string))
         (let ((img (make Image)))
           (set! img.src url)
@@ -78,7 +78,7 @@
         (else
          (errorf "bad value for :on-error argument; must be #f or :error, but got ~s" on-error)))))
 
-(define (load-audio url :key (content-type #f) (on-error :error))
+(define (load-audio url :key (on-error :error))
   (receive (audio err) (jslet/await ((url::string))
                          (let1 audio (make Audio url)
                            (set! audio.onloadeddata (lambda ()
@@ -137,7 +137,6 @@
                             :key
                             (id "canvas")
                             (title #f)
-                            (color #f)
                             (background-color #f)
                             (window-width #f)
                             (window-height #f)
@@ -154,8 +153,7 @@
            (window-height (or window-height
                               (ceiling->exact (* window-width (/. height width))))))
       (grv-window :body (html:body
-                         :style (alist->style `(("color" . ,color)
-                                                ("background-color" . ,background-color)
+                         :style (alist->style `(("background-color" . ,background-color)
                                                 ("margin" . 0)
                                                 ("width" . "100%")
                                                 ("height" . "100%")
