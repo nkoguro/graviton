@@ -3,7 +3,7 @@
 (use graviton)
 (use graviton.grut)
 
-(bind-url-path "/font_16x16.png" (build-path (sys-dirname (current-load-path)) "../font_16x16.png"))
+(define image-path (build-path (sys-dirname (current-load-path)) "../font_16x16.png"))
 
 (define (main args)
   (let-args (cdr args)
@@ -20,5 +20,5 @@
           (when (equal? key "Escape")
             (close-window)))
 
-        (let1 image (load-image "/font_16x16.png")
+        (let1 image (load-image (file->url image-path))
           (ctx'draw-image image 0 0))))))

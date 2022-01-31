@@ -323,6 +323,28 @@ Binds <i>file-path</i> to <i>url-path</i>, so that the file is accessible with t
 
 You can also bind a procedure <i>proc</i> to <i>url-path</i>. <i>proc</i> is called when the URL is requested, and returns the result of <i>proc</i> as the response. <i>proc</i> must returns a body and the content-type. 
 </dd>
+
+<dt><code>(file->url <i>filename</i> :optional <i>content-type</i>)</code></dt>
+<dd>
+Allocates an URL for the specified <i>filename</i>. If the URL is already allocated for the file, the same URL returns.
+
+If <i>content-type</i> is omitted, it will be estimated from <i>filename</i>.
+</dd>
+
+<dt><code>(data->url <i>data</i> <i>content-type</i>)</code></dt>
+<dd>
+Allocates an URL for the <i>data</i>.
+</dd>
+
+<dt><code>(json->url <i>json</i>)</code></dt>
+<dd>
+Allocates an URL for the <i>json</i>. <i>json</i> must be a list or a vector.
+</dd>
+
+<dt><code>(sxml->url <i>sxml</i>)</code></dt>
+<dd>
+Allocates an URL for the <i>sxml</i>.
+</dd>
 </dl>
 
 

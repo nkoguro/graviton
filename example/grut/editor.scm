@@ -37,7 +37,7 @@
 (use graviton.grut)
 (use text.html-lite)
 
-(bind-url-path "/editor.css" (build-path (sys-dirname (current-load-path)) "editor.css"))
+(define editor-css-path (build-path (sys-dirname (current-load-path)) "editor.css"))
 
 (define (main args)
   (let-args (cdr args)
@@ -48,7 +48,7 @@
                           (force-browser? 'browser)
                           (else #f)))
     (with-window (grv-window
-                   :css "/editor.css"
+                   :css (file->url editor-css-path)
                    :body
                    (html:body
                     (html:div :id "container"

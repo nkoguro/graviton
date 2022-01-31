@@ -84,6 +84,10 @@
 
           autoload-css
           bind-url-path
+          file->url
+          data->url
+          json->url
+          sxml->url
 
           flush-client-request
 
@@ -230,23 +234,51 @@
             (respond/ok req js-code :content-type "text/javascript"))
           (respond/ng req 404)))))
 
-(define *resource-table* (make-hash-table 'equal?))
+(define *id->resource-body-table* (make-hash-table 'equal?))
+(define *resource-body->url-table* (make-hash-table 'equal?))
 (define resource-id-generator (make-id-generator))
 
 (define-http-handler #/\/_r\/(.*)/
   (lambda (req app)
     (let1 res-id ((slot-ref req 'path-rxmatch) 1)
-      (match-let1 (content-type body) (hash-table-get *resource-table* res-id '(#f #f))
+      (match-let1 (content-type body) (hash-table-get *id->resource-body-table* res-id '(#f #f))
         (cond
-          (content-type
+          ((and content-type body)
            (respond/ok req body :content-type content-type))
+          (body
+           (respond/ok req body))
           (else
            (respond/ng req 404)))))))
 
-(define (allocate-resource content-type data)
-  (let1 res-id (number->string (resource-id-generator) 36)
-    (hash-table-put! *resource-table* res-id (list content-type data))
-    (string-append "/_r/" res-id)))
+(define (allocate-resource content-type body)
+  (let1 content-type&body (list content-type body)
+    (cond
+      ((hash-table-get *resource-body->url-table* content-type&body #f)
+       => (lambda (url) url))
+      (else
+       (let* ((res-id (number->string (resource-id-generator) 36))
+              (url (string-append "/_r/" res-id)))
+         (hash-table-put! *id->resource-body-table* res-id content-type&body)
+         (hash-table-put! *resource-body->url-table* content-type&body url)
+         url)))))
+
+(define (file->url file :optional (content-type (estimate-content-type file)))
+  (unless content-type
+    (errorf "No content-type specified: ~a" file))
+  (unless (file-is-readable? file)
+    (errorf "File not found: ~a" file))
+  (allocate-resource content-type `(file ,file)))
+
+(define (data->url data content-type)
+  (unless content-type
+    (errorf "No content-type specified: ~s" data))
+  (allocate-resource content-type `(file ,file)))
+
+(define (json->url json)
+  (allocate-resource #f `(json ,json)))
+
+(define (sxml->url sxml)
+  (allocate-resource #f `(sxml ,sxml)))
 
 ;;;
 

@@ -13,7 +13,7 @@
 (use text.html-lite)
 (use util.match)
 
-(bind-url-path "/webgosh.css" (build-path (sys-dirname (current-load-path)) "webgosh.css"))
+(define css-path (build-path (sys-dirname (current-load-path)) "webgosh.css"))
 
 (define (input-continues? input-context)
   (let1 str (input-context-text-content input-context)
@@ -392,7 +392,7 @@
 
     (with-window
         (grv-window
-          :css "/webgosh.css"
+          :css (file->url css-path)
           :title "gosh on Web"
           :body
           (html:body

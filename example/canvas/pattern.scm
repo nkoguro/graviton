@@ -3,7 +3,7 @@
 (use graviton)
 (use graviton.grut)
 
-(bind-url-path "/" (sys-dirname (current-load-path)))
+(define image-path (build-path (sys-dirname (current-load-path)) "Canvas_createpattern.png"))
 
 (define (main args)
   (let-args (cdr args)
@@ -20,6 +20,6 @@
           (when (equal? key "Escape")
             (close-window)))
 
-        (let1 pat (ctx'create-pattern (load-image "/Canvas_createpattern.png") "repeat")
+        (let1 pat (ctx'create-pattern (load-image (file->url image-path)) "repeat")
           (set! (~ ctx'fill-style) pat)
           (ctx'fill-rect 0 0 300 300))))))

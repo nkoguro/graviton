@@ -225,6 +225,8 @@
        "audio/wav")
       ((member ext '("js" "mjs"))
        "text/javascript")
+      ((member ext '("css"))
+       "text/css")
       (else
        #f))))
 

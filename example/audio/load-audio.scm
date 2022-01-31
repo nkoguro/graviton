@@ -4,7 +4,7 @@
 (use graviton)
 (use graviton.grut)
 
-(bind-url-path "/pipo.mp3" (build-path (sys-dirname (current-load-path)) "pipo.mp3"))
+(define sound-path (build-path (sys-dirname (current-load-path)) "pipo.mp3"))
 
 (define (is-browser?)
     (eq? (grv-config-parameter 'client) 'browser))
@@ -30,7 +30,7 @@
           (while (not (equal? (jsevent-await window "keyup" '(key)) " "))
             #t))
 
-        (let1 audio (load-audio "/pipo.mp3")
+        (let1 audio (load-audio (file->url sound-path))
           (log-format "duration: ~a sec" (~ audio'duration))
           (audio'play)
           (asleep 0.5))
