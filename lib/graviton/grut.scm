@@ -173,6 +173,7 @@
                           (title #f)
                           (column #f)
                           (row #f)
+                          (font #f)
                           (font-size #f)
                           (color "white")
                           (background-color "black")
@@ -201,6 +202,7 @@
                                                             ("overflow-y" . ,(if scrollbar?
                                                                                "scroll"
                                                                                "hidden"))
+                                                            ("font" . ,font)
                                                             ("font-size" . ,font-size)))))
               :title title
               :width window-width
@@ -213,6 +215,7 @@
                                  (canvas-id "canvas")
                                  (column #f)
                                  (row #f)
+                                 (font #f)
                                  (font-size #f)
                                  (title #f)
                                  (color "white")
@@ -254,6 +257,7 @@
                                                                 ("overflow-y" . ,(if scrollbar?
                                                                                    "scroll"
                                                                                    "hidden"))
+                                                                ("font" . ,font)
                                                                 ("font-size" . ,font-size)))))
                   :title title
                   :width window-width
