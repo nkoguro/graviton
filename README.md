@@ -1056,45 +1056,59 @@ Cancels the current speech.
 
 ### Text Console
 
-html:grut-text
-clipboard-text
+graviton.grut module provides `<grut-text>` element that represents a text console. You can input a text using line edit and output a text. You can also control the text console using ANSI escape sequence.
+
+`<grut-text>` is a `<jsobject>`, and it also inherits `<virtual-output-port>`. You can write a text to it, so that the text will be displayed in the text console element (for example, `(format text-console "Hello, world")`).
+
+`<grut-text>` can accept generic functions of [`text.console`](http://practical-scheme.net/gauche/man/?p=text.console).
+
+<dl>
+<dt><code>html:grut-text</code></dt>
+<dd>
+Constructs a <code>&lt;grut-text&gt;</code> element. You can use it as a part of HTML document tree by <a href="http://practical-scheme.net/gauche/man/?p=text.html-lite"><code>text.html-lite</code> module</a>.
+</dd>
+
+<dt><code>(set-line-style! <i>text-console</i> <i>row</i> <i>style</i> <i>value</i>)</code></dt>
+<dd>
+Sets the HTML <i>style</i> of the line <i>row</i> to <i>value</i>. 
+</dd> 
+
+<dt><code>(scroll-up <i>text-console</i> :optional <i>n</i>)</code></dt>
+<dd>
+Scrolls up <i>text-console</i> by <i>n</i> lines. The default <i>n</i> is 1.
+</dd>
+
+<dt><code>(scroll-down <i>text-console</i> :optional <i>n</i>)</code></dt>
+<dd>
+Scrolls down <i>text-console</i> by <i>n</i> lines. The default <i>n</i> is 1.
+</dd>
+
+<dt><code>(scroll-to <i>text-console</i> <i>row</i> :optional <i>align-to-top</i>)</code></dt>
+<dd>
+Scrolls to the line <i>row</i>. If <i>align-to-top</i> is <code>#t</code>, the line <i>row</i> will be aligned at the top. Otherwise, the line will be aligned at the bottom. The default value of <i>align-to-top</i> is <code>#t</code>.
+</dd>
+
+<dt><code>(compute-character-position&size <i>text-console</i> <i>column</i> <i>row</i>)</code></dt>
+<dd>
+Returns the rectangle in the viewport which contains the character at (<i>column</i>, <i>row</i>). This function returns 4 values (x, y, width and height).
+</dd>
+</dl>
+
+#### Line Edit
+
+<dl>
+<dt><code>(clipboard-text <i>input-context</i>)</code></dt>
+<dd>
+</dd>
 
 <input-context>
-<grut-text>
 
 get-input-text
-
-call-with-console
-putch
-putstr
-beep
-getch
-chready?
-query-cursor-position
-move-cursor-to
-clear-screen
-clear-to-eol
-clear-to-eos
-hide-cursor
-show-cursor
-cursor-down/scroll-up
-cursor-up/scroll-down
-query-screen-size
-set-character-attribute
-reset-character-attribute
-with-character-attribute
-
-set-line-style!
-scroll-up
-scroll-down
-scroll-to
 
 make-keymap
 global-keymap
 bind-key
 switch-keymap
-
-compute-character-position&size
 
 input-context-data-get
 input-context-data-put!
@@ -1122,6 +1136,7 @@ edit:previous-char
 edit:previous-line
 edit:select-all
 read-text/edit
+</dl>
 
 
 ## JavaScript FFI and JSiSE (JavaScript in S-expression)
