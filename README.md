@@ -742,23 +742,221 @@ It is identical to <code>(await (parallel <i>body ...</i>)</code>.
 
 ## Module: graviton.grut
 
-One of the motivations to develop Graviton is to quickly make an old-style computer UI (the days of CUI, i.e., text console + single graphics screen).
+One of the motivations to develop Graviton is to quickly make an old-style computer UI (the days of CUI, i.e., text console + single graphics screen). graviton.grut, which stands for "GRaviton Utility Toolkit," provides miscellaneous utilities to support such UI. 
 
-graviton.grut, which stands for "GRaviton Utility Toolkit," provides miscellaneous utilities to support such UI. Currently, it contains these utilities.
- - Simple window generation of text console + graphics
- - Text Console
- - Clipboard
- - Old-style PSG Music with MML
- - Speech Synthesis
+<dl>
+<dt><code>(load-image <i>url</i> :key <i>on-error</i>)</code></dt>
+<dd>
+Loads an image from <i>url</i> and returns <code>&lt;html-image-element&gt;</code> object (which is <code>HTMLImageElement</code> in JavaScript).
 
-load-image
-load-audio
+The keyword argument <code>:on-error</code> can be a keyword <code>:error</code> (default) or <code>#f</code>. If it's the former, an error is signaled when the image can't be loaded from the URL. If it's the latter, <code>load-image</code> just returns <code>#f</code>.
+</dd>
 
-alist->style
+<dt><code>(load-audio <i>url</i> :key <i>on-error</i>)</code></dt>
+<dd>
+Loads an audio data from <i>url</i> and returns <code>&lt;html-audio-element&gt;</code> object (which is <code>HTMLAudioElement</code> in JavaScript).
 
-grut-canvas-window
-grut-text-window
-grut-text+canvas-window
+The keyword argument <code>:on-error</code> can be a keyword <code>:error</code> (default) or <code>#f</code>. If it's the former, an error is signaled when the audio data can't be loaded from the URL. If it's the latter, <code>load-audio</code> just returns <code>#f</code>.
+</dd>
+
+<dt><code>(alist->style <i>alist</i>)</code></dt>
+<dd>
+Returns a string which is for the style attribute of HTML element. <i>alist</i> is an alist, the key is an style attribute name and the value is the attribute's value. If the value is <code>#f</code>, the style attribute will be ignored. 
+</dd>
+
+<dt id="grut-canvas-window"><code>(grut-canvas-window <i>width</i> <i>height</i> :key <i>id</i> <i>title</i> <i>background-color</i> <i>window-width</i> <i>window-height</i> <i>resizable?</i> <i>fit</i> <i>margin</i></code>
+<dd>
+Creates <code>&lt;grv-window&gt;</code> which has a <code>&lt;canvas&gt;</code> element. <i>width</i> and <i>height</i> are the resolution of the canvas.
+  <dl>
+    <dt><code>id</code></dt>
+    <dd>
+      The element ID of this <code>&lt;canvas&gt;</code> element. The default is "canvas".
+    </dd>
+    <dt><code>title</code></dt>
+    <dd>
+      The title of this window.
+    </dd>
+    <dt><code>background-color</code></dt>
+    <dd>
+      The background color of this window.
+    </dd>
+    <dt><code>window-width</code></dt>
+    <dd>
+      The width of this window.
+    </dd>
+    <dt><code>window-height</code></dt>
+    <dd>
+      The height of this window.
+    </dd>
+    <dt><code>resizable?</code></dt>
+    <dd>
+      Whether this window is resizable or not. The default is <code>#t</code>.
+    </dd>
+    <dt><code>fit</code></dt>
+    <dd>
+      How to fit the size and position of this <code>&lt;canvas&gt;</code> element to this window. The value must be one of these values.
+      <dl>
+        <dt><code>'contain</code> (default)</dt>
+        <dd>
+          The canvas is expanded or shrank to fit the window with keeping the aspect ratio. If the canvas's aspect ratio and the window's aspect ratio are different, the canvas will be "<a href="https://en.wikipedia.org/wiki/Letterboxing_(filming)">letterboxed</a>".
+        </dd>
+        <dt><code>'cover</code></dt>
+        <dd>
+          The canvas is expanded or shrank to fit the window with keeping the aspect ratio. If the canvas's aspect ratio and the window's aspect ratio are different, the canvas will be clipped to fit. 
+        </dd>
+        <dt><code>'fill</code></dt>
+        <dd>
+          The canvas is expanded or shrank to fit the window without keeping the canvas's orignal aspect ratio. The entire canvas will completely fill the window.
+        </dd>
+        <dt><code>'none</code></dt>
+        <dd>
+          The canvas will not be resized.
+        </dd>
+      </dl>
+    </dd>
+    <dt><code>margin</code></dt>
+    <dd>
+      The margin of this <code>&lt;canvas&gt;</code> element.
+    </dd>
+  </dl>
+</dd>
+
+<dt><code>(grut-text-window :key <i>id</i> <i>title</i> <i>column</i> <i>row</i> <i>font</i> <i>font-size</i> <i>color</i> <i>background-color</i> <i>window-width</i> <i>window-height</i> <i>resizable?</i> <i>fit</i> <i>scrollbar?</i> <i>padding</i></code>
+<dd>
+Creates <code>&lt;grv-window&gt;</code> which has a <a href="#text-console"><code>&lt;grut-text&gt;</code></a> element.
+  <dl>
+    <dt><code>id</code></dt>
+    <dd>
+      The element ID of this <code>&lt;grut-text&gt;</code> element. The default is "text-console".
+    </dd>
+    <dt><code>title</code></dt>
+    <dd>
+      The title of this window.
+    </dd>
+    <dt><code>column</code></dt>
+    <dd>
+      The number of columns of this <code>&lt;grut-text&gt;</code> element. The width of <code>&lt;grut-text&gt;</code> will be computed with this value and the font size.
+    </dd>
+    <dt><code>row</code></dt>
+    <dd>
+      The number of rows of this <code>&lt;grut-text&gt;</code> element. The height of <code>&lt;grut-text&gt;</code> will be computed with this value and the font size.
+    </dd>
+    <dt><code>font</code></dt>
+    <dd>
+      The font of this <code>&lt;grut-text&gt;</code> element.
+    </dd>
+    <dt><code>font-size</code></dt>
+    <dd>
+      The font size of this <code>&lt;grut-text&gt;</code> element.
+    </dd>
+    <dt><code>color</code></dt>
+    <dd>
+      The text color of this <code>&lt;grut-text&gt;</code> element. The default is "white".
+    </dd>
+    <dt><code>background-color</code></dt>
+    <dd>
+      The background color of this window. The default is "black".
+    </dd>
+    <dt><code>window-width</code></dt>
+    <dd>
+      The width of this window.
+    </dd>
+    <dt><code>window-height</code></dt>
+    <dd>
+      The height of this window.
+    </dd>
+    <dt><code>resizable?</code></dt>
+    <dd>
+      Whether this window is resizable or not. The default is <code>#t</code>.
+    </dd>
+    <dt><code>fit</code></dt>
+    <dd>
+      How to fit the size and position of this <code>&lt;grut-text&gt;</code> element to this window. The available values are the same as <a href="#grut-canvas-window"><code>grut-canvas-window</code></a>.
+    </dd>
+    <dt><code>scrollbar?</code></dt>
+    <dd>
+      Whether the vertical scrollbar is shown or not. The default is <code>#f</code> (the scroll bar is hidden).
+      The horizontal scrollbar is always hidden.
+    </dd>
+    <dt><code>padding</code></dt>
+    <dd>
+      The padding of this this <code>&lt;grut-text&gt;</code> element.
+    </dd>
+  </dl>
+</dd>
+
+<dt><code>(grut-text+canvas-window width height :key  <i>text-id</i> <i>canvas-id</i> <i>title</i> <i>column</i> <i>row</i> <i>font</i> <i>font-size</i> <i>color</i> <i>background-color</i> <i>window-width</i> <i>window-height</i> <i>resizable?</i> <i>fit</i> <i>scrollbar?</i> <i>margin</i> <i>padding</i></code></dt>
+<dd>
+Creates <code>&lt;grv-window&gt;</code> which has a <a href="#text-console"><code>&lt;grut-text&gt;</code></a> element and a <code>&lt;canvas&gt;</code> element. <i>width</i> and <i>height</i> are the resolution of the canvas.
+    <dt><code>text-id</code></dt>
+    <dd>
+      The element ID of this <code>&lt;grut-text&gt;</code> element. The default is "text-console".
+    </dd>
+    <dt><code>canvas-id</code></dt>
+    <dd>
+      The element ID of this <code>&lt;canvas&gt;</code> element. The default is "canvas".
+    </dd>
+    <dt><code>title</code></dt>
+    <dd>
+      The title of this window.
+    </dd>
+    <dt><code>column</code></dt>
+    <dd>
+      The number of columns of this <code>&lt;grut-text&gt;</code> element. The width of <code>&lt;grut-text&gt;</code> will be computed with this value and the font size.
+    </dd>
+    <dt><code>row</code></dt>
+    <dd>
+      The number of rows of this <code>&lt;grut-text&gt;</code> element. The height of <code>&lt;grut-text&gt;</code> will be computed with this value and the font size.
+    </dd>
+    <dt><code>font</code></dt>
+    <dd>
+      The font of this <code>&lt;grut-text&gt;</code> element.
+    </dd>
+    <dt><code>font-size</code></dt>
+    <dd>
+      The font size of this <code>&lt;grut-text&gt;</code> element.
+    </dd>
+    <dt><code>color</code></dt>
+    <dd>
+      The text color of this <code>&lt;grut-text&gt;</code> element. The default is "white".
+    </dd>
+    <dt><code>background-color</code></dt>
+    <dd>
+      The background color of this window. The default is "black".
+    </dd>
+    <dt><code>window-width</code></dt>
+    <dd>
+      The width of this window.
+    </dd>
+    <dt><code>window-height</code></dt>
+    <dd>
+      The height of this window.
+    </dd>
+    <dt><code>resizable?</code></dt>
+    <dd>
+      Whether this window is resizable or not. The default is <code>#t</code>.
+    </dd>
+    <dt><code>fit</code></dt>
+    <dd>
+      How to fit the size and position of this <code>&lt;grut-text&gt;</code> and <code>&lt;canvas&gt;</code> element to this window. The available values are the same as <a href="#grut-canvas-window"><code>grut-canvas-window</code></a>.
+    </dd>
+    <dt><code>scrollbar?</code></dt>
+    <dd>
+      Whether the vertical scrollbar is shown or not. The default is <code>#f</code> (the scroll bar is hidden).
+      The horizontal scrollbar is always hidden.
+    </dd>
+    <dt><code>margin</code></dt>
+    <dd>
+      The margin of this <code>&lt;canvas&gt;</code> element.
+    </dd>
+    <dt><code>padding</code></dt>
+    <dd>
+      The padding of this this <code>&lt;grut-text&gt;</code> element.
+    </dd>
+  </dl>
+</dd>
+</dl>
+
 
 ### grut audio
 
@@ -774,21 +972,89 @@ wait-all-tracks
 
 play-beep
 
-### grut clipboard
+### Clipboard
 
-copy-text-to-clipboard
+<dl>
+<dt><code>(copy-text-to-clipboard <i>text</i>)</code></dt>
+<dd>
+Copies <i>text</i> into the clipboard.
+</dd>
+</dl>
 
-### grut speech
 
-<speech-synthesis-voice>
-query-all-voices
-query-voice
-speak
-pause-speech
-resume-speech
-cancel-speech
+### Speech
 
-### grut text
+`<speech-synthesis-voice>` represents a voice for the speech synthesis (it is identical to [`SpeechSynthesisVoice`](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesisVoice) in JavaScript). The class has these slots.
+<dl>
+<dt><code>default</code> (boolean)</dt>
+<dd>
+  Whether the voice is the defalut voice or not.
+</dd>
+<dt><code>lang</code> (string)</dt>
+<dd>
+  The BCP 47 language tag of this voice.
+</dd>
+<dt><code>local-service</code> (boolean)</dt>
+<dd>
+  Whether the voice is supplied by a local speech synthesizer service or not.
+</dd>
+<dt><code>name</code> (string)</dt>
+<dd>
+  The human-readable name of this voice.
+</dd>
+<dt><code>voice-uri</code> (string)</dt>
+<dd>
+  The type of URI and location of the speech synthesis service for this voice.
+</dd>
+</dl>
+
+These functions are provided for Speech Synthesis.
+
+<dl>
+<dt id="query-all-voices"><code>(query-all-voices :key <i>lang</i> <i>name</i> <i>default</i> <i>local-service</i> <i>voice-uri</i> <i>wait?</i>)</code></dt>
+<dd>
+Returns a list of voices that matches the specified conditions. The conditions can be specified with <code><i>lang</i> <i>name</i> <i>default</i> <i>local-service</i> <i>voice-uri</i></code>. They are associated with the slots of <code>&lt;speech-synthesis-voice&gt;</code>. 
+
+If the slot is boolean, the associated keyword parameter can takes a boolean value. The voices that matches the keyword parameter value will be returned. 
+
+If the slot is string, the associated keyword parameter can take a string or a regular expression. The voices whose parameter contains the string or matches the regular expression will be returned.
+
+<dl>
+  <dt><code><i>wait?</i></code> (default is <code>#t</code>)</dt>
+  <dd>
+    Waits for the background voice loading. Some browsers loads voices in background, so <code>SpeechSynthesis.getVoices()</code> in JavaScript may not return any voices until the load is completed. If <code><i>wait?</i></code> is <code>#t</code>, this function waits until the getVoices() method returns voices. If no voices are available, <code>query-all-voices</code> will not be returned.   
+  </dd>
+</dl>
+</dd>
+
+<dt><code>(query-voice :key <i>lang</i> <i>name</i> <i>default</i> <i>local-service</i> <i>voice-uri</i> <i>wait?</i>)</code></dt>
+<dd>
+Returns one of the voices that matches the specified conditions. The keyword parameters are the same as <a href="#query-all-voices"><code>query-all-voices</code></a>.
+</dd>
+
+<dt><code>(speak <i>text</i> :key <i>voice</i>)</code></dt>
+<dd>
+Speaks <i>text</i> with <i>voice</i>. If <i>voice</i> is omitted, the default voice will be used.
+</dd>
+
+<dt><code>(pause-speech)</code></dt>
+<dd>
+Pauses the current speech.
+</dd>
+
+<dt><code>(resume-speech)</code></dt>
+<dd>
+Resumes the paused speech.
+</dd>
+
+<dt><code>(cancel-speech)</code></dt>
+<dd>
+Cancels the current speech.
+</dd>
+</dl>
+
+
+### Text Console
 
 html:grut-text
 clipboard-text
