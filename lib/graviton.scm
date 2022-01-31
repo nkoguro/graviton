@@ -256,7 +256,11 @@
       ((hash-table-get *resource-body->url-table* content-type&body #f)
        => (lambda (url) url))
       (else
-       (let* ((res-id (number->string (resource-id-generator) 36))
+       (let* ((res-id (let loop ()
+                        (let1 id (number->string (random-integer 18446744073709551616) 36)
+                          (if (hash-table-contains? *id->resource-body-table* id)
+                            (loop)
+                            id))))
               (url (string-append "/_r/" res-id)))
          (hash-table-put! *id->resource-body-table* res-id content-type&body)
          (hash-table-put! *resource-body->url-table* content-type&body url)
