@@ -142,7 +142,8 @@
                             (window-width #f)
                             (window-height #f)
                             (resizable? #t)
-                            (fit 'contain))
+                            (fit 'contain)
+                            (margin #f))
   (let-values (((default-width default-height) (min-default-window-size)))
     (let* ((window-width (or window-width
                              (and window-height
@@ -160,7 +161,8 @@
                                                 ("height" . "100%")
                                                 ("overflow-x" . "hidden")
                                                 ("overflow-y" . "hidden")))
-                         (html:canvas :id id :class (fit->css-name fit) :width width :height height))
+                         (html:canvas :id id :class (fit->css-name fit) :width width :height height
+                                      :style (alist->style `(("margin" . ,margin)))))
                   :title title
                   :width window-width
                   :height window-height
@@ -220,6 +222,7 @@
                                  (resizable? #t)
                                  (fit 'contain)
                                  (scrollbar? #f)
+                                 (margin #f)
                                  (padding #f))
   (let-values (((default-width default-height) (min-default-window-size)))
     (let* ((window-width (or window-width
@@ -238,7 +241,8 @@
                                                 ("height" . "100%")
                                                 ("overflow-x" . "hidden")
                                                 ("overflow-y" . "hidden")))
-                         (html:canvas :id canvas-id :class (fit->css-name fit) :width width :height height)
+                         (html:canvas :id canvas-id :class (fit->css-name fit) :width width :height height
+                                      :style (alist->style `(("margin" . ,margin))))
                          (html:grut-text :id text-id
                                          :class (string-join (list "grut-monospace-font" (fit->css-name fit)) " ")
                                          :column column

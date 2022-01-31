@@ -80,9 +80,15 @@ function processGrutSpecialClassInner(element) {
     const objectFitId = `object${objectFitNextId++}`;
     const objectWidthVar = '--grut-object-width';
     const objectHeightVar = '--grut-object-height';
+    const objectMarginLeftVar = '--grut-object-margin-left';
+    const objectMarginTopVar = '--grut-object-margin-top';
     const handler = () => {
-        element.style.setProperty(objectWidthVar, element.offsetWidth);
-        element.style.setProperty(objectHeightVar, element.offsetHeight);
+        const style = window.getComputedStyle(element);
+        const [marginTop, marginBottom, marginLeft, marginRight] = [style.marginTop, style.marginBottom, style.marginLeft, style.marginRight].map(parseFloat);
+        element.style.setProperty(objectWidthVar, element.clientWidth + marginLeft + marginRight);
+        element.style.setProperty(objectHeightVar, element.clientHeight + marginTop + marginBottom);
+        element.style.setProperty(objectMarginLeftVar, marginLeft);
+        element.style.setProperty(objectMarginTopVar, marginTop);
     };
     const objectData = {
         'handler': handler
@@ -91,23 +97,23 @@ function processGrutSpecialClassInner(element) {
     objectFitDataTable.set(objectFitId, objectData);
     switch (grutSpecialClass) {
         case 'grut-contain':
-            element.style.left = `var(${containerData['center-x-var']})`;
-            element.style.top = `var(${containerData['center-y-var']})`;
+            element.style.left = `calc(var(${containerData['center-x-var']})*1px - var(${objectMarginLeftVar})*1px)`;
+            element.style.top = `calc(var(${containerData['center-y-var']})*1px - var(${objectMarginTopVar})*1px)`;
             element.style.transform = `translate(-50%, -50%) scale(min(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar})))`;
             break;
         case 'grut-cover':
-            element.style.left = `var(${containerData['center-x-var']})`;
-            element.style.top = `var(${containerData['center-y-var']})`;
+            element.style.left = `calc(var(${containerData['center-x-var']})*1px - var(${objectMarginLeftVar})*1px)`;
+            element.style.top = `calc(var(${containerData['center-y-var']})*1px - var(${objectMarginTopVar})*1px)`;
             element.style.transform = `translate(-50%, -50%) scale(max(var(${containerData['width-var']}) / var(${objectWidthVar}), var(${containerData['height-var']}) / var(${objectHeightVar})))`;
             break;
         case 'grut-fill':
-            element.style.left = `var(${containerData['center-x-var']})`;
-            element.style.top = `var(${containerData['center-y-var']})`;
+            element.style.left = `calc(var(${containerData['center-x-var']})*1px - var(${objectMarginLeftVar})*1px)`;
+            element.style.top = `calc(var(${containerData['center-y-var']})*1px - var(${objectMarginTopVar})*1px)`;
             element.style.transform = `translate(-50%, -50%) scale(calc(var(${containerData['width-var']}) / var(${objectWidthVar})), calc(var(${containerData['height-var']}) / var(${objectHeightVar})))`;
             break;
         case 'grut-none':
-            element.style.left = `var(${containerData['center-x-var']})`;
-            element.style.top = `var(${containerData['center-y-var']})`;
+            element.style.left = `calc(var(${containerData['center-x-var']})*1px - var(${objectMarginLeftVar})*1px)`;
+            element.style.top = `calc(var(${containerData['center-y-var']})*1px - var(${objectMarginTopVar})*1px)`;
             break;
     }
     handler();
