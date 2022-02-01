@@ -1092,50 +1092,213 @@ Scrolls to the line <i>row</i>. If <i>align-to-top</i> is <code>#t</code>, the l
 <dd>
 Returns the rectangle in the viewport which contains the character at (<i>column</i>, <i>row</i>). This function returns 4 values (x, y, width and height).
 </dd>
+
+<dt><code>(get-input-text <i>text-console</i> :optional <i>wait?</i>)</code></dt>
+<dd>
+Returns a string in the input queue of <i>text-console</i>. 
+If the input queue is empty and <i>wait?</i> is <code>#f</code> (default), <code>#f</code> is returned.
+
+If <i>wait?</i> is <code>#t</code>, this function waits for an input event if the queue is empty. 
+</dd>
 </dl>
 
 #### Line Edit
 
 <dl>
-<dt><code>(clipboard-text <i>input-context</i>)</code></dt>
+<dt><code>(make-keymap :optional <i>parent</i>)</code></dt>
 <dd>
+Makes a keymap. If a <i>parent</i> keymap is specified, the newly created keymap inherits the <i>parent</i>. 
+</dd>
+<dt><code>(global-keymap)</code></dt>
+<dd>
+Returns the global keymap, which is effective at first.
+</dd>
+<dt><code>(bind-key <i>keymap</i> <i>key</i> <i>action</i> :key <i>use-clipboard-text?</i>)</code></dt>
+<dd>
+Assigns <i>action</i> to <i>key</i> in <i>keymap</i>.
+
+<i>key</i> is <a href="https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key/Key_Values">a key value of KeyboardEvent</a>. If you want to specify modifier keys, Alt, Meta, Ctrl and Shift, you need to add prefixes "A-", "M-", "C-" and "S-" in this order. For example, if you want to specify "Ctrl+Shift+PageDown", the key is "C-S-PageDown".
+
+You can also specify continuous keys like "Ctrl+X Ctrl+S" in Emacs. In this case, the <i>key</i> is "C-x C-s". 
+
+<i>action</i> must be a string or <code>&lt;procedure&gt;</code>. If <i>action</i> is a string, the string will be inserted if the <i>key</i> is pressed. If <i>action</i> is a procedure, the procedure will be called with <code>&lt;input-context&gt;</code>. You can get information of line editing from the context.
+
+If you want to use a clipboard text, you need to specify <code>#t</code> to <code>:use-clipboard-text?</code> keyword parameter. You can get the clipboard text from the <code>&lt;input-context&gt;</code>.
 </dd>
 
-<input-context>
+<dt><code>(switch-keymap <i>input-context</i> <i>keymap</i>)</code></dt>
+<dd>
+Switches the current keymap to <i>keymap</i>.
+</dd> 
 
-get-input-text
+<dt><code>(read-text/edit <i>text-console</i> :key <i>prompt</i> <i>keymap</i> <i>input-continues</i> <i>initial-text</i> <i>cursor-column</i> <i>cursor-row</i> <i>on-change</i> <i>on-input</i> <i>data-alist</i>)</code></dt>
+<dd>
+Reads a text that the user inputs on <i>text-console</i>. The user can use line edit in the input.
+  <dl>
+    <dt><code>prompt</code></dt>
+    <dd>
+      The prompt string of this input. The default is an empty string.
+    </dd>
+    <dt><code>keymap</code></dt>
+    <dd>
+      The keymap used in this input.
+    </dd>
+    <dt><code>input-continues</code></dt>
+    <dd>
+      The procedure that determines whether the input continues or finishes. This procedure is called with input-context  when Enter is pressed. If it returns <code>#f</code>, the input finishes and <code>read-text/edit</code> returns the input text. Otherwise, the input continues.<br>
+      If <i>input-continues</i> is <code>#f</code> (default), the input finishes when Enter is pressed. If you don't need multiple line edit, you don't need to specify <i>input-continues</i>.
+    </dd>
+    <dt><code>initial-text</code></dt>
+    <dd>
+      The ininitial text of this input.
+    </dd>
+    <dt><code>cursor-column</code></dt>
+    <dd>
+      The column number of the initial cursor position.
+    </dd>
+    <dt><code>cursor-column</code></dt>
+    <dd>
+      The row number of the initial cursor position.
+    </dd>
+    <dt><code>on-change</code></dt>
+    <dd>
+      The procedure that is called with <code>&lt;input-context&gt;</code> when the input text is changed.
+    </dd>
+    <dt><code>on-input</code></dt>
+    <dd>
+      The procedure that is called with <code>&lt;input-context&gt;</code> when the user types any keys.
+    </dd>
+    <dt><code>data-alist</code></dt>
+    <dd>
+      The data that will be passed to <code>&lt;input-context&gt;</code>. You can get the data with <code>input-context-data-get</code> and modify it with <code>input-context-data-put!</code>.
+    </dd>
+  </dl>
+</dd>
 
-make-keymap
-global-keymap
-bind-key
-switch-keymap
+<dt><code>(clipboard-text <i>input-context</i>)</code></dt>
+<dd>
+Returns the text in the clipboard. If no text is available, <code>#f</code> is returned.
+</dd>
 
-input-context-data-get
-input-context-data-put!
-input-context-data-delete!
-input-context-text-line
-input-context-text-content
+<dt><code>(input-context-text-line <i>input-context</i> :optional <i>row</i>)</code></dt>
+<dd>
+Returns the line of the input text at line <i>row</i>. The default <i>row</i> is the current line. 
+</dd>
 
-edit:backward-delete-char
-edit:beginning-of-edit-area
-edit:beginning-of-line
-edit:cancel-edit
-edit:copy
-edit:cut
-edit:delete-char
-edit:end-of-edit-area
-edit:end-of-line
-edit:forward-char
-edit:insert-string
-edit:newline-or-commit
-edit:next-line
-edit:page-up
-edit:page-down
-edit:paste
-edit:previous-char
-edit:previous-line
-edit:select-all
-read-text/edit
+<dt><code>(input-context-text-content <i>input-context</i>)</code></dt>
+<dd>
+Returns the whole text of the input text.
+</dd>
+
+<dt><code>(input-context-data-get <i>input-context</i> <i>key</i> :optional <i>default</i>)</code></dt>
+<dd>
+Searches <i>key</i> in <i>input-context</i>, and returns its value if found. Otherwise, returns <i>default</i> (the default is <code>#f</code>).
+</dd>
+
+<dt><code>(input-context-data-put! <i>input-context</i> <i>key</i> <i>value</i>)</code></dt>
+<dd>
+Puts <i>key</i> with <i>value</i> in <i>input-context</i>.
+</dd>
+
+<dt><code>(input-context-data-delete! <i>input-context</i> <i>key</i>)</code></dt>
+<dd>
+Deletes <i>key</i> in <i>input-context</i>.
+</dd>
+
+<dt><code>(edit:backward-delete-char <i>input-context</i>)</code></dt>
+<dd>
+Deletes the previous character.
+</dd>
+
+<dt><code>(edit:beginning-of-edit-area <i>input-context</i>)</code></dt>
+<dd>
+Moves the cursor to the beginning of the input area.
+</dd>
+
+<dt><code>(edit:beginning-of-line <i>input-context</i>)</code></dt>
+<dd>
+Moves the cursor to the beginning of the current line.
+</dd>
+
+<dt><code>(edit:cancel-edit <i>input-context</i>)</code></dt>
+<dd>
+Cancels the input text. <code>read-text/edit</code> returns <code>#f</code>.
+</dd>
+
+<dt><code>(edit:copy <i>input-context</i>)</code></dt>
+<dd>
+Copies the selected text into the clipboard.
+</dd>
+
+<dt><code>(edit:cut <i>input-context</i>)</code></dt>
+<dd>
+Copies the selected text into the clipboard, and deletes the text.
+</dd>
+
+<dt><code>(edit:delete-char <i>input-context</i>)</code></dt>
+<dd>
+Deletes the current character.
+</dd>
+
+<dt><code>(edit:end-of-edit-area <i>input-context</i>)</code></dt>
+<dd>
+Moves the cursor to the end of the input area.
+</dd>
+
+<dt><code>(edit:end-of-line <i>input-context</i>)</code></dt>
+<dd>
+Moves the cursor to the end of the current line.
+</dd>
+
+<dt><code>(edit:forward-char <i>input-context</i>)</code></dt>
+<dd>
+Moves the cursor one character forward.
+</dd>
+
+<dt><code>(edit:insert-string <i>input-context</i> <i>string</i>)</code></dt>
+<dd>
+Inserts <i>string</i> at the current cursor position.
+</dd>
+
+<dt><code>(edit:newline-or-commit <i>input-context</i>)</code></dt>
+<dd>
+Finishes the input, and returns the input text if <code>input-continues</code> that is specified by <code>read-text/edit</code> returns <code>#f</code>. Otherwise, inserts a newline. 
+</dd>
+
+<dt><code>(edit:next-line <i>input-context</i>)</code></dt>
+<dd>
+Moves the cursor vertically down one line.
+</dd>
+
+<dt><code>(edit:page-up <i>input-context</i>)</code></dt>
+<dd>
+Moves the cursor vertically up one page.
+</dd>
+
+<dt><code>(edit:page-down <i>input-context</i>)</code></dt>
+<dd>
+Moves the cursor vertically down one page.
+</dd>
+
+<dt><code>(edit:paste <i>input-context</i>)</code></dt>
+<dd>
+Pastes a text in the clipboard.
+</dd>
+
+<dt><code>(edit:previous-char <i>input-context</i>)</code></dt>
+<dd>
+Moves the cursor one character backward.
+</dd>
+
+<dt><code>(edit:previous-line <i>input-context</i>)</code></dt>
+<dd>
+Moves the cursor vertically up one line.
+</dd>
+
+<dt><code>(edit:select-all <i>input-context</i>)</code></dt>
+<dd>
+Selects all text in the current input area.
+</dd>
 </dl>
 
 
