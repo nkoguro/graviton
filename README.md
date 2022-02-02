@@ -2,6 +2,38 @@
 
 ## Table of contents
 
+  * [Overview](#overview)
+  * [Installation](#installation)
+    * [Note for WSL user](#note-for-wsl-user)
+  * [Getting started](#getting-started)
+  * [Module: graviton](#module-graviton)
+    * [Configuration](#configuration)
+    * [Window](#window)
+    * [Window parameter](#window-parameter)
+    * [Information of the current request](#information-of-the-current-request)
+    * [Routing](#routing)
+    * [Autoloading CSS](#autoloading-css)
+    * [Working with JavaScript](#working-with-javascript)
+    * [Worker](#worker)
+    * [Asynchronous utilities](#asynchronous-utilities)
+    * [Concurrency and Parallelism](#concurrency-and-parallelism)
+  * [Module: graviton.grut](#module-gravitongrut)
+    * [Audio](#audio)
+    * [Clipboard](#clipboard)
+    * [Speech](#speech)
+    * [Text console](#text-console)
+  * [JavaScript FFI and JSiSE (JavaScript in S-Expression)](#javascript-ffi-and-jsise-javascript-in-s-expression)
+    * [Literals](#literals)
+    * [Vector](#vector)
+    * [Object](#object)
+    * [Control flow](#control-flow)
+    * [Local variables definition](#local-variables-definition)
+    * [Assignment](#assignment)
+    * [Expression operators](#expression-operators)
+    * [Returning values to Scheme](#returning-values-to-scheme)
+    * [Global variable definition](#global-variable-definition)
+
+
 ## Overview
 
 Graviton is a library to provide Web-based UI for a standalone Gauche program. You can make UI with HTML, CSS, and JavaScript and integrate the UI into your program.
@@ -1159,7 +1191,7 @@ Cancels the current speech.
 </dl>
 
 
-### Text Console
+### Text console
 
 graviton.grut module provides `<grut-text>` element that represents a text console. You can input a text using line edit and output a text. You can also control the text console using ANSI escape sequence.
 
