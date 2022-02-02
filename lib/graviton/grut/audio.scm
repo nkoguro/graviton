@@ -190,7 +190,7 @@
          (%dots ($lift length ($many ($. "."))))
          (%note-length ($lift (^(x n) (* x (- 2 (expt 0.5 n)))) %note-base-length %dots))
          (%note-total-length ($lift (cut apply + <> <>) %note-length ($many ($seq ($. #[+^]) %note-length))))
-         (%slur ($or ($->symbol ($. "&")) ($->symbol ($. "^"))))
+         (%slur ($->symbol ($. "&")))
          (%rest ($->symbol ($. "r")))
          (%noise ($->symbol ($. "x")))
          (%tempo ($->symbol ($. "t")))
