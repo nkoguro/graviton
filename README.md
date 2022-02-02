@@ -958,19 +958,124 @@ Creates <code>&lt;grv-window&gt;</code> which has a <a href="#text-console"><cod
 </dl>
 
 
-### grut audio
+### Audio
 
-play-mml
-resume-track
-resume-all-tracks
-pause-track
-pause-all-tracks
-stop-track
-stop-all-tracks
-wait-track
-wait-all-tracks
+<dl>
+<dt><code>(play-mml <i>track</i> <i>mml</i> ...)</code></dt>
+<dd>
+Plays music that is described in <i>mml</i> (Music Macro Language). <i>track</i> is a keyword in which the music is played. <i>track</i> and <i>mml</i> is a pair, and you can specify multiple <i>track</i> and <i>mml</i> pairs (for example, <code>(play-mml :track1 '(c d e) :track2 '(e f g))</code>).
 
-play-beep
+The Music Macro Language is a list of these elements.
+  <dl>
+    <dt><code><i>note symbol (c, d, e, f, g, a, b and qualifiers)</i></code></dt>
+    <dd>
+      <code>c</code>, <code>d</code>, <code>e</code>, <code>f</code>, <code>g</code>, <code>a</code> and <code>b</code> correspond to a scale. You can concatitate them to describe a chord. For example, <code>'ceg</code> means Cmajor. <code>+</code> and <code>-</code> means sharp and flat. <code>'c+</code> is "C sharp", and <code>'b-</code> means "B flat". <br><br>
+      You can add a number and a dot after the note symbol to describe the length. <code>'c4</code> means a quarter note, and <code>'c8.</code> means dotted eighth note. If the length is omitted, the default length is used. <br><br>
+      The notes can be concatinated with <code>&</code> for slur and tie like <code>'c&c</code> and <code>'c&d</code>.
+    </dd>
+    <dt><code>'r<i>length</i></code></dt>
+    <dd>
+      Rest. <code>'r4</code> means a quarter rest. If <i>length</i> is omitted, the default length is used. 
+    </dd>
+    <dt><code>'x<i>length</i></code></dt>
+    <dd>
+      Noise.
+    </dd>
+    <dt><code>:tempo <i>bpm</i></code></dt>
+    <dt><code>'t<i>bpm</i></code></dt>
+    <dd>
+      Tempo. <i>bpm</i> can't be omitted.
+    </dd>
+    <dt><code>:length <i>bpm</i></code></dt>
+    <dt><code>'l<i>length</i></code></dt>
+    <dd>
+      Changes the default length of notes.
+    </dd>
+    <dt><code>:octave <i>bpm</i></code></dt>
+    <dt><code>'o<i>octave</i></code></dt>
+    <dd>
+      Changes the octave.
+    </dd>
+    <dt><code>'&gt;</code></dt>
+    <dd>
+      Increases the octave.
+    </dd>
+    <dt><code>'&lt;</code></dt>
+    <dd>
+      Decreases the octave.
+    </dd>
+    <dt><code>:volume <i>volume</i></code></dt>
+    <dt><code>'v<i>volume</i></code></dt>
+    <dd>
+      Changes the volume. <i>volume</i> must be a number from 0 to 1.
+    </dd>
+    <dt><code>:stereo-pan <i>pan</i></code></dt>
+    <dt><code>'p<i>pan</i></code></dt>
+    <dd>
+      Controls a pan. <i>pan</i> is a number from -1 to 1, -1 means full left pan, and 1 means full right pan. 
+    </dd>
+    <dt><code>:gate/step <i>ratio</i></code></dt>
+    <dt><code>'q<i>ratio</i></code></dt>
+    <dd>
+      Changes a ratio of gate time (the sound is actually sounded) and the sound length. <i>ratio</i> is a number from 0 to 1. The default is 7/8.
+    </dd>
+    <dt><code>:wave-form <i>wave-type</i></code></dt>
+    <dt><code>:wave-form (<i>cosine-terms</i> <i>sine-terms</i>)</code></dt>
+    <dd>
+      Changes the wave shape of sounds. You can specify the shape with a symbol or cosine and sine-terms of the wave.<br>
+      The wave type symbol is <code>'sine</code>, <code>'square</code>, <code>'sawtooth</code> or <code>'triangle</code>.<br>
+      <i>cosine-terms</i> and <i>sine-terms</i> must be <code>&lt;f32vector&gt;</code>, and their lengths must be equal.
+    </dd>
+    <dt><code>:adsr (<i>attack</i> <i>decay</i> <i>sustain</i> <i>release</i>)</code></dt>
+    <dd>
+      Specifies <a href="https://en.wikipedia.org/wiki/Envelope_(music)">the envelope in ADSR</a>.
+      <i>attack</i>, <i>decay</i> and <i>release</i> are time in second. <i>sustain</i> is a volume level from 0 to 1.
+    </dd>
+    <dt><code>:detune <i>cents</i></code></dt>
+    <dd>
+      Specifies detuning in cents.
+    </dd>
+  </dl>
+</dd>
+
+<dt><code>(resume-track <i>track</i> ...)</code></dt>
+<dd>
+Resumes <i>track</i>, which is paused.
+</dd>
+<dt><code>(resume-all-tracks)</code></dt>
+<dd>
+Resumes all tracks.
+</dd>
+<dt><code>(pause-track <i>track</i> ...)</code></dt>
+<dd>
+Pauses <i>track</i>.
+</dd>
+<dt><code>(pause-all-tracks)</code></dt>
+<dd>
+Pauses all tracks.
+</dd>
+<dt><code>(stop-track <i>track</i> ...)</code></dt>
+<dd>
+Stops playing the specified <i>track</i>.
+</dd>
+<dt><code>(stop-all-tracks)</code></dt>
+<dd>
+Stops playing all tracks.
+</dd>
+<dt><code>(wait-track <i>track</i> ...)</code></dt>
+<dd>
+Waits until the playing finishes in the specified <i>track</i>.
+</dd>
+<dt><code>(wait-all-tracks)</code></dt>
+<dd>
+Waits until the playing finishes in all tracks.
+</dd>
+<dt><code>(play-beep <i>frequency</i> <i>length</i> :key <i>wave-form</i> <i>volume</i>)</code></dt>
+<dd>
+Plays a sound of <i>frequency</i> and <i>length</i>. <i>length</i> is in second.
+The default <i>wave-form</i> is <code>'sine</code>.
+</dd>
+</dl>
 
 ### Clipboard
 
