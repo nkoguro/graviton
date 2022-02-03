@@ -121,4 +121,14 @@
                                                 (edit:cancel-edit input-context)
                                                 (start-editor str)))))
 
+        (bind-key (global-keymap) "C-/ s" (lambda (input-context)
+                                            (set! filename (or filename (read-text/edit status :prompt "File: " :keymap status-keymap :initial-text "")))
+                                            (when filename
+                                              (when (file-exists? filename)
+                                                (move-file filename (path-swap-extension filename "bak")))
+                                              (call-with-output-file filename
+                                                (lambda (out)
+                                                  (display (input-context-text-content input-context) out))))
+                                            (update-title! #f)))
+
         (start-editor #f)))))
