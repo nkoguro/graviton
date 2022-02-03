@@ -31,13 +31,32 @@
 ;;;
 
 (use file.util)
-(use gauche.hook)
 (use gauche.parseopt)
 (use graviton)
 (use graviton.grut)
 (use text.html-lite)
 
-(define editor-css-path (build-path (sys-dirname (current-load-path)) "editor.css"))
+(define css '((style-rule body
+                (background-color black)
+                (margin 0))
+              (style-rule (* (id container))
+                (display flex)
+                (flex-direction column)
+                (height (100 vh))
+                (font-family (:or Consolas SFMono-Regular "Roboto Mono" "Courier New" Courier monospace))
+                (font-weight normal))
+              (style-rule (* (id buffer))
+                (flex #(1 1))
+                (height 0)
+                (overflow-y scroll)
+                (background-color black)
+                (color white)
+                (padding #((2 px) (2 px) (2 px) (5 px))))
+              (style-rule (* (id status))
+                (height (1 em))
+                (background-color white)
+                (color black)
+                (padding #((2 px) 0 (2 px) (5 px))))))
 
 (define (main args)
   (let-args (cdr args)
@@ -48,7 +67,7 @@
                           (force-browser? 'browser)
                           (else #f)))
     (with-window (grv-window
-                   :css (file->url editor-css-path)
+                   :css css
                    :body
                    (html:body
                     (html:div :id "container"
