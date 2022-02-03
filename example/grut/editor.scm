@@ -85,9 +85,9 @@
           (cond
             ((and (eq? type 'key)
                   (equal? str "C-/"))
-             (display "C-/" status))
+             (display "C-/   f - load file, s - save file" status))
             (else
-             #t)))
+             (display "C-/ to show menu" status))))
         (define (start-editor content-filename)
           (set! filename content-filename)
           (let1 content (cond
