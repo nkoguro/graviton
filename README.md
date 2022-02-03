@@ -291,7 +291,7 @@ Updates the title of the current widnow.
 
 <dt><code>(close-window)</code></dt>
 <dd>
-Closes the current window.
+Closes the current window, and terminates workers related to the window.
 </dd>
 </dl>
 

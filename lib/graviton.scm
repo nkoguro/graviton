@@ -863,7 +863,9 @@
 (define (close-window :optional (ctx #f))
   (let1 thunk (lambda ()
                 (flush-client-request)
-                (app-exit 0))
+                (for-each worker-close (all-workers))
+                (app-exit 0)
+                (asleep 0))
     (if ctx
       (parameterize ((window-context ctx))
         (thunk))
