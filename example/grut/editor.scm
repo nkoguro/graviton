@@ -80,6 +80,8 @@
           (set! (~ document'title) (format "~a~a - Editor"
                                            (if modified? "*" "")
                                            (or filename "Untitled"))))
+        (define (display-default-status-message)
+          (display "C-/ to show menu" status))
         (define (update-status! ctx type str)
           (clear-screen status)
           (cond
@@ -87,7 +89,7 @@
                   (equal? str "C-/"))
              (display "C-/   f - load file, s - save file" status))
             (else
-             (display "C-/ to show menu" status))))
+             (display-default-status-message))))
         (define (start-editor content-filename)
           (set! filename content-filename)
           (let1 content (cond
@@ -131,4 +133,5 @@
                                                   (display (input-context-text-content input-context) out))))
                                             (update-title! #f)))
 
+        (display-default-status-message)
         (start-editor #f)))))
