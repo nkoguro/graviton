@@ -331,12 +331,24 @@
                                         ("Backspace" ,edit:backward-delete-char)
                                         ("Delete" ,edit:delete-char)
                                         ("Tab" "\t")
-                                        ("Home" ,edit:beginning-of-line)
-                                        ("S-Home" ,edit:beginning-of-line)
-                                        ("End" ,edit:end-of-line)
-                                        ("S-End" ,edit:end-of-line)
                                         ("Enter" ,edit:newline-or-commit)
-                                        ("C-a" ,edit:select-all)))))))
+                                        ,@(cond
+                                            ((string-contains "Mac " (user-agent))
+                                             `(("C-a" ,edit:beginning-of-line)
+                                               ("C-e" ,edit:end-of-line)
+                                               ("C-S-a" ,edit:beginning-of-line)
+                                               ("C-S-e" ,edit:end-of-line)
+                                               ("Home" ,edit:beginning-of-edit-area)
+                                               ("S-Home" ,edit:beginning-of-edit-area)
+                                               ("End" ,edit:end-of-edit-area)
+                                               ("S-End" ,edit:end-of-edit-area)
+                                               ("M-a" ,edit:select-all)))
+                                            (else
+                                             `(("C-a" ,edit:select-all)
+                                               ("Home" ,edit:beginning-of-line)
+                                               ("S-Home" ,edit:beginning-of-line)
+                                               ("End" ,edit:end-of-line)
+                                               ("S-End" ,edit:end-of-line))))))))))
 
 (define-record-type <text-mark>
   make-text-mark text-mark?
