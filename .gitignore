@@ -5,6 +5,7 @@ Makefile
 VERSION
 lib/graviton/config-alist.scm
 player/.build-*.done
+player/.update-node_modules.done
 player/Makefile
 player/graviton-player-*/
 player/src/node_modules

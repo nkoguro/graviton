@@ -16,13 +16,14 @@ PLAYER_INSTALL_DIR := "$(DESTDIR)$(shell gosh -I ../lib -ugraviton.config -e "(p
 
 .DEFAULT_GOAL := build
 
+.update-node_modules.done: src/package-lock.json src/package.json
+	(cd src; npm ci)
+	touch $@
+
 define player-template
 .PHONY: build-$(1)
 
-.build-$(1).done: $(SRCS)
-	if [ ! -d src/node_modules ]; then \
-	  (cd src; npm ci) \
-	fi
+.build-$(1).done: $(SRCS) .update-node_modules.done
 	(cd src; npx electron-packager . graviton-player --platform=$(word 1,$(subst -, ,$(1))) --arch=$(word 2,$(subst -, ,$(1))) --out=.. --verbose --overwrite)
 	touch .build-$(1).done
 
@@ -53,7 +54,7 @@ uninstall:
 	rm -Rf $(PLAYER_INSTALL_DIR)/graviton-player-$(DEFAULT_PLATFORM_ARCH)
 
 clean:
-	rm -Rf graviton-player-* .build-*.done
+	rm -Rf graviton-player-* .build-*.done .update-node_modules.done
 
 distclean:
 	rm -Rf $(CONFIG_GENERATED) src/node_modules
