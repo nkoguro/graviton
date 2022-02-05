@@ -169,6 +169,18 @@
      (newline))
     ((equal? command "history")
      (print-history))
+    ((or (equal? command "h") (equal? command "help"))
+     (print "You're in REPL of Gauche Web shell (demo).")
+     (print "Type a Scheme expression to evaluate.")
+     (print "Evaluate (exit) to exit REPL.")
+     (print "A word preceded with comma has special meaning.")
+     (print "")
+     (print " ,attach  Attach to the specified worker.")
+     (print " ,detach  Detach from the current worker.")
+     (print " ,lsw     Print the list of workers.")
+     (print " ,sm      Switch to the module.")
+     (print " ,cm      Print the current module.")
+     (print " ,history Show REPL history."))
     (else
      (errorf "Invalid toplevel command: ~a" command))))
 
@@ -427,6 +439,8 @@
           (bind-key completion-keymap "Escape" end-completion)
           (bind-key completion-keymap "Enter" commit-completion)
 
+          (format #t "Gauche version ~a~%" (gauche-version))
+          (format #t "You can use Tab Completion.~%~%")
           (while #t
             (guard (e (else (format #t "*** ~a~%" (condition-message e))))
               (update-status! status env)
