@@ -394,7 +394,15 @@
   (let-args (cdr args)
       ((force-player? "player" #f)
        (force-browser? "browser" #f)
-       (font-size "font-size=s" #f))
+       (font-size "font-size=s" #f)
+       (show-help? "h|help" #f))
+    (when show-help?
+      (print #"Usage: ~(car args) [Options]")
+      (print "Options:")
+      (print "  --player          Use graviton-player.")
+      (print "  --browser         Use Web browser.")
+      (print "  --font-size=size  Change the font size.")
+      (exit 0))
     (grv-log-config :log-level 1)
 
     (grv-config :client (cond
