@@ -60,7 +60,7 @@ distclean: clean
 	rm -rf $(CONFIG_GENERATED)
 
 maintainer-clean: clean
-	(cd js; make maintainer-distclean)
-	(cd lib; make maintainer-distclean)
+	(cd js; make maintainer-clean)
+	(cd lib; make maintainer-clean)
 	(cd player; make maintainer-clean)
 	rm -rf $(CONFIG_GENERATED) VERSION
