@@ -47,13 +47,18 @@ CAVEAT: Graviton is a kind of "Web application framework." However, it is design
 ## Installation
 
 You need the latest version of Gauche and Gauche-makiki.
-To build graviton-player, you also need the latest node and npm.
 
 ```
 $ ./configure
 $ make
 $ make install
-$ make install-player  # if you want to install graviton-player.
+```
+
+If you want to install graviton-player, the latest node and npm are required.
+
+```
+$ make build-player
+$ make install-player
 ```
 
 ### Note for WSL user
