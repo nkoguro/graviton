@@ -414,7 +414,7 @@
             :style (alist->style `(("font-size" . ,font-size)))
             (html:grut-text :id "console")
             (html:grut-text :id "status"))
-           (html:grut-text :id "completion" :style "visibility: hidden")))
+           (html:grut-text :id "completion" :style (alist->style `(("font-size" . ,font-size) ("visibility" . "hidden"))))))
         (console status completion)
       (show-cursor console)
 
