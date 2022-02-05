@@ -161,7 +161,12 @@
   (clear-screen text)
   (set-character-attribute text '(white black bright))
   (show-string-in-center text "S N A K E" 5)
-  (show-string-in-center text "HIT ANY KEY" 10))
+  (show-string-in-center text "    K    " 9)
+  (show-string-in-center text "    \u2191    " 10)
+  (show-string-in-center text "H \u2190 @ \u2192 L" 11)
+  (show-string-in-center text "    \u2193    " 12)
+  (show-string-in-center text "    J    " 13)
+  (show-string-in-center text "HIT ANY KEY" 16))
 
 (define (show-gameover text)
   (set-character-attribute text '(white black bright))
