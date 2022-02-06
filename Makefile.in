@@ -38,6 +38,7 @@ install:
 uninstall: uninstall-player
 	(cd lib; make uninstall)
 	(cd js; make uninstall)
+	$(INSTALL) -U $(GAUCHE_PKGLIBDIR)/.packages $(PACKAGE).gpd
 
 build-player:
 	(cd player; make)
