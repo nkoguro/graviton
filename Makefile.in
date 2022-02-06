@@ -33,6 +33,7 @@ all:
 install:
 	(cd lib; make install)
 	(cd js; make install)
+	$(INSTALL) -m 444 -T $(GAUCHE_PKGLIBDIR)/.packages $(PACKAGE).gpd
 
 uninstall: uninstall-player
 	(cd lib; make uninstall)
