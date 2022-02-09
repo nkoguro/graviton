@@ -231,6 +231,7 @@
   (lambda (req app)
     (let1 url-path (slot-ref req 'path)
       (or (and-let1 js-code (get-js-code url-path)
+            (response-header-replace! req "Cache-Control" "private, max-age=86400")
             (respond/ok req js-code :content-type "text/javascript"))
           (respond/ng req 404)))))
 
@@ -344,7 +345,7 @@
                            (html:script :type type :src js-path)))
                         (load-js+type-list))
                    (map (lambda (js-mod)
-                          (html:script :type "module" :src js-mod))
+                          (html:script :type "module" :src (string-append js-mod "?" (base64-encode-string (sha1-digest-string (get-js-code js-mod))))))
                         (js-main-module-absolute-paths))
                    (map (lambda (js)
                           (html:script :src js))
