@@ -275,6 +275,7 @@ class SoundTrack {
                     latency = audioContext.currentTime - audioContext.getOutputTimestamp().contextTime;
                 }
                 if (this.soundletQueue.length === 0 && (this.completionTime + latency) < now) {
+                    this.state = 'stopped';
                     this.invokeCompletionResolves();
                 }
 
