@@ -221,12 +221,13 @@ class RestSoundlet {
 }
 
 const soundPlayIntervalMs = 100;
+const initialWaitSec = 0.2;
 
 class SoundTrack {
     constructor() {
         this.soundletQueue = [];
-        this.releasedTime = audioContext.currentTime;
-        this.completionTime = audioContext.currentTime;
+        this.releasedTime = Math.max(audioContext.currentTime, initialWaitSec);
+        this.completionTime = Math.max(audioContext.currentTime, initialWaitSec);
         this.state = 'stopped';
         this.completionResolves = [];
     }
