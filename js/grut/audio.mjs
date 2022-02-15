@@ -200,7 +200,7 @@ class NoiseSoundlet {
         this.starter = (startTime) => {
             childStarters.forEach((starter) => starter(startTime));
             bufferSource.start(startTime);
-            bufferSource.stop(startTime + len + margin);
+            bufferSource.stop(startTime + len + release);
         };
     }
 
