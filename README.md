@@ -1072,7 +1072,23 @@ The Music Macro Language is a list of these elements.
     <dd>
       Specifies detuning in cents.
     </dd>
+    <dt><code>(beep <i>frequency</i> [<i>duration</i>])</code></dt>
+    <dd>
+      Generates a sound of <i>frequency</i> and <i>duration</i> in second. If <i>duration</i> is omitted, the default length by <code>:length</code> is used.
+    </dd>
+    <dt><code>(sound <i>audio-buffer</i> [<i>start</i> <i>end</i> <i>duration</i>])</code></dt>
+    <dd>
+      Generates a sound <i>audio-buffer</i>. If <i>start</i> is specified, the sound loops from <i>start</i> (in second) to <i>end</i> (the default <i>end</i> is the end of the sound). <i>duration</i> (in second) specifies the length of the looped sound.
+    </dd>
   </dl>
+</dd>
+<dt><code>(compile-mml <i>mml</i>)</code></dt>
+<dd>
+Compiles <i>mml</i>. You can pass the returned value to <code>play-music</code> to play it. 
+</dd>
+<dt><code>(play-music <i>track</i> <i>music</i> <i>...</i>)</code></dt>
+<dd>
+Plays the compiled <i>music</i> object.
 </dd>
 
 <dt><code>(resume-track <i>track</i> ...)</code></dt>
@@ -1111,6 +1127,17 @@ Waits until the playing finishes in all tracks.
 <dd>
 Plays a sound of <i>frequency</i> and <i>length</i>. <i>length</i> is in second.
 The default <i>wave-form</i> is <code>'sine</code>.
+</dd>
+<dt><code>(play-sound <i>url</i> :key <i>start</i> <i>end</i> <i>duration</i> <i>volume</i>)</code></dt>
+<dt><code>(play-sound <i>audio-buffer</i> :key <i>start</i> <i>end</i> <i>duration</i> <i>volume</i>)</code></dt>
+<dd>
+Plays a sound of the specified <i>audio-buffer</i> or the downloaded data from <i>url</i>. You can loop the sound from <i>start</i> to <i>end</i> in <i>duration</i>.
+</dd>
+<dt><code>(load-audio-buffer <i>url</i> :key <i>on-error</i>)</code></dt>
+<dd>
+Loads audio data from <i>url</i>, and returns <i>audio-buffer</i> object. You can play it with <code>play-sound</code> or the MML command <code>(sound <i>audio-buffer</i> <i>...</i>)</code>.
+
+The keyword argument <code>:on-error</code> can be a keyword <code>:error</code> (default) or <code>#f</code>. If it's the former, an error is signaled when the audio data can't be loaded from the URL. If it's the latter, <code>load-audio-buffer</code> just returns <code>#f</code>.
 </dd>
 </dl>
 

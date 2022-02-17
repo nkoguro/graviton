@@ -60,45 +60,45 @@ function decorateAudioParam(audioParam, specs, len) {
     }
 
     specs.forEach((spec) => {
-        const type = spec.shift();
+        const [type, ...rest] = spec;
         switch (type) {
             case VALUE_AT_TIME_PARAM: {
-                const [value, relStartTime] = spec;
+                const [value, relStartTime] = rest;
                 starters.push((startTime) => {
                     audioParam.setValueAtTime(value, startTime + relStartTime);
                 });
                 break;
             }
             case LINEAR_RAMP_TO_VALUE_AT_TIME_PARAM: {
-                const [value, relEndTime] = spec;
+                const [value, relEndTime] = rest;
                 starters.push((startTime) => {
                     audioParam.linearRampToValueAtTime(value, startTime + relEndTime);
                 });
                 break;
             }
             case EXPONENTIAL_RAMP_TO_VALUE_AT_TIME_PARAM: {
-                const [value, relEndTime] = spec;
+                const [value, relEndTime] = rest;
                 starters.push((startTime) => {
                     audioParam.exponentialRampToValueAtTime(value, startTime + relEndTime);
                 });
                 break;
             }
             case TARGET_AT_TIME_PARAM: {
-                const [value, relStartTime, timeConstant] = spec;
+                const [value, relStartTime, timeConstant] = rest;
                 starters.push((startTime) => {
                     audioParam.setTargetAtTime(value, startTime + relStartTime, timeConstant);
                 });
                 break;
             }
             case VALUE_CURVE_AT_TIME_PARAM: {
-                const [values, relStartTime, duration] = spec;
+                const [values, relStartTime, duration] = rest;
                 starters.push((startTime) => {
                     audioParam.setValueCurveAtTime(values, startTime + relStartTime, duration);
                 });
                 break;
             }
             case OSCILLATOR_PARAM: {
-                const [freqSpec, waveSpec, detuneSpec, delay, depthSpec] = spec;
+                const [freqSpec, waveSpec, detuneSpec, delay, depthSpec] = rest;
                 const oscillator = new Oscillator(freqSpec, waveSpec, detuneSpec, len, delay, depthSpec);
                 oscillator.node.connect(audioParam);
                 starters.push(oscillator.starter);
@@ -124,12 +124,13 @@ class Oscillator {
         this.childStarters.push(...decorateAudioParam(oscillator.detune, detuneSpec, len));
         this.childStarters.push(...decorateAudioParam(gain.gain, depthSpec, len));
 
-        this.lengthSec = len;
         this.node = gain;
         this.starter = (startTime) => {
             this.childStarters.forEach((starter) => starter(startTime));
             oscillator.start(startTime + delay);
-            oscillator.stop(startTime + len);
+            if (Number.isFinite(len)) {
+                oscillator.stop(startTime + len);
+            }
         };
     }
 }
@@ -220,6 +221,58 @@ class RestSoundlet {
     }
 }
 
+class BufferSoundlet {
+    constructor(buffer, loop, loopStart, loopEnd, detuneSpec, playbackRateSpec, len, depthSpec, panSpec) {
+        const bufferSource = audioContext.createBufferSource();
+        bufferSource.buffer = buffer;
+        if (loop) {
+            bufferSource.loop = loop;
+            if (loopStart) {
+                bufferSource.loopStart = loopStart;
+            }
+            if (loopEnd) {
+                bufferSource.loopEnd = loopEnd;
+            } else {
+                bufferSource.loopEnd = buffer.duration;
+            }
+        }
+
+        let soundLen = Number.POSITIVE_INFINITY;
+        if (Number.isFinite(len)) {
+            soundLen = len;
+        } else if (!loop) {
+            soundLen = buffer.duration;
+        }
+        const childStarters = [];
+        const gain = audioContext.createGain();
+        const stereoPanner = audioContext.createStereoPanner();
+        bufferSource.connect(gain).connect(stereoPanner).connect(audioContext.destination);
+        childStarters.push(...decorateAudioParam(bufferSource.detune, detuneSpec, soundLen));
+        childStarters.push(...decorateAudioParam(bufferSource.playbackRate, playbackRateSpec, soundLen));
+        childStarters.push(...decorateAudioParam(gain.gain, depthSpec, soundLen));
+        childStarters.push(...decorateAudioParam(stereoPanner.pan, panSpec, soundLen));
+
+        if (Number.isFinite(soundLen)) {
+            this.soundLength = soundLen;
+            this.soundTotalLength = soundLen;
+        } else {
+            this.soundLength = Number.POSITIVE_INFINITY;
+            this.soundTotalLength = Number.POSITIVE_INFINITY;
+        }
+        this.starter = (startTime) => {
+            childStarters.forEach((starter) => starter(startTime));
+            bufferSource.start(startTime);
+            if (Number.isFinite(soundLen)) {
+                bufferSource.stop(startTime + soundLen);
+            }
+        };
+    }
+
+    play(startTime) {
+        this.starter(startTime);
+    }
+}
+
 const soundPlayIntervalMs = 100;
 const initialWaitSec = 0.2;
 
@@ -253,7 +306,7 @@ class SoundTrack {
                 this.invokeCompletionResolves();
                 return false;
             case 'playing': {
-                const rangeStartMs = audioContext.currentTime * 1000;
+                const rangeStartMs = now * 1000;
                 const rangeEndMs = rangeStartMs + soundPlayIntervalMs * 2;
                 while (this.soundletQueue.length > 0) {
                     const soundlet = this.soundletQueue[0];
@@ -292,9 +345,16 @@ class SoundTrack {
     }
 }
 
+class GrutMusic {
+    constructor(soundDataList) {
+        this.soundDataList = soundDataList;
+    }
+}
+
 const OSCILLATOR_SOUND = 1;
 const COMPOSED_SOUND = 2;
 const NOISE_SOUND = 3;
+const BUFFER_SOUND = 4;
 const REST_SOUND = 5;
 const SET_CUSTOM_WAVE = 6;
 
@@ -330,25 +390,29 @@ class SoundTrackManager {
     }
 
     decodeSoundData(soundData) {
-        const soundType = soundData.shift();
+        const [soundType, ...rest] = soundData;
         switch (soundType) {
             case OSCILLATOR_SOUND: {
-                const [freqSpec, waveSpec, detuneSpec, len, delay, release, depthSpec, panSpec] = soundData;
+                const [freqSpec, waveSpec, detuneSpec, len, delay, release, depthSpec, panSpec] = rest;
                 return new OscillatorSoundlet(freqSpec, waveSpec, detuneSpec, len, delay, release, depthSpec, panSpec);
             }
             case COMPOSED_SOUND: {
-                return new ComposedSoundlet(soundData.map((element) => this.decodeSoundData(element)));
+                return new ComposedSoundlet(rest.map((element) => this.decodeSoundData(element)));
             }
             case NOISE_SOUND: {
-                const [len, release, depthSpec, panSpec] = soundData;
+                const [len, release, depthSpec, panSpec] = rest;
                 return new NoiseSoundlet(len, release, depthSpec, panSpec);
             }
+            case BUFFER_SOUND: {
+                const [buffer, loop, loopStart, loopEnd, detuneSpec, playbackRateSpec, len, margin, release, depthSpec, panSpec] = rest;
+                return new BufferSoundlet(buffer, loop, loopStart, loopEnd, detuneSpec, playbackRateSpec, len, margin, release, depthSpec, panSpec);
+            }
             case REST_SOUND: {
-                const len = soundData.shift();
+                const [len] = rest;
                 return new RestSoundlet(len);
             }
             case SET_CUSTOM_WAVE:
-                const [real, imag] = soundData;
+                const [real, imag] = rest;
                 customWave = audioContext.createPeriodicWave(real, imag);
                 return false;
             default:
@@ -356,8 +420,11 @@ class SoundTrackManager {
         }
     }
 
+    registerSoundData(soundDataList) {
+        return new GrutMusic(soundDataList);
+    }
 
-    enqueue(trackName, soundDataList) {
+    enqueueSoundData(trackName, soundDataList) {
         const track = this.getTrack(trackName);
         soundDataList.forEach((soundData) => {
             const soundlet = this.decodeSoundData(soundData);
@@ -365,6 +432,10 @@ class SoundTrackManager {
                 track.enqueue(soundlet);
             }
         });
+    }
+
+    enqueueMusic(trackName, music) {
+        this.enqueueSoundData(trackName, music.soundDataList);
     }
 
     start(trackNames) {
@@ -451,3 +522,18 @@ class SoundTrackManager {
 }
 
 export const soundTrackManager = new SoundTrackManager();
+
+export function loadAudioBuffer(url, successHandler, errorHandler) {
+    const request = new XMLHttpRequest();
+    request.open('GET', url, true);
+    request.responseType = 'arraybuffer';
+    request.onload = () => {
+        const audioData = request.response;
+        audioContext.decodeAudioData(audioData).then((decodedData) => {
+            successHandler(decodedData);
+        }).catch((err) => {
+            errorHandler(err.message);
+        });
+    };
+    request.send();
+}

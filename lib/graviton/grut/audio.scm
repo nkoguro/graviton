@@ -35,13 +35,16 @@
   (use gauche.sequence)
   (use gauche.uvector)
   (use graviton.async)
+  (use graviton.audio)
   (use graviton.jsffi)
   (use parser.peg)
   (use srfi-1)
   (use srfi-13)
+  (use srfi-227)
   (use util.match)
 
   (export play-mml
+          compile-mml
           resume-track
           resume-all-tracks
           pause-track
@@ -51,16 +54,32 @@
           wait-track
           wait-all-tracks
 
-          play-beep))
+          play-beep
+          play-sound
+          play-music
+
+          load-audio-buffer
+          ))
 
 (select-module graviton.grut.audio)
 
-(import-js ("/_g/grut/audio.mjs" :only (soundTrackManager)))
+(import-js ("/_g/grut/audio.mjs" :only (soundTrackManager loadAudioBuffer)))
 
-(define (enqueue-sound track sound-data-list)
+(define-class <grut-music> (<jsobject>)
+  ((sound-data-list :jsproperty "soundDataList"
+                    :read-only? #t
+                    :cacheable? #t))
+  :jsclass "GrutMusic")
+
+(define (enqueue-sound-data track sound-data-list)
   (jslet ((track::string)
           (sound-data-list::array))
-    (soundTrackManager.enqueue track sound-data-list)))
+    (soundTrackManager.enqueueSoundData track sound-data-list)))
+
+(define (enqueue-music track music)
+  (jslet ((track::string)
+          (music))
+    (soundTrackManager.enqueueMusic track music)))
 
 (define (resume-track :rest tracks)
   (jslet ((tracks::list (map keyword->string tracks)))
@@ -100,8 +119,10 @@
 (define-constant OSCILLATOR-SOUND 1)
 (define-constant COMPOSED-SOUND 2)
 (define-constant NOISE-SOUND 3)
+(define-constant BUFFER-SOUND 4)
 (define-constant REST-SOUND 5)
 (define-constant SET-CUSTOM-WAVE 6)
+(define-constant ELEMENT-SOUND 7)
 
 (define-constant SINE-WAVE 1)
 (define-constant SQUARE-WAVE 2)
@@ -293,6 +314,8 @@
     (match expr
       (()
        (list->vector (reverse sound-data-list)))
+      ((#f rest ...)
+       (loop env rest sound-data-list))
       ((('oscillator freq-spec wave-form detune-spec len margin release depth-spec pan-spec) rest ...)
        (loop env
              rest
@@ -322,7 +345,7 @@
       ((('noise len margin release depth-spec pan-spec) rest ...)
        (loop env
              rest
-             (cons (vector NOISE-SOUND len margin release depth-spec pan-spec)
+             (cons (vector NOISE-SOUND len margin release (parse-control depth-spec) (parse-control pan-spec))
                    sound-data-list)))
       ((('chord (and soundlets ((or 'oscillator 'note 'noise) _ ...)) ...) rest ...)
        (loop env
@@ -335,6 +358,43 @@
        (loop env
              rest
              (cons (vector REST-SOUND len) sound-data-list)))
+      ((('audio-buffer abuf loop? loop-start loop-end detune-spec playback-rate-spec len depth-spec pan-spec) rest ...)
+       (loop env
+             rest
+             (cons (vector BUFFER-SOUND
+                           abuf
+                           loop?
+                           loop-start
+                           loop-end
+                           (parse-control detune-spec)
+                           (parse-control playback-rate-spec)
+                           len
+                           (parse-control depth-spec)
+                           (parse-control pan-spec))
+                   sound-data-list)))
+      ((('media-element element len depth-spec pan-spec) rest ...)
+       (loop env
+             rest
+             (cons (vector ELEMENT-SOUND element len (parse-control depth-spec) (parse-control pan-spec)) sound-data-list)))
+      ((('beep freq opts ...) rest ...)
+       (let-optionals opts ((len (let ((len-unit (/. (* 60 4) (assq-ref env 'tempo 120)))
+                                       (len-mag (assq-ref env 'length-magnifier 0.25)))
+                                   (* len-unit len-mag))))
+         (let ((wave-form (assq-ref env 'wave-form 'sine))
+               (volume (assq-ref env 'volume 0.5)))
+           (loop env
+                 rest
+                 (append (reverse (vector->list (parse-mml env `((oscillator ,freq ,wave-form 0 ,len 0 0 ,volume 0)))))
+                         sound-data-list)))))
+      ((('sound abuf opts ...) rest ...)
+       (let-optionals opts ((start #f) (end #f) (duration #f))
+         (let ((loop? (if start #t #f))
+               (volume (assq-ref env 'volume 0.5)))
+           (loop env
+                 rest
+                 (append (reverse (vector->list (parse-mml env
+                                                           `((audio-buffer ,abuf ,loop? ,start ,end 0 1 ,duration ,volume 0)))))
+                         sound-data-list)))))
       ((('scope expr ...) rest ...)
        (loop env
              rest
@@ -406,7 +466,7 @@
       (()
        #t)
       (((? keyword? track) mml rest ...)
-       (enqueue-sound (keyword->string track) (parse-mml '() mml))
+       (enqueue-sound-data (keyword->string track) (parse-mml '() mml))
        (loop rest))
       (_
        (errorf "keyword-value list required, but got ~s" args)))))
@@ -415,6 +475,39 @@
   (apply enqueue-mml args)
   (apply resume-track (filter keyword? args)))
 
-(define (play-beep freq len :key (wave-form 'sine) (volume 1))
-  (play-mml :beep `((oscillator ,freq ,wave-form 0 ,len 0 0 ,volume 0))))
+(define (play-beep freq len :key (wave-form 'sine) (volume #f))
+  (play-mml :beep `(,@(if volume `(:volume ,volume) '()) ,@(if wave-form `(:wave-form ,wave-form) '()) (beep ,freq ,len))))
 
+(define (compile-mml mml)
+  (jslet/await ((sound-data-list::array (parse-mml '() mml)))
+    (respond (soundTrackManager.registerSoundData sound-data-list))))
+
+(define (play-music :rest args)
+  (let loop ((args args))
+    (match args
+      (()
+       #t)
+      (((? keyword? track) music rest ...)
+       (enqueue-music (keyword->string track) music)
+       (loop rest))
+      (_
+       (errorf "keyword-value list required, but got ~s" args))))
+  (apply resume-track (filter keyword? args)))
+
+(define-method play-sound ((url <string>) :rest args)
+  (apply play-sound (load-audio-buffer url) args))
+
+(define-method play-sound ((audio-buffer <audio-buffer>) :key (start #f) (end #f) (volume #f) (duration #f))
+  (play-mml :sound `(,@(if volume `(:volume ,volume) '()) (sound ,audio-buffer ,start ,end ,duration))))
+
+
+(define (load-audio-buffer url :key (on-error :error))
+  (receive (abuf err)
+      (jslet/await ((url::string))
+        (loadAudioBuffer url (lambda (data) (respond data #f)) (lambda (err) (respond #f err))))
+    (or abuf
+        (case on-error
+          ((#f) #f)
+          ((:error) (errorf "Failed to load audio: ~a (~a)" url err))
+          (else
+           (errorf "bad value for :on-error argument; must be #f or :error, but got ~s" on-error))))))
