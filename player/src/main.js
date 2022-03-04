@@ -4,18 +4,36 @@ const fs = require('fs');
 const path = require('path');
 const { BrowserWindow, Menu, app, ipcMain } = require('electron');
 
-let config = null;
+let config = { visible: true };
 
-for (var i = 0; i < process.argv.length; ++i) {
-    if (process.argv[i] === '--config') {
-        let configFile = process.argv[++i];
-        config = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
-        fs.unlinkSync(configFile);
+var i = 0;
+while (i < process.argv.length - 1) {
+    switch (process.argv[i++]) {
+        case '--width':
+            config.width = Number.parseInt(process.argv[i++]);
+            break;
+        case '--height':
+            config.height = Number.parseInt(process.argv[i++]);
+            break;
+        case '--use-dev-tools':
+            config.useDevTools = (process.argv[i++].toLowerCase() === 'true');
+            break;
+        case '--visible':
+            config.visible = (process.argv[i++].toLowerCase() === 'true');
+            break;
+        case '--resizable':
+            config.resizable = (process.argv[i++].toLowerCase() === 'true');
+            break;
+        default:
+            // Ignore undefined options.
+            break;
     }
 }
 
-if (!config) {
-    console.log('No config specified.');
+config.url = process.argv[i];
+
+if (!config.url) {
+    console.log('No URL specified.');
     app.exit(1);
 }
 
@@ -54,17 +72,18 @@ function createWindow() {
     });
     Promise.all([readyToShowPromise, setBackgroundColorPromise]).then((values) => {
         const [, backgroundColor] = values;
-        if (config.show) {
+        if (config.visible) {
             win.setBackgroundColor(backgroundColor);
             win.show();
         }
     });
 
-    if (config['open-dev-tools']) {
+    if (config.useDevTools) {
         win.openDevTools();
     }
     Menu.setApplicationMenu(null);
     win.loadURL(config.url).catch((err) => {
+        console.log(err);
         app.exit(70);
     });
 }

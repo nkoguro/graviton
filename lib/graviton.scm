@@ -740,18 +740,18 @@
           (sockaddr-port (socket-address sock))))
 
 (define (invoke-player url width height show? resizable?)
-  (let* ((config-file (generate-player-config-file url width height show? resizable?))
+  (let* ((player-args (generate-player-args url width height show? resizable?))
          (player-path (graviton-config 'graviton-player-path))
          (stdout-filename (build-path (temporary-directory) (format "graviton-player.~a.out" (sys-getpid))))
          (stderr-filename (build-path (temporary-directory) (format "graviton-player.~a.err" (sys-getpid)))))
     (let1 player-process (case (grv-config-parameter 'client)
                            ((player)
-                            (run-process `(,player-path "--config" ,config-file)
+                            (run-process `(,player-path ,@player-args)
                                          :input :null
                                          :output stdout-filename
                                          :error stderr-filename))
                            ((dev-player)
-                            (run-process `("npx" "electron" "." "--config" ,config-file)
+                            (run-process `("npx" "electron" "." ,@player-args)
                                          :directory "./player/src"
                                          :input :null
                                          :output stdout-filename
@@ -768,26 +768,21 @@
                                       ;; So we need to quit this app here when the player exits in the no-connection case.
                                       (when (and (not (= exit-code 0))
                                                  (not (atom-ref *requested?-atom*)))
+                                        (format (current-error-port) "'~a ~a' aborted (~a)~%" player-path (string-join player-args) exit-code)
                                         (display (file->string stderr-filename) (current-error-port))
                                         (exit 70)))))))))
 
-(define (generate-player-config-file url width height show? resizable?)
-  (let* ((config `((width . ,width)
-                   (height . ,height)
-                   (url . ,url)
-                   (open-dev-tools . #f)
-                   (show . ,show?)
-                   (resizable . ,resizable?)))
-         (config-file (receive (out filename) (sys-mkstemp (build-path (temporary-directory) "grvcfg"))
-                        (construct-json config out)
-                        (close-port out)
-                        (if (absolute-path? filename)
-                          filename
-                          (simplify-path (build-path (current-directory) filename))))))
-    (if (and (graviton-config 'wsl)
-             (eq? (grv-config-parameter 'client) 'player))
-      (process-output->string `("wslpath" "-w" ,config-file))
-      config-file)))
+(define (generate-player-args url width height show? resizable?)
+  `(,@(if width
+        `("--width" ,width)
+        '())
+    ,@(if height
+        `("--height" ,height)
+        '())
+    "--visible" ,(if show? "true" "false")
+    "--resizable" ,(if resizable? "true" "false")
+    ;; NOTE: It looks like graviton-player invocation will fail if some args are placed after the url on WSL. I'm not sure why it happens.
+    ,url))
 
 (define (grv-start-server shutdown-if-all-connection-closed?
                           startup-callback
