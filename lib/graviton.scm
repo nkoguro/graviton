@@ -741,7 +741,8 @@
 
 (define (invoke-player url width height show? resizable?)
   (let* ((player-args (generate-player-args url width height show? resizable?))
-         (player-path (graviton-config 'graviton-player-path))
+         (player-path (or (graviton-config 'alternative-player-path)
+                          (graviton-config 'graviton-player-path)))
          (stdout-filename (build-path (temporary-directory) (format "graviton-player.~a.out" (sys-getpid))))
          (stderr-filename (build-path (temporary-directory) (format "graviton-player.~a.err" (sys-getpid)))))
     (let1 player-process (case (grv-config-parameter 'client)

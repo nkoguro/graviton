@@ -19,4 +19,10 @@
     (graviton-player-executable . "@GRAVITON_PLAYER_EXECUTABLE@")
     (graviton-player-install-dir . "@GRAVITON_PLAYER_INSTALL_DIR@")
     (graviton-player-path . "${graviton-player-install-dir}/graviton-player-${graviton-player-arch}/${graviton-player-executable}")
-    (graviton-js-dir . "${graviton-data-dir}/js")))
+    (graviton-js-dir . "${graviton-data-dir}/js")
+    (alternative-player-path . ,(let1 path "@ALTERNATIVE_PLAYER_PATH@"
+                                  (cond
+                                    ((equal? path "")
+                                     #f)
+                                    (else
+                                     path))))))

@@ -34,7 +34,7 @@
 (cf-arg-with 'player-install-dir
              (cf-help-string
                "--with-player-install-dir"
-               "install directory for Graviton player.")
+               "The install directory of Graviton player.")
              (lambda (with-player-install-dir)
                (cf-subst 'GRAVITON_PLAYER_INSTALL_DIR with-player-install-dir))
              (lambda ()
@@ -55,6 +55,15 @@
                                  (current-directory curdir))))
                            "${graviton-lib-dir}/player"))))
 
+(cf-arg-with 'alternative-player-path
+             (cf-help-string
+               "--with-alternative-player-path"
+               "Specify the alternative player path. If this path is specified, the executable at the path is invoked if the client type is 'player.")
+             (lambda (path)
+               (cf-subst 'ALTERNATIVE_PLAYER_PATH path))
+             (lambda ()
+               (cf-subst 'ALTERNATIVE_PLAYER_PATH "")))
+               
 ;; Initialize configure.  This creates the global context, parses
 ;; command-line args and sets up default values.
 (cf-init-gauche-extension)
