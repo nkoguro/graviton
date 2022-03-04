@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { BrowserWindow, Menu, app, ipcMain } = require('electron');
 
-let config = { visible: true };
+let config = { visible: true, resizable: true };
 
 var i = 0;
 while (i < process.argv.length - 1) {
@@ -74,6 +74,7 @@ function createWindow() {
         const [, backgroundColor] = values;
         if (config.visible) {
             win.setBackgroundColor(backgroundColor);
+            win.resizable = config.resizable;
             win.show();
         }
     });
