@@ -133,6 +133,15 @@
     (else
      (errorf "Invalid fit type: ~s" fit-type))))
 
+(define (%make-continuous-elements element-maker ids)
+  (map element-maker (match ids
+                       ((? string? ids)
+                        (list ids))
+                       ((ids ...)
+                        ids)
+                       (_
+                        (errorf "<string> or <list> required, but got ~s" ids)))))
+
 (define (grut-canvas-window width height
                             :key
                             (id "canvas")
@@ -152,6 +161,9 @@
                                (ceiling->exact (* (max height default-height) (/. width height))))))
            (window-height (or window-height
                               (ceiling->exact (* window-width (/. height width))))))
+      (define (make-canvas id)
+        (html:canvas :id id :class (fit->css-name fit) :width width :height height
+                     :style (alist->style `(("margin" . ,margin)))))
       (grv-window :body (html:body
                          :style (alist->style `(("background-color" . ,background-color)
                                                 ("margin" . 0)
@@ -159,8 +171,7 @@
                                                 ("height" . "100%")
                                                 ("overflow-x" . "hidden")
                                                 ("overflow-y" . "hidden")))
-                         (html:canvas :id id :class (fit->css-name fit) :width width :height height
-                                      :style (alist->style `(("margin" . ,margin)))))
+                         (%make-continuous-elements make-canvas id))
                   :title title
                   :width window-width
                   :height window-height
@@ -181,6 +192,20 @@
                           (fit 'contain)
                           (scrollbar? #f)
                           (padding #f))
+  (define (make-text id)
+    (html:grut-text :id id
+                    :class (string-join (list "grut-monospace-font" (fit->css-name fit)) " ")
+                    :column column
+                    :row row
+                    :style (alist->style `(("width" . "100%")
+                                           ("height" . "100%")
+                                           ("box-sizing" . "border-box")
+                                           ("padding" . ,padding)
+                                           ("overflow-y" . ,(if scrollbar?
+                                                              "scroll"
+                                                              "hidden"))
+                                           ("font" . ,font)
+                                           ("font-size" . ,font-size)))))
   (grv-window :body (html:body
                      :style (alist->style `(("color" . ,color)
                                             ("background-color" . ,background-color)
@@ -189,19 +214,7 @@
                                             ("height" . "100%")
                                             ("overflow-x" . "hidden")
                                             ("overflow-y" . "hidden")))
-                     (html:grut-text :id id
-                                     :class (string-join (list "grut-monospace-font" (fit->css-name fit)) " ")
-                                     :column column
-                                     :row row
-                                     :style (alist->style `(("width" . "100%")
-                                                            ("height" . "100%")
-                                                            ("box-sizing" . "border-box")
-                                                            ("padding" . ,padding)
-                                                            ("overflow-y" . ,(if scrollbar?
-                                                                               "scroll"
-                                                                               "hidden"))
-                                                            ("font" . ,font)
-                                                            ("font-size" . ,font-size)))))
+                     (%make-continuous-elements make-text id))
               :title title
               :width window-width
               :height window-height
@@ -234,6 +247,23 @@
                                (ceiling->exact (* (max height default-height) (/. width height))))))
            (window-height (or window-height
                               (ceiling->exact (* window-width (/. height width))))))
+      (define (make-canvas id)
+        (html:canvas :id id :class (fit->css-name fit) :width width :height height
+                     :style (alist->style `(("margin" . ,margin)))))
+      (define (make-text id)
+        (html:grut-text :id id
+                        :class (string-join (list "grut-monospace-font" (fit->css-name fit)) " ")
+                        :column column
+                        :row row
+                        :style (alist->style `(("width" . "100%")
+                                               ("height" . "100%")
+                                               ("box-sizing" . "border-box")
+                                               ("padding" . ,padding)
+                                               ("overflow-y" . ,(if scrollbar?
+                                                                  "scroll"
+                                                                  "hidden"))
+                                               ("font" . ,font)
+                                               ("font-size" . ,font-size)))))
       (grv-window :body (html:body
                          :style (alist->style `(("color" . ,color)
                                                 ("background-color" . ,background-color)
@@ -242,21 +272,8 @@
                                                 ("height" . "100%")
                                                 ("overflow-x" . "hidden")
                                                 ("overflow-y" . "hidden")))
-                         (html:canvas :id canvas-id :class (fit->css-name fit) :width width :height height
-                                      :style (alist->style `(("margin" . ,margin))))
-                         (html:grut-text :id text-id
-                                         :class (string-join (list "grut-monospace-font" (fit->css-name fit)) " ")
-                                         :column column
-                                         :row row
-                                         :style (alist->style `(("width" . "100%")
-                                                                ("height" . "100%")
-                                                                ("box-sizing" . "border-box")
-                                                                ("padding" . ,padding)
-                                                                ("overflow-y" . ,(if scrollbar?
-                                                                                   "scroll"
-                                                                                   "hidden"))
-                                                                ("font" . ,font)
-                                                                ("font-size" . ,font-size)))))
+                         (%make-continuous-elements make-canvas canvas-id)
+                         (%make-continuous-elements make-text text-id))
                   :title title
                   :width window-width
                   :height window-height

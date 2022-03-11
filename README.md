@@ -807,7 +807,8 @@ Creates <code>&lt;grv-window&gt;</code> which has a <code>&lt;canvas&gt;</code> 
   <dl>
     <dt><code>id</code></dt>
     <dd>
-      The element ID of this <code>&lt;canvas&gt;</code> element. The default is "canvas".
+      The element ID of this <code>&lt;canvas&gt;</code> element. The default is "canvas".<br>
+      You can specify a list of IDs to make multiple layered canvases. The first ID points to the backmost canvas, and the last ID points to the foreground canvas.
     </dd>
     <dt><code>title</code></dt>
     <dd>
@@ -864,7 +865,8 @@ Creates <code>&lt;grv-window&gt;</code> which has a <a href="#text-console"><cod
   <dl>
     <dt><code>id</code></dt>
     <dd>
-      The element ID of this <code>&lt;grut-text&gt;</code> element. The default is "text-console".
+      The element ID of this <code>&lt;grut-text&gt;</code> element. The default is "text-console".<br>
+      You can specify a list of IDs to make multiple layered text elements. The first ID points to the backmost text, and the last ID points to the foreground text.
     </dd>
     <dt><code>title</code></dt>
     <dd>
@@ -927,11 +929,13 @@ Creates <code>&lt;grv-window&gt;</code> which has a <a href="#text-console"><cod
 Creates <code>&lt;grv-window&gt;</code> which has a <a href="#text-console"><code>&lt;grut-text&gt;</code></a> element and a <code>&lt;canvas&gt;</code> element. <i>width</i> and <i>height</i> are the resolution of the canvas.
     <dt><code>text-id</code></dt>
     <dd>
-      The element ID of this <code>&lt;grut-text&gt;</code> element. The default is "text-console".
+      The element ID of this <code>&lt;grut-text&gt;</code> element. The default is "text-console".<br>
+      You can specify a list of IDs to make multiple layered text elements like <code>grut-text-window</code>.
     </dd>
     <dt><code>canvas-id</code></dt>
     <dd>
       The element ID of this <code>&lt;canvas&gt;</code> element. The default is "canvas".
+      You can specify a list of IDs to make multiple layered canvases like <code>grut-canvas-window</code>.
     </dd>
     <dt><code>title</code></dt>
     <dd>
