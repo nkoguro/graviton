@@ -13,6 +13,9 @@
                 (else
                  wsl))))
 
+    (browser-default-port . ,(string->number "@BROWSER_DEFAULT_PORT@"))
+    (player-default-port . ,(string->number "@PLAYER_DEFAULT_PORT@"))
+    
     (graviton-lib-dir . "${libdir}/graviton")
     (graviton-data-dir . "${datadir}/graviton")
     (graviton-player-arch . "@GRAVITON_PLAYER_ARCH@")

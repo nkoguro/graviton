@@ -697,9 +697,9 @@
                            :port (or port
                                      (case client-type
                                        ((browser)
-                                        8080)
+                                        (graviton-config 'browser-default-port))
                                        (else
-                                        0)))
+                                        (graviton-config 'player-default-port))))
                            :host host
                            :protocol protocol
                            :client client-type

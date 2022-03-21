@@ -63,7 +63,25 @@
                (cf-subst 'ALTERNATIVE_PLAYER_PATH path))
              (lambda ()
                (cf-subst 'ALTERNATIVE_PLAYER_PATH "")))
-               
+
+(cf-arg-with 'browser-default-port
+             (cf-help-string
+               "--with-browser-default-port"
+               "Specify the default port for using browser client. 0 means the ephemeral port. The default is 8080.")
+             (lambda (port)
+               (cf-subst 'BROWSER_DEFAULT_PORT port))
+             (lambda ()
+               (cf-subst 'BROWSER_DEFAULT_PORT "8080")))
+
+(cf-arg-with 'player-default-port
+             (cf-help-string
+               "--with-player-default-port"
+               "Specify the default port for using graviton-player client. 0 means the ephemeral port. The default is 0.")
+             (lambda (port)
+               (cf-subst 'PLAYER_DEFAULT_PORT port))
+             (lambda ()
+               (cf-subst 'PLAYER_DEFAULT_PORT "0")))
+
 ;; Initialize configure.  This creates the global context, parses
 ;; command-line args and sets up default values.
 (cf-init-gauche-extension)
