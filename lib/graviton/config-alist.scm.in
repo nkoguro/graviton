@@ -6,16 +6,11 @@
     (datarootdir . "@datarootdir@")
     (datadir . "@datadir@")
 
-    (wsl . ,(let1 wsl "@WSL@"
-              (cond
-                ((equal? wsl "")
-                 #f)
-                (else
-                 wsl))))
+    (wsl . @WSL@)
 
-    (browser-default-port . ,(string->number "@BROWSER_DEFAULT_PORT@"))
-    (player-default-port . ,(string->number "@PLAYER_DEFAULT_PORT@"))
-    
+    (browser-default-port . @BROWSER_DEFAULT_PORT@)
+    (player-default-port . @PLAYER_DEFAULT_PORT@)
+
     (graviton-lib-dir . "${libdir}/graviton")
     (graviton-data-dir . "${datadir}/graviton")
     (graviton-player-arch . "@GRAVITON_PLAYER_ARCH@")
@@ -23,9 +18,4 @@
     (graviton-player-install-dir . "@GRAVITON_PLAYER_INSTALL_DIR@")
     (graviton-player-path . "${graviton-player-install-dir}/graviton-player-${graviton-player-arch}/${graviton-player-executable}")
     (graviton-js-dir . "${graviton-data-dir}/js")
-    (alternative-player-path . ,(let1 path "@ALTERNATIVE_PLAYER_PATH@"
-                                  (cond
-                                    ((equal? path "")
-                                     #f)
-                                    (else
-                                     path))))))
+    (alternative-player-path . @ALTERNATIVE_PLAYER_PATH@)))

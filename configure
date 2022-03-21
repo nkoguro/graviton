@@ -23,6 +23,25 @@
                  "1")
                 (else
                  #f))))
+(define player-install-dir
+  (if wsl
+    (guard (e (else (report-error e)
+                    (print "Failed to set up Graviton player install directory. Please specify the directory with --with-player-install-dir option."
+                           (current-error-port))
+                    (exit 1)))
+      (let1 curdir (current-directory)
+        (unwind-protect
+            (begin
+              (current-directory "/mnt/c/Windows/System32")
+              (let* ((localappdata (process-output->string '("./cmd.exe" "/c" "echo %LOCALAPPDATA%")))
+                     (player-path (build-path (process-output->string `("wslpath" "-u" ,localappdata))
+                                              "gauche-graviton")))
+                player-path))
+          (current-directory curdir))))
+    "${graviton-lib-dir}/player"))
+(define alternative-player-path #f)
+(define browser-default-port 8080)
+(define player-default-port 0)
 
 (cf-arg-with 'wsl
              (cf-help-string
@@ -35,52 +54,29 @@
              (cf-help-string
                "--with-player-install-dir"
                "The install directory of Graviton player.")
-             (lambda (with-player-install-dir)
-               (cf-subst 'GRAVITON_PLAYER_INSTALL_DIR with-player-install-dir))
-             (lambda ()
-               (cf-subst 'GRAVITON_PLAYER_INSTALL_DIR
-                         (if wsl
-                           (guard (e (else (report-error e)
-                                           (print "Failed to set up Graviton player install directory. Please specify the directory with --with-player-install-dir option."
-                                                  (current-error-port))
-                                           (exit 1)))
-                             (let1 curdir (current-directory)
-                               (unwind-protect
-                                   (begin
-                                     (current-directory "/mnt/c/Windows/System32")
-                                     (let* ((localappdata (process-output->string '("./cmd.exe" "/c" "echo %LOCALAPPDATA%")))
-                                            (player-path (build-path (process-output->string `("wslpath" "-u" ,localappdata))
-                                                                     "gauche-graviton")))
-                                       player-path))
-                                 (current-directory curdir))))
-                           "${graviton-lib-dir}/player"))))
+             (lambda (path)
+               (set! player-install-dir path)))
 
 (cf-arg-with 'alternative-player-path
              (cf-help-string
                "--with-alternative-player-path"
                "Specify the alternative player path. If this path is specified, the executable at the path is invoked if the client type is 'player.")
              (lambda (path)
-               (cf-subst 'ALTERNATIVE_PLAYER_PATH path))
-             (lambda ()
-               (cf-subst 'ALTERNATIVE_PLAYER_PATH "")))
+               (set! alternative-player-path path)))
 
 (cf-arg-with 'browser-default-port
              (cf-help-string
                "--with-browser-default-port"
                "Specify the default port for using browser client. 0 means the ephemeral port. The default is 8080.")
              (lambda (port)
-               (cf-subst 'BROWSER_DEFAULT_PORT port))
-             (lambda ()
-               (cf-subst 'BROWSER_DEFAULT_PORT "8080")))
+               (set! browser-default-port (read-from-string port))))
 
 (cf-arg-with 'player-default-port
              (cf-help-string
                "--with-player-default-port"
                "Specify the default port for using graviton-player client. 0 means the ephemeral port. The default is 0.")
              (lambda (port)
-               (cf-subst 'PLAYER_DEFAULT_PORT port))
-             (lambda ()
-               (cf-subst 'PLAYER_DEFAULT_PORT "0")))
+               (set! player-default-port (read-from-string port))))
 
 ;; Initialize configure.  This creates the global context, parses
 ;; command-line args and sets up default values.
@@ -88,7 +84,15 @@
 
 ;; Here you can add feature tests and other cf-define's.
 
-(cf-subst 'WSL (or wsl ""))
+(cf-subst 'WSL (write-to-string wsl))
+
+(cf-subst 'GRAVITON_PLAYER_INSTALL_DIR player-install-dir)
+
+(cf-subst 'ALTERNATIVE_PLAYER_PATH (write-to-string alternative-player-path))
+
+(cf-subst 'BROWSER_DEFAULT_PORT (write-to-string browser-default-port))
+
+(cf-subst 'PLAYER_DEFAULT_PORT (write-to-string player-default-port))
 
 (cf-subst 'GRAVITON_PLAYER_ARCH
           (let1 platform (gauche-config "--arch")
