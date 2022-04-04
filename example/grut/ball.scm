@@ -5,7 +5,7 @@
 (use graviton.misc)
 (use text.console)
 
-(import-js ("https://cdn.skypack.dev/three@0.138.2" :as THREE))
+(import-js ("https://cdn.skypack.dev/three" :as THREE))
 
 (define-jsvar camera)
 (define-jsvar scene)
