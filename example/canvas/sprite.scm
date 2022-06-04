@@ -80,14 +80,16 @@
   (let-args (cdr args) ((num-sprites "s|sprites=i" 100)
                         (force-browser? "b|browser" #f)
                         (force-player? "p|player" #f)
+                        (force-server? "server" #f)
                         (num-samples "num-samples=i" #f))
     (set! *num-samples* num-samples)
     (set! *num-sprites* num-sprites)
 
-    (grv-config :client (cond
-                          (force-browser? 'browser)
-                          (force-player? 'player)
-                          (else #f)))
+    (grv-config :mode (cond
+                        (force-browser? 'browser)
+                        (force-player? 'player)
+                        (force-server? 'server)
+                        (else #f)))
 
     (with-window (grut-canvas-window *canvas-width* *canvas-height* :background-color "black")
         (canvas)

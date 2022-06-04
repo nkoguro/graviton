@@ -176,19 +176,23 @@ Configures Graviton.
     <dd>
       Protocol ("http" or "https") to connect this server. The default is "http".
     </dd>
-    <dt><code>client</code>
+    <dt><code>mode</code>
     <dd>
-      Client type. The default is <code>'player</code> if graviton-player is installed. Otherwise, <code>'browser</code>.
+      Operation mode of Graviton.
       <dl>
         <dt><code>'browser</code></dt>
         <dd>
-          Web browser. The program waits for the client requests, and can accept requests from multiple clients.
+          The program opens a main window with Web browser automatically, and it exits if the window is closed. graviton uses the system default Web browser. If you set BROWSER environment variable, the browser is used instead of the system default.  
         </dd>
         <dt><code>'player</code></dt>
         <dd>
-          graviton-player. The program opens a main window with graviton-player, and it exits if the window is closed.
+          The program opens a main window with graviton-player automatically, and it exits if the window is closed.
         </dd>
-        <dt><code>#f</code></dt>
+        <dt><code>'server</code></dt>
+        <dd>
+          The program waits for the client requests, and can accept requests from multiple clients.
+        </dd>
+        <dt><code>#f</code> (default)</dt>
         <dd>
           <code>'player</code> if graviton-player is installed. Otherwise, <code>'browser</code>.
         </dd>
@@ -221,12 +225,12 @@ Returns the current value of the setting. <i>name</i> must be one of these symbo
 
 <dt><code>(client-is-player)</code></dt>
 <dd>
-Returns <code>#t</code> if the current client setting is graviton-player.
+Returns <code>#t</code> if the current client is graviton-player.
 </dd>
 
 <dt><code>(client-is-browser)</code></dt>
 <dd>
-Returns <code>#t</code> if the current client setting is Web browser.
+Returns <code>#t</code> if the current client is Web browser.
 </dd>
 </dl>
 

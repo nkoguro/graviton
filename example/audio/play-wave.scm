@@ -29,10 +29,12 @@
 (define (main args)
   (let-args (cdr args)
       ((force-player? "player" #f)
-       (force-browser? "browser" #f))
-    (grv-config :client (cond
+       (force-browser? "browser" #f)
+       (force-server? "server" #f))
+    (grv-config :mode (cond
                           (force-player? 'player)
                           (force-browser? 'browser)
+                          (force-server? 'server)
                           (else #f)))
 
     (with-window (cond

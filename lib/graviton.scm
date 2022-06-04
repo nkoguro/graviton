@@ -671,6 +671,7 @@
    (host :init-keyword :host)
    (protocol :init-keyword :protocol)
    (client :init-keyword :client)
+   (mode :init-keyword :mode)
    (access-log :init-keyword :access-log)
    (error-log :init-keyword :error-log)
    (iframe-window? :init-keyword :iframe-window?)))
@@ -684,22 +685,35 @@
                     (host "localhost")
                     (protocol "http")
                     (client #f)
+                    (mode #f)
                     (port #f)
                     (access-log #f)
                     (error-log #f)
                     (iframe-window? (eq? client 'browser)))
   (unless *server-started?*
-    (let1 client-type (or client
-                          (if (player-exists?)
-                            'player
-                            'browser))
+    (let* ((mode (or mode
+                     (cond
+                       (client
+                        (display ":client keyword parameter is deprecated. Use :mode parameter instead.\n"
+                                 (current-error-port))
+                        (if (eq? client 'browser)
+                          'server
+                          client))
+                       ((player-exists?)
+                        'player)
+                       (else
+                        'browser))))
+           (client-type (if (eq? mode 'server)
+                          'browser
+                          mode)))
       (set! *grv-config* (make <grv-config>
                            :port (or port
-                                     (case client-type
-                                       ((browser)
-                                        (graviton-config 'browser-default-port))
+                                     (case mode
+                                       ((server)
+                                        (graviton-config 'server-default-port))
                                        (else
-                                        (graviton-config 'player-default-port))))
+                                        (graviton-config 'app-default-port))))
+                           :mode mode
                            :host host
                            :protocol protocol
                            :client client-type
@@ -713,6 +727,7 @@
     ((host) (~ *grv-config*'host))
     ((protocol) (~ *grv-config*'protocol))
     ((client) (~ *grv-config*'client))
+    ((mode) (~ *grv-config*'mode))
     ((access-log) (~ *grv-config*'access-log))
     ((error-log) (~ *grv-config*'error-log))
     ((iframe-window?) (~ *grv-config*'iframe-window?))
@@ -823,6 +838,7 @@
                  "/"))
          (win-controller (make-window-controller path (~ win'page) thunk))
          (use-player? (memq (grv-config-parameter 'client) '(player dev-player)))
+         (server-mode? (eq? (grv-config-parameter 'mode) 'server))
          (width (~ win'width))
          (height (~ win'height))
          (resizable? (~ win'resizable?)))
@@ -830,13 +846,16 @@
       (*server-started?*
        (open-client-window (~ win-controller'path) width height resizable?))
       (else
-       (grv-start-server use-player?
-                         (if use-player?
-                           (lambda (url)
-                             (invoke-player url width height (~ win'show?) resizable?))
-                           (lambda (url)
-                             (log-info "Graviton server is running at")
-                             (log-info "~a" url))))))))
+       (grv-start-server (not server-mode?)
+                         (lambda (url)
+                           (cond
+                             (server-mode?
+                              (log-info "Graviton server is running at")
+                              (log-info "~a" url))
+                             (use-player?
+                              (invoke-player url width height (~ win'show?) resizable?))
+                             (else
+                              (open-browser url)))))))))
 
 (define-syntax with-window
   (syntax-rules ()

@@ -8,11 +8,13 @@
 (define (main args)
   (let-args (cdr args)
       ((force-player? "player" #f)
-       (force-browser? "browser" #f))
-    (grv-config :client (cond
-                          (force-player? 'player)
-                          (force-browser? 'browser)
-                          (else #f)))
+       (force-browser? "browser" #f)
+       (force-server? "server" #f))
+    (grv-config :mode (cond
+                        (force-player? 'player)
+                        (force-browser? 'browser)
+                        (force-server? 'server)
+                        (else #f)))
     (with-window (grut-canvas-window 300 300)
         (canvas)
       (let1 ctx (canvas'get-context "2d")

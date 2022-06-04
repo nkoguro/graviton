@@ -394,6 +394,7 @@
   (let-args (cdr args)
       ((force-player? "player" #f)
        (force-browser? "browser" #f)
+       (force-server? "server" #f)
        (font-size "font-size=s" #f)
        (show-help? "h|help" #f))
     (when show-help?
@@ -401,14 +402,16 @@
       (print "Options:")
       (print "  --player          Use graviton-player.")
       (print "  --browser         Use Web browser.")
+      (print "  --server          Run as server mode.")
       (print "  --font-size=size  Change the font size.")
       (exit 0))
     (grv-log-config :log-level 1)
 
-    (grv-config :client (cond
-                          (force-player? 'player)
-                          (force-browser? 'browser)
-                          (else #f)))
+    (grv-config :mode (cond
+                        (force-player? 'player)
+                        (force-browser? 'browser)
+                        (force-server? 'server)
+                        (else #f)))
 
     (with-window
         (grv-window

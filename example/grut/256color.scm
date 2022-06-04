@@ -7,11 +7,13 @@
 (define (main args)
   (let-args (cdr args)
       ((force-player? "player" #f)
-       (force-browser? "browser" #f))
-    (grv-config :client (cond
-                          (force-player? 'player)
-                          (force-browser? 'browser)
-                          (else #f)))
+       (force-browser? "browser" #f)
+       (force-server? "server" #f))
+    (grv-config :mode (cond
+                        (force-player? 'player)
+                        (force-browser? 'browser)
+                        (force-server? 'server)
+                        (else #f)))
     (with-window (grut-text-window :column 42 :row 15 :fit 'contain)
         (text-console)
       (on-jsevent window "keyup" (key)

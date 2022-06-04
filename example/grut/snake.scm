@@ -293,11 +293,13 @@
 (define (main args)
   (let-args (cdr args)
       ((force-player? "player" #f)
-       (force-browser? "browser" #f))
-    (grv-config :client (cond
-                          (force-player? 'player)
-                          (force-browser? 'browser)
-                          (else #f)))
+       (force-browser? "browser" #f)
+       (force-server? "server" #f))
+    (grv-config :mode (cond
+                        (force-player? 'player)
+                        (force-browser? 'browser)
+                        (force-server? 'server)
+                        (else #f)))
 
     (with-window (grut-text-window :column *text-width* :row *text-height* :fit 'fill :window-width 600 :window-height 600)
         (text-console)
