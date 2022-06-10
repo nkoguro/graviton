@@ -746,7 +746,7 @@
 (define *graviton-access-log-drain* #f)
 (define *graviton-error-log-drain* #t)
 
-(define *control-channel* (make-server-control-channel))
+(define *control-channel* #f)
 
 (define (server-url sock)
   (format "~a://~a:~a/"
@@ -805,14 +805,20 @@
                           :key
                           (access-log #f)
                           (error-log #f))
+  (when *server-started?*
+    (error "Graviton server is already started."))
   (set! *shutdown-if-all-connection-closed?* shutdown-if-all-connection-closed?)
+  (set! *control-channel* (make-server-control-channel))
   (start-http-server :port (grv-config-parameter 'port)
                      :access-log (grv-config-parameter 'access-log)
                      :error-log (grv-config-parameter 'error-log)
                      :control-channel *control-channel*
                      :startup-callback (lambda (socks)
                                          (set! *server-started?* #t)
-                                         (startup-callback (server-url (first socks))))))
+                                         (startup-callback (server-url (first socks))))
+                     :shutdown-callback (lambda ()
+                                          (set! *server-started?* #f)
+                                          (set! *control-channel* #f))))
 
 (define (grv-exit :optional (code 0))
   (flush-client-request)
