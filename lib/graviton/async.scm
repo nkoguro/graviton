@@ -340,7 +340,7 @@
 (define-syntax concurrent/await
   (syntax-rules ()
     ((_ body ...)
-     (await (concurrent/async body ...)))))
+     (await (concurrent body ...)))))
 
 (define-method worker-fire-event ((worker <worker>) event :rest args)
   (enqueue-task! worker EVENT-QUEUE-PRIORITY-VALUE (list* (now-seconds) event #f args)))
