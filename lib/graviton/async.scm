@@ -478,7 +478,7 @@
 (define-syntax parallel/await
   (syntax-rules ()
     ((_ body ...)
-     (await (parallel/async body ...)))))
+     (await (parallel body ...)))))
 
 (define-method worker-fire-event ((worker-wrapper <worker-wrapper>) event :rest args)
   (apply worker-fire-event (unwrap-worker worker-wrapper) event args))
