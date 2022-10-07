@@ -57,6 +57,7 @@
   (use graviton.event)
   (use graviton.jsffi)
   (use graviton.misc)
+  (use graviton.repl)
   (use makiki)
   (use rfc.base64)
   (use rfc.json)
@@ -125,6 +126,12 @@
           jslet
           jslet/async
           jslet/await
+
+          make-repl-group
+          grv-repl
+          next-repl
+          list-repl
+          select-repl
           ))
 
 (select-module graviton)
@@ -489,6 +496,18 @@
 
 ;;;
 
+(define (%find-element id eid)
+  (let1 alist (window-context-slot-ref 'window-element-alist)
+    (or (assoc-ref alist id #f)
+        (let1 element (document'get-element-by-id eid)
+          (cond
+            ((eq? element 'null)
+             #f)
+            (else
+             (window-context-slot-set! 'window-element-alist
+                                       (acons id element (window-context-slot-ref 'window-element-alist)))
+             element))))))
+
 (define-syntax let-elements
   (er-macro-transformer
     (lambda (form rename id=?)
@@ -498,14 +517,11 @@
            `(let () ,@body)))
         ((_ ((? symbol? id) rest ...) body ...)
          (quasirename rename
-           `(let1 ,id (let1 element (document'get-element-by-id ,(symbol->string id))
-                        (if (eq? element 'null)
-                          #f
-                          element))
+           `(let1 ,id (%find-element ',id ,(symbol->string id))
               (let-elements ,rest ,@body))))
         ((_ (((? symbol? var) name) rest ...) body ...)
          (quasirename rename
-           `(let1 ,var (document'get-element-by-id ,name)
+           `(let1 ,var (%find-element ',var ,name)
               (let-elements ,rest ,@body))))
         (_
          (errorf "malformed let-elements: ~s" form))))))
@@ -520,12 +536,12 @@
         ((_ (? symbol? id) rest ...)
          (quasirename rename
            `(begin
-              (define ,id (document'get-element-by-id ,(symbol->string id)))
+              (define ,id (%find-element ',id ,(symbol->string id)))
               (import-elements ,@rest))))
         ((_ ((? symbol? var) name) rest ...)
          (quasirename rename
            `(begin
-              (define ,var (document'get-element-by-id ,name))
+              (define ,var (%find-element ',var ,name))
               (import-elements ,@rest))))
         (_
          (errorf "malformed import-elements: ~s" form))))))
@@ -862,6 +878,8 @@
                               (invoke-player url width height (~ win'show?) resizable?))
                              (else
                               (open-browser url)))))))))
+
+(define-window-context-slot window-element-alist '())
 
 (define-syntax with-window
   (syntax-rules ()

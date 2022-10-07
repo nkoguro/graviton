@@ -781,6 +781,36 @@ It is identical to <code>(await (parallel <i>body ...</i>)</code>.
 </dl>
 
 
+### REPL
+
+<dl>
+<dt><code>(grv-repl :optional <i>reader</i> <i>evaluator</i> <i>printer</i> <i>prompter</i> <i>repl-group</i>)</code></dt>
+<dd>
+Starts read-eval-print loop. You must start this REPL in a worker.
+If multiple REPLs are started, one of them is active in a REPL group. If <i>repl-group</i> is omitted, the default REPL group, which is globally defined, will be used.
+</dd>
+
+<dt><code>(make-repl-group)</code></dt>
+<dd>
+Makes a new REPL group.
+</dd>
+
+<dt><code>(next-repl :optional <i>repl-group</i>)</code></dt>
+<dd>
+Activates the next REPL in <i>repl-group</i>. If <i>repl-group</i> is omitted, the current REPL's group will be used.
+</dd>
+
+<dt><code>(list-repl :optional <i>repl-group</i>)</code></dt>
+<dd>
+Returns a list of REPL in <i>repl-group</i>. If <i>repl-group</i> is omitted, the current REPL's group will be used.
+</dd>
+
+<dt><code>(select-repl <i>repl</i>)</code></dt>
+<dd>
+Activates the specified REPL. The <i>repl</i> must be in a group of the current REPL.
+</dd>
+</dl>
+
 ## Module: graviton.grut
 
 One of the motivations to develop Graviton is to quickly make an old-style computer UI (the days of CUI, i.e., text console + single graphics screen). graviton.grut, which stands for "GRaviton Utility Toolkit," provides miscellaneous utilities to support such UI. 

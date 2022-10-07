@@ -17,17 +17,6 @@ body {
     padding: 0 0 0 5;
 }
 
-#status {
-    flex-shrink: 0;
-    height: 1.2em;
-    line-height: 1em;
-    background-color: white;
-    color: black;
-    overflow-y: hidden;
-    padding: 0 0 0 5;
-}
-
-
 #completion {
     position: absolute;
     left: 0px;

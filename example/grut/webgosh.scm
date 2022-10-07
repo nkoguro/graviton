@@ -1,12 +1,9 @@
 (use file.util)
 (use gauche.hook)
-(use gauche.logger)
 (use gauche.parameter)
 (use gauche.parseopt)
 (use gauche.sequence)
-(use gauche.vport)
 (use graviton)
-(use graviton.interactive)
 (use graviton.grut)
 (use srfi-1)
 (use srfi-13)
@@ -31,160 +28,17 @@
       (unless continue?
         (end-completion input-context)))))
 
-(define (get-text-output-port ui-worker)
-  (make <virtual-output-port>
-    :putb (lambda (b)
-            (ui-worker'putb b))
-    :puts (lambda (s)
-            (ui-worker'puts s))))
-
-(define (get-text-input-port grut-text out)
-  (let1 in #f
-    (make <virtual-input-port>
-      :getb (lambda ()
-              (let loop ((b (if in
-                              (read-byte in)
-                              (eof-object))))
-                (cond
-                  ((eof-object? b)
-                   (set! in (open-input-string (rlet1 str (get-input-text grut-text #t)
-                                                 (display str out)
-                                                 (flush out))))
-                   (loop (read-byte in)))
-                  (else
-                   b)))))))
-
-(define *history-size* 3)
-
-(dotimes (i *history-size*)
-  (eval `(define-in-module gauche ,(string->symbol (format "*~d" (+ i 1))) #f) (find-module 'gauche)))
-
-(define (record-history v)
-  (let loop ((i 1)
-             (sexprs '()))
-    (cond
-      ((< *history-size* i)
-       (eval `(begin ,@sexprs) (find-module 'gauche)))
-      ((= i 1)
-       (loop (+ i 1) (cons `(set! *1 ,(cond
-                                        ((or (symbol? v) (pair? v))
-                                         (list 'quote v))
-                                        (else
-                                         v)))
-                           sexprs)))
-      (else
-       (loop (+ i 1) (cons `(set! ,(string->symbol (format "*~d" i)) ,(string->symbol (format "*~d" (- i 1)))) sexprs))))))
-
-(define (print-history)
-  (dotimes (i *history-size*)
-    (format #t "*~d: ~s~%" (+ i 1) (global-variable-ref (find-module 'gauche) (string->symbol (format "*~d" (+ i 1))) #f))))
-
-(define (make-prompt env)
-  (let* ((worker (env-target-worker env))
-         (module (worker-current-module worker))
-         (sandbox (worker-sandbox-module worker))
+(define (make-prompt)
+  (let* ((m ((with-module gauche.internal vm-current-module)))
          (prompt (cond
-                   ((equal? module sandbox)
+                   ((eq? m (find-module 'user))
                     "gosh$ ")
                    (else
-                    (format "gosh[~a]$ " (module-name module))))))
+                    (format "gosh[~a]$ " (module-name m))))))
     (list prompt (string-append (make-string (- (string-length prompt) 1) #\.) " "))))
 
-(define (update-status! status env)
-  (let1 worker (env-target-worker env)
-    (clear-screen status)
-    (format status "~a: ~s" (worker-eval '(~ document'title) worker) worker)))
-
-(define-class <environ> ()
-  ((target-worker-stack :init-form (list (current-worker)))
-   (input-port :init-keyword :input-port)
-   (output-port :init-keyword :output-port)
-   (console :init-keyword :console)))
-
-(define (env-target-worker env)
-  (let1 stack (~ env'target-worker-stack)
-    (cond
-      ((null? stack)
-       (format (current-error-port) "No workers found. Aborted.")
-       (close-window))
-      ((worker-active? (car stack))
-       (car stack))
-      (else
-       (set! (~ env'target-worker-stack) (cdr stack))
-       (errorf "~s is inactive, detatched." (car stack))))))
-
-(define (env-attach! env worker)
-  (push! (~ env'target-worker-stack) worker))
-
-(define (env-detatch! env)
-  (when (< 1 (length (~ env'target-worker-stack)))
-    (pop! (~ env'target-worker-stack))))
-
-(define (env-eval* env sexpr success fail record?)
-  (worker-eval* sexpr
-                (env-target-worker env)
-                (lambda vals
-                  (when (and record? (not (null? vals)))
-                    (record-history (first vals)))
-                  (apply success vals))
-                fail
-                :input-port (~ env'input-port)
-                :output-port (~ env'output-port)
-                :error-port (~ env'output-port)
-                :trace-port (~ env'output-port)
-                :console (~ env'console)))
-
 ;;;
 
-(define (process-toplevel-command env command arg-str)
-  (cond
-    ((equal? command "attach")
-     (env-eval* env
-                (read-from-string arg-str)
-                (match-lambda*
-                  (((? (cut is-a? <> <worker>) worker) rest ...)
-                   (write worker)
-                   (newline)
-                   (env-attach! env worker))
-                  (vals
-                   (errorf "<worker> required, but got ~s" vals)))
-                (lambda (e)
-                  (report-error e))
-                #t))
-    ((equal? command "detach")
-     (env-detatch! env))
-    ((equal? command "lsw")
-     (print-main-worker-list))
-    ((equal? command "sm")
-     (env-eval* env `(select-module ,(cond
-                                       ((and arg-str (< 0 (string-length arg-str)))
-                                        (string->symbol arg-str))
-                                       (else
-                                        (module-name (worker-sandbox-module (env-target-worker env))))))
-                (lambda _ #t)
-                (^e (report-error e))
-                #f))
-    ((equal? command "cm")
-     (write (worker-current-module (env-target-worker env)))
-     (newline))
-    ((equal? command "history")
-     (print-history))
-    ((or (equal? command "h") (equal? command "help"))
-     (print "You're in REPL of Gauche Web shell (demo).")
-     (print "Type a Scheme expression to evaluate.")
-     (print "Evaluate (exit) to exit REPL.")
-     (print "A word preceded with comma has special meaning.")
-     (print "")
-     (print " ,attach  Attach to the specified worker.")
-     (print " ,detach  Detach from the current worker.")
-     (print " ,lsw     Print the list of workers.")
-     (print " ,sm      Switch to the module.")
-     (print " ,cm      Print the current module.")
-     (print " ,history Show REPL history."))
-    (else
-     (errorf "Invalid toplevel command: ~a" command))))
-
-;;;
 
 (define (extract-common-prefix strs)
   (let loop ((prefix (car strs))
@@ -233,35 +87,29 @@
          (line (input-context-text-line input-context))
          (start-index (+ (or (string-skip-right line *word-char-set* 0 (- cursor-column offset)) -1) 1))
          (start-column (+ start-index offset))
-         (env (~ input-context'data'environ))
          (state (make <completion-state>
                   :row cursor-row
                   :start-index start-index)))
     (set! (~ input-context'data'completion-state) state)
-    (env-eval* env
-               '(let1 tbl (make-hash-table)
+    (let ((m ((with-module gauche.internal vm-current-module)))
+          (tbl (make-hash-table)))
+      (for-each (lambda (sym)
+                  (hash-table-put! tbl sym #t))
+                (hash-table-keys (module-table m)))
+      (for-each (lambda (m)
                   (for-each (lambda (sym)
                               (hash-table-put! tbl sym #t))
-                            (hash-table-keys (module-table (current-module))))
-                  (for-each (lambda (m)
-                              (for-each (lambda (sym)
-                                          (hash-table-put! tbl sym #t))
-                                        (hash-table-keys (module-table m))))
-                            (module-precedence-list (current-module)))
-                  (for-each (lambda (m)
-                              (for-each (lambda (sym)
-                                          (hash-table-put! tbl sym #t))
-                                        (module-exports m)))
-                            (module-imports (current-module)))
-                  (hash-table-keys tbl))
-               (lambda (lst)
-                 (set! (~ state'all-words) (sort (remove (^s (string-contains s " ")) (map symbol->string lst))))
-                 (add-hook! (~ input-context'data'hook) update-completion-by-input)
-                 (switch-keymap input-context (~ input-context'data'completion-keymap))
-                 (update-completion input-context #t))
-               (lambda (e)
-                 #f)
-               #f)))
+                            (hash-table-keys (module-table m))))
+                (module-precedence-list m))
+      (for-each (lambda (m)
+                  (for-each (lambda (sym)
+                              (hash-table-put! tbl sym #t))
+                            (module-exports m)))
+                (module-imports m))
+      (set! (~ state'all-words) (sort (remove (^s (string-contains s " ")) (map symbol->string (hash-table-keys tbl)))))
+      (add-hook! (~ input-context'data'hook) update-completion-by-input)
+      (switch-keymap input-context (~ input-context'data'completion-keymap))
+      (update-completion input-context #t))))
 
 (define *right-padding* 5)
 (define *max-win-rows* 10)
@@ -423,22 +271,11 @@
            (html:div
             :id "container"
             :style (alist->style `(("font-size" . ,font-size)))
-            (html:grut-text :id "console")
-            (html:grut-text :id "status"))
+            (html:grut-text :id "console"))
            (html:grut-text :id "completion" :style (alist->style `(("font-size" . ,font-size) ("visibility" . "hidden"))))))
         (console status completion)
-      (show-cursor console)
 
-      (define-message putb (b)
-        (write-byte b console))
-
-      (define-message puts (s)
-        (display s console))
-
-      (let* ((out (get-text-output-port (current-worker)))
-             (in (get-text-input-port console out))
-             (env (make <environ> :input-port in :output-port out :console console))
-             (hook (make-hook 3))
+      (let* ((hook (make-hook 3))
              (completion-keymap (make-keymap (global-keymap))))
         (parameterize ((current-output-port console)
                        (current-error-port console)
@@ -452,38 +289,27 @@
 
           (format #t "Gauche version ~a~%" (gauche-version))
           (format #t "You can use Tab Completion.~%~%")
-          (while #t
-            (guard (e (else (format #t "*** ~a~%" (condition-message e))))
-              (update-status! status env)
 
-              (let1 str (read-text/edit console
-                                        :prompt (make-prompt env)
-                                        :input-continues input-continues?
-                                        :data-alist `((environ . ,env)
-                                                      (console-element . ,console)
-                                                      (completion-element . ,completion)
-                                                      (completion-state . #f)
-                                                      (completion-keymap . ,completion-keymap)
-                                                      (hook . ,hook))
-                                        :on-input (lambda (ctx type str)
-                                                    (run-hook hook ctx type str)))
-                (cond
-                  ((#/^\s*,((\S+)(\s+(.*))?)/ str)
-                   => (lambda (m)
-                        (let ((command (m 2))
-                              (arg-str (or (m 4) "")))
-                          (process-toplevel-command env command arg-str))))
-                  (else
-                   (port-for-each (lambda (sexpr)
-                                    (env-eval* env
-                                               sexpr
-                                               (lambda vals
-                                                 (for-each (lambda (v)
-                                                             (write v)
-                                                             (newline))
-                                                           vals))
-                                               (lambda (e)
-                                                 (report-error e))
-                                               #t))
-                                  (let1 in (open-input-string str)
-                                    (cut read in)))))))))))))
+          (grv-repl
+            (lambda ()
+              (let loop ()
+                (let1 str (read-text/edit console
+                                          :prompt (make-prompt)
+                                          :input-continues input-continues?
+                                          :data-alist `((console-element . ,console)
+                                                        (completion-element . ,completion)
+                                                        (completion-state . #f)
+                                                        (completion-keymap . ,completion-keymap)
+                                                        (hook . ,hook))
+                                          :on-input (lambda (ctx type str)
+                                                      (run-hook hook ctx type str)))
+                  (cond
+                    ((or (not str)
+                         (= (string-length (string-trim-both str)) 0))
+                     (loop))
+                    (else
+                     (read-from-string str))))))
+            #f
+            #f
+            (lambda ()
+              #f)))))))
