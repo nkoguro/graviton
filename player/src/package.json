@@ -9,7 +9,7 @@
   "author": "KOGURO, Naoki",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^20.1.1",
-    "electron-packager": "^16.0.0"
+    "electron": "^21.2.0",
+    "electron-packager": "^17.0.0"
   }
 }
