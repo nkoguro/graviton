@@ -12,7 +12,7 @@
                         (force-browser? 'browser)
                         (force-server? 'server)
                         (else #f)))
-    (with-window (grut-canvas-window 300 150)
+    (with-window (grut-canvas-window 300 150 :background-color "white")
         (canvas)
       (let1 ctx (canvas'get-context "2d")
         (on-jsevent window "keyup" (key)
