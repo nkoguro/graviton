@@ -247,8 +247,15 @@
 
 (define json-command-table (make-hash-table 'equal?))
 
+(define (handle-json-special sym)
+  (case sym
+    ((false) #f)
+    ((true) #t)
+    (else sym)))
+
 (define (receive-json json-str)
-  (let* ((params (vector->list (parse-json-string json-str)))
+  (let* ((params (vector->list (parameterize ((json-special-handler handle-json-special))
+                                 (parse-json-string json-str))))
          (cmd (car params))
          (args (cdr params))
          (proc (hash-table-get json-command-table cmd #f)))
@@ -277,18 +284,11 @@
 
 ;;;
 
-(define (handle-json-special sym)
-  (case sym
-    ((false) #f)
-    ((true) #t)
-    (else sym)))
-
 (define-window-context-slot websocket-output-port #f)
 
 (define (websocket-main-loop ctx in out req-user-agent thunk)
   (let1 exit-code 0
 
-    (json-special-handler handle-json-special)
     (window-context ctx)
 
     (window-context-slot-set! 'websocket-output-port out)
