@@ -169,14 +169,17 @@
     (while (worker-process-event (worker-event-wait-timeout))
       #t)))
 
-(define (make-worker thunk :key (name #f) (size 1))
-  (rlet1 worker (make <worker> :name (format "~a:~a" (window-context-id) name))
-    (window-context-slot-atomic-update! 'workers
-      (lambda (lst)
-        (cons worker lst)))
-    (dotimes (i size)
-      (let1 thread (make-thread (cut worker-run-event-loop worker thunk) (format "~s:~d" worker i))
-        (push! (~ worker'threads) thread)))))
+(define (make-worker ctx thunk :key (name #f) (size 1))
+  (let1 thunk (lambda ()
+                (window-context ctx)
+                (thunk))
+    (rlet1 worker (make <worker> :name (format "~a:~a" (window-context-id ctx) name))
+      (window-context-slot-atomic-update! ctx 'workers
+        (lambda (lst)
+          (cons worker lst)))
+      (dotimes (i size)
+        (let1 thread (make-thread (cut worker-run-event-loop worker thunk) (format "~s:~d" worker i))
+          (push! (~ worker'threads) thread))))))
 
 (define (worker-run worker)
   (dolist (thread (~ worker'threads))
@@ -189,10 +192,10 @@
 (define (worker-active? worker)
   (not (task-queue-closed? (~ worker'task-queue))))
 
-(define (worker-shutdown worker)
+(define (worker-shutdown ctx worker)
   (worker-close worker)
   (remove-all-tasks! worker)
-  (window-context-slot-atomic-update! 'workers
+  (window-context-slot-atomic-update! ctx 'workers
     (lambda (workers)
       (delete worker workers)))
   (undefined))
@@ -207,8 +210,8 @@
     (set! (~ worker'threads) '()))
   (undefined))
 
-(define (all-workers)
-  (window-context-slot-ref 'workers))
+(define (all-workers :optional (ctx (window-context)))
+  (window-context-slot-ref ctx 'workers))
 
 (define (worker-event-loop-hook :optional (worker (current-worker)))
   (~ worker'event-loop-hook))
@@ -459,7 +462,8 @@
            (loop rest (append specs (list kw val))))
           ((body ...)
            (quasirename rename `(let1 provider (lambda ()
-                                                 (rlet1 worker (apply make-worker (lambda () ,@body) (list ,@specs))
+                                                 (rlet1 worker (apply make-worker (window-context)
+                                                                      (lambda () ,@body) (list ,@specs))
                                                    (worker-run worker)))
                                   (if (window-context)
                                     (provider)
@@ -590,8 +594,8 @@
 
 (define-window-context-slot main-worker #f)
 
-(define (main-worker)
-  (window-context-slot-ref 'main-worker))
+(define (main-worker :optional (ctx (window-context)))
+  (window-context-slot-ref ctx 'main-worker))
 
 ;;;
 

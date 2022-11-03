@@ -497,15 +497,18 @@
 ;;;
 
 (define (%find-element id eid)
-  (let1 alist (window-context-slot-ref 'window-element-alist)
+  (let1 alist (window-context-slot-ref (window-context) 'window-element-alist)
     (or (assoc-ref alist id #f)
         (let1 element (document'get-element-by-id eid)
           (cond
             ((eq? element 'null)
              #f)
             (else
-             (window-context-slot-set! 'window-element-alist
-                                       (acons id element (window-context-slot-ref 'window-element-alist)))
+             (window-context-slot-set! (window-context)
+                                       'window-element-alist
+                                       (acons id
+                                              element
+                                              (window-context-slot-ref (window-context) 'window-element-alist)))
              element))))))
 
 (define-syntax let-elements
@@ -631,8 +634,7 @@
            (when (~ win-controller'temporary?)
              (delete-window-controller path))
            (let1 ctx (make-window-context)
-             (parameterize ((window-context ctx))
-               (query-parameters (~ req'params)))
+             (window-parameter-set! ctx query-parameters (~ req'params))
              (start-websocket-dispatcher! ctx (request-socket req) in out req-user-agent thunk))
            req)
           (else
@@ -852,12 +854,22 @@
           (use-iframe? (grv-config-parameter 'iframe-window?)))
     (Graviton.openWindow path width height resizable? use-iframe?)))
 
+(define %close-window-message (gensym))
+
 (define (%with-window win thunk)
   (let* ((win (or win
                   (grv-window :body (html:body) :show? #f)))
          (path (if *server-started?*
                  #f
                  "/"))
+         (thunk (lambda ()
+                  (add-message-handler! %close-window-message
+                    (lambda ()
+                      (flush-client-request)
+                      (for-each worker-close (all-workers))
+                      (app-exit 0)
+                      (asleep 0)))
+                  (thunk)))
          (win-controller (make-window-controller path (~ win'page) thunk))
          (use-player? (memq (grv-config-parameter 'client) '(player dev-player)))
          (server-mode? (eq? (grv-config-parameter 'mode) 'server))
@@ -901,15 +913,8 @@
       (enqueue! queue callback))))
 
 (define (close-window :optional (ctx #f))
-  (let1 thunk (lambda ()
-                (flush-client-request)
-                (for-each worker-close (all-workers))
-                (app-exit 0)
-                (asleep 0))
-    (if ctx
-      (parameterize ((window-context ctx))
-        (thunk))
-      (begin
-        (unless (window-context)
-          (error "window-context not found"))
-        (thunk)))))
+  (let1 ctx (or ctx (window-context))
+    (unless (window-context)
+      (error "window-context not found"))
+    ((window-context-slot-ref ctx 'main-worker) %close-window-message)
+    (undefined)))

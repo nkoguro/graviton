@@ -106,7 +106,7 @@
   (%client-request-output (open-output-uvector)))
 
 (define (flush-client-request)
-  (window-context-slot-atomic-ref 'websocket-output-port
+  (window-context-slot-atomic-ref (window-context) 'websocket-output-port
     (lambda (wout)
       (let1 data (get-output-uvector (client-request-output) :shared #t)
         (when (< 0 (u8vector-length data))
@@ -215,7 +215,7 @@
                   ((1)
                    (receive-json (u8vector->string (apply u8vector-append (reverse cont-frames)))))
                   ((2)
-                   (receive-binary (apply u8vector-append (reverse cont-frames)))))))
+                   (receive-binary ctx (apply u8vector-append (reverse cont-frames)))))))
              (else
               (push! (slot-ref ctx 'continuation-frames) payload-data))))
           ((1)
@@ -228,7 +228,7 @@
           ((2)
            (cond
              (fin?
-              (receive-binary payload-data))
+              (receive-binary ctx payload-data))
              (else
               (slot-set! ctx 'continuation-opcode opcode)
               (slot-set! ctx 'continuation-frames (list payload-data)))))
@@ -278,9 +278,9 @@
 (define (register-binary-handler! proc)
   (set! *binary-handler* proc))
 
-(define (receive-binary data)
+(define (receive-binary ctx data)
   (and-let1 proc *binary-handler*
-    (proc data)))
+    (proc ctx data)))
 
 ;;;
 
@@ -289,13 +289,11 @@
 (define (websocket-main-loop ctx in out req-user-agent thunk)
   (let1 exit-code 0
 
-    (window-context ctx)
-
-    (window-context-slot-set! 'websocket-output-port out)
-    (user-agent req-user-agent)
+    (window-context-slot-set! ctx 'websocket-output-port out)
+    (window-parameter-set! ctx user-agent req-user-agent)
 
     (receive (ctrl-in ctrl-out) (sys-pipe)
-      (window-context-slot-set! 'control-out ctrl-out)
+      (window-context-slot-set! ctx 'control-out ctrl-out)
 
       (let ((sel (make <selector>))
             (run-loop? #t))
@@ -319,17 +317,17 @@
                        '(r))
 
         ;; Invoke main worker thread
-        (let1 wt (make-worker thunk :name "main")
+        (let1 wt (make-worker ctx thunk :name "main")
           (worker-run wt)
-          (window-context-slot-set! 'main-worker wt))
+          (window-context-slot-set! ctx 'main-worker wt))
 
         (while run-loop?
           (selector-select sel))
 
         (selector-delete! sel #f #f #f)))
 
-    (let1 workers (all-workers)
-      (for-each worker-shutdown workers))
+    (let1 workers (all-workers ctx)
+      (for-each (cut worker-shutdown ctx <>) workers))
 
     (window-context-invalidate! ctx)
 

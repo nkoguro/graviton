@@ -103,7 +103,7 @@
 
 (define-method jsevent-callback-set! ((jsobj <jsobject>) event-type prop-specs (callback <worker-callback>) :key (use-capture? #f))
   (jsevent-callback-delete! jsobj event-type)
-  (window-context-slot-atomic-ref 'jsevent-callback-table
+  (window-context-slot-atomic-ref (window-context) 'jsevent-callback-table
     (lambda (tbl)
       (hash-table-put! tbl (list jsobj event-type) callback)))
   (jslet ((obj::object jsobj)
@@ -121,7 +121,7 @@
   (jsevent-callback-set! (jsobj-provider) event-type prop-specs proc-or-callback :use-capture? use-capture?))
 
 (define-method jsevent-callback-delete! ((jsobj <jsobject>) event-type :key (use-capture? #f))
-  (and-let1 callback (window-context-slot-atomic-ref 'jsevent-callback-table
+  (and-let1 callback (window-context-slot-atomic-ref (window-context) 'jsevent-callback-table
                        (lambda (tbl)
                          (let1 key (list jsobj event-type)
                            (begin0

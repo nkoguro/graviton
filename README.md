@@ -321,15 +321,26 @@ Creates <code>&lt;window-parameter&gt;</code> object with the initial values <i>
 Creates <code>&lt;window-parameter&gt;</code> object, but the initialization is delayed until a window instance is created. When a new window instance is created, the <code>&lt;window-parameter&gt;</code> object will be initialized with the return values of <i>thunk</i>.
 </dd>
 
-<dt><code>(window-parameter-atomic-ref <i>window-parameter</i> <i>proc</i>)</code></dt>
+<dt><code>(window-parameter-atomic-ref <i>window-context</i> <i>window-parameter</i> <i>proc</i>)</code></dt>
 <dd>
 </dd>
-Calls <i>proc</i> with the current values in <i>window-parameter</i>, while locking <i>window-parameter</i>.
+Calls <i>proc</i> with the current values of <i>window-parameter</i> in <i>window-context</i>, while locking <i>window-parameter</i>.
 </dd>
 
-<dt><code>(window-parameter-atomic-update! <i>window-parameter</i> <i>proc</i>)</code></dt>
+<dt><code>(window-parameter-atomic-update! <i>window-context</i> <i>window-parameter</i> <i>proc</i>)</code></dt>
 <dd>
-Calls <i>proc</i> with the current values in <i>window-parameter</i> while locking <i>window-parameter</i>, and updates the values in <i>window-parameter</i> by the returned values from <i>proc</i>.
+Calls <i>proc</i> with the current values of <i>window-parameter</i> in <i>window-context</i> while locking <i>window-parameter</i>, and updates the values in <i>window-parameter</i> by the returned values from <i>proc</i>.
+</dd>
+
+<dt><code>(window-parameter-ref <i>window-context</i> <i>window-parameter</i>)</code></dt>
+<dd>
+</dd>
+Returns the current values in <i>window-parameter</i>.
+</dd>
+
+<dt><code>(window-parameter-set! <i>window-context</i> <i>window-parameter</i> <i>vals...</i>)</code></dt>
+<dd>
+Sets <i>vals...<i> to <i>window-parameter</i> in <i>window-context</i>.
 </dd>
 
 <dt><code>(object-apply (<i>window-parameter</i> &lt;window-parameter&gt;) <i>value ...</i>)</code></dt>

@@ -776,8 +776,8 @@
     (else
      (errorf "Unsupported object: ~s" obj))))
 
-(define (decode-string in)
-  (let1 len (decode-value in)
+(define (decode-string ctx in)
+  (let1 len (decode-value ctx in)
     (if (= len 0)
       ""
       (ces-convert (read-uvector <u8vector> len in) 'utf-8))))
@@ -786,104 +786,104 @@
   (alist->hash-table
     `(
       ;; undefined
-      (,VAL-TYPE-UNDEFINED . ,(^(in) (undefined)))
+      (,VAL-TYPE-UNDEFINED . ,(^(ctx in) (undefined)))
       ;; null
-      (,VAL-TYPE-NULL . ,(^(in) 'null))
+      (,VAL-TYPE-NULL . ,(^(ctx in) 'null))
       ;; true
-      (,VAL-TYPE-TRUE . ,(^(in) #t))
+      (,VAL-TYPE-TRUE . ,(^(ctx in) #t))
       ;; false
-      (,VAL-TYPE-FALSE . ,(^(in) #f))
+      (,VAL-TYPE-FALSE . ,(^(ctx in) #f))
       ;; positive infinity
-      (,VAL-TYPE-POSITIVE-INFINITY . ,(^(in) +inf.0))
+      (,VAL-TYPE-POSITIVE-INFINITY . ,(^(ctx in) +inf.0))
       ;; negative infinity
-      (,VAL-TYPE-NEGATIVE-INFINITY . ,(^(in) -inf.0))
+      (,VAL-TYPE-NEGATIVE-INFINITY . ,(^(ctx in) -inf.0))
       ;; NaN
-      (,VAL-TYPE-NAN . ,(^(in) +nan.0))
+      (,VAL-TYPE-NAN . ,(^(ctx in) +nan.0))
       ;; string
-      (,VAL-TYPE-STRING . ,(^(in) (decode-string in)))
+      (,VAL-TYPE-STRING . ,(^(ctx in) (decode-string ctx in)))
       ;; symbol
-      (,VAL-TYPE-SYMBOL . ,(^(in) (string->symbol (decode-string in))))
+      (,VAL-TYPE-SYMBOL . ,(^(ctx in) (string->symbol (decode-string ctx in))))
       ;; object
-      (,VAL-TYPE-OBJECT . ,(^(in)
-                             (let* ((class-id (decode-value in))
-                                    (jsobj-id (decode-value in)))
-                               (window-context-slot-atomic-ref 'jsobject-manager
+      (,VAL-TYPE-OBJECT . ,(^(ctx in)
+                             (let* ((class-id (decode-value ctx in))
+                                    (jsobj-id (decode-value ctx in)))
+                               (window-context-slot-atomic-ref ctx 'jsobject-manager
                                  (lambda (manager)
                                    (or (find-jsobject manager jsobj-id)
                                        (let1 jsobj (make (hash-table-get *id->class-table* class-id)
                                                      :id jsobj-id
-                                                     :window-context (window-context))
+                                                     :window-context ctx)
                                          (register-jsobject! manager jsobj)
                                          jsobj)))))))
       ;; date
-      (,VAL-TYPE-DATE . ,(^(in) (seconds->time (/. (decode-value in) 1000))))
+      (,VAL-TYPE-DATE . ,(^(ctx in) (seconds->time (/. (decode-value ctx in) 1000))))
       ;; array
-      (,VAL-TYPE-ARRAY . ,(^(in)
-                            (let1 len (decode-value in)
-                              (vector-ec (: _ len) (decode-value in)))))
+      (,VAL-TYPE-ARRAY . ,(^(ctx in)
+                            (let1 len (decode-value ctx in)
+                              (vector-ec (: _ len) (decode-value ctx in)))))
       ;; int8array
-      (,VAL-TYPE-INT8ARRAY . ,(^(in) (let1 len (decode-value in)
-                                       (if (= len 0)
-                                         #s8()
-                                         (read-uvector <s8vector> len in 'little-endian)))))
+      (,VAL-TYPE-INT8ARRAY . ,(^(ctx in) (let1 len (decode-value ctx in)
+                                           (if (= len 0)
+                                             #s8()
+                                             (read-uvector <s8vector> len in 'little-endian)))))
       ;; uint8array
-      (,VAL-TYPE-UINT8ARRAY . ,(^(in) (let1 len (decode-value in)
-                                        (if (= len 0)
-                                          #u8()
-                                          (read-uvector <u8vector> len in 'little-endian)))))
+      (,VAL-TYPE-UINT8ARRAY . ,(^(ctx in) (let1 len (decode-value ctx in)
+                                            (if (= len 0)
+                                              #u8()
+                                              (read-uvector <u8vector> len in 'little-endian)))))
       ;; int16array
-      (,VAL-TYPE-INT16ARRAY . ,(^(in) (let1 len (decode-value in)
-                                        (if (= len 0)
-                                          #s16()
-                                          (read-uvector <s16vector> len in 'little-endian)))))
+      (,VAL-TYPE-INT16ARRAY . ,(^(ctx in) (let1 len (decode-value ctx in)
+                                            (if (= len 0)
+                                              #s16()
+                                              (read-uvector <s16vector> len in 'little-endian)))))
       ;; uint16array
-      (,VAL-TYPE-UINT16ARRAY . ,(^(in) (let1 len (decode-value in)
-                                         (if (= len 0)
-                                           #u16()
-                                           (read-uvector <u16vector> len in 'little-endian)))))
+      (,VAL-TYPE-UINT16ARRAY . ,(^(ctx in) (let1 len (decode-value ctx in)
+                                             (if (= len 0)
+                                               #u16()
+                                               (read-uvector <u16vector> len in 'little-endian)))))
       ;; int32array
-      (,VAL-TYPE-INT32ARRAY . ,(^(in) (let1 len (decode-value in)
-                                        (if (= len 0)
-                                          #s32()
-                                          (read-uvector <s32vector> len in 'little-endian)))))
+      (,VAL-TYPE-INT32ARRAY . ,(^(ctx in) (let1 len (decode-value ctx in)
+                                            (if (= len 0)
+                                              #s32()
+                                              (read-uvector <s32vector> len in 'little-endian)))))
       ;; uint32array
-      (,VAL-TYPE-UINT32ARRAY . ,(^(in) (let1 len (decode-value in)
-                                         (if (= len 0)
-                                           #u32()
-                                           (read-uvector <u32vector> len in 'little-endian)))))
+      (,VAL-TYPE-UINT32ARRAY . ,(^(ctx in) (let1 len (decode-value ctx in)
+                                             (if (= len 0)
+                                               #u32()
+                                               (read-uvector <u32vector> len in 'little-endian)))))
       ;; float32array
-      (,VAL-TYPE-FLOAT32ARRAY . ,(^(in) (let1 len (decode-value in)
-                                          (if (= len 0)
-                                            #f32()
-                                            (read-uvector <f32vector> len in 'little-endian)))))
+      (,VAL-TYPE-FLOAT32ARRAY . ,(^(ctx in) (let1 len (decode-value ctx in)
+                                              (if (= len 0)
+                                                #f32()
+                                                (read-uvector <f32vector> len in 'little-endian)))))
       ;; float64array
-      (,VAL-TYPE-FLOAT64ARRAY . ,(^(in) (let1 len (decode-value in)
-                                          (if (= len 0)
-                                            #f64()
-                                            (read-uvector <f64vector> len in 'little-endian)))))
+      (,VAL-TYPE-FLOAT64ARRAY . ,(^(ctx in) (let1 len (decode-value ctx in)
+                                              (if (= len 0)
+                                                #f64()
+                                                (read-uvector <f64vector> len in 'little-endian)))))
       ;; JSON
-      (,VAL-TYPE-JSON . ,(^(in)
-                           (let1 len (decode-value in)
-                             (list-ec (: _ (decode-value in))
-                                      (let* ((key (decode-value in))
-                                             (val (decode-value in)))
+      (,VAL-TYPE-JSON . ,(^(ctx in)
+                           (let1 len (decode-value ctx in)
+                             (list-ec (: _ (decode-value ctx in))
+                                      (let* ((key (decode-value ctx in))
+                                             (val (decode-value ctx in)))
                                         (cons key val))))))
       ;; int8
-      (,VAL-TYPE-INT8 . ,read-s8)
+      (,VAL-TYPE-INT8 . ,(^(ctx in) (read-s8 in)))
       ;; uint8
-      (,VAL-TYPE-UINT8 . ,read-u8)
+      (,VAL-TYPE-UINT8 . ,(^(ctx in) (read-u8 in)))
       ;; int16
-      (,VAL-TYPE-INT16 . ,(cut read-s16 <> 'little-endian))
+      (,VAL-TYPE-INT16 . ,(^(ctx in) (read-s16 in 'little-endian)))
       ;; uint16
-      (,VAL-TYPE-UINT16 . ,(cut read-u16 <> 'little-endian))
+      (,VAL-TYPE-UINT16 . ,(^(ctx in) (read-u16 in 'little-endian)))
       ;; int32
-      (,VAL-TYPE-INT32 . ,(cut read-s32 <> 'little-endian))
+      (,VAL-TYPE-INT32 . ,(^(ctx in) (read-s32 in 'little-endian)))
       ;; uint32
-      (,VAL-TYPE-UINT32 . ,(cut read-u32 <> 'little-endian))
+      (,VAL-TYPE-UINT32 . ,(^(ctx in) (read-u32 in 'little-endian)))
       ;; float64
-      (,VAL-TYPE-FLOAT64 . ,(cut read-f64 <> 'little-endian)))))
+      (,VAL-TYPE-FLOAT64 . ,(^(ctx in) (read-f64 in 'little-endian))))))
 
-(define (decode-value in)
+(define (decode-value ctx in)
   (let1 val-type (read-s8 in)
     (cond
       ((eof-object? val-type)
@@ -893,7 +893,7 @@
       (else
        (let1 decoder (or (hash-table-get decoder-table val-type #f)
                          (errorf "Unsupported value type: ~a" val-type))
-         (decoder in))))))
+         (decoder ctx in))))))
 
 ;;;
 
@@ -1362,8 +1362,9 @@
   (eq? (window-context) (slot-ref jsobj '%window-context)))
 
 (define (jsobject-free! obj)
-  (let1 id (~ obj'%id)
-    (window-context-slot-atomic-ref 'jsobject-manager
+  (let ((id (slot-ref obj '%id))
+        (ctx (slot-ref obj '%window-context)))
+    (window-context-slot-atomic-ref ctx 'jsobject-manager
       (lambda (manager)
         (with-slots (id-vector object-vector id->index-table next-index) manager
           (jslet ((id))
@@ -1528,7 +1529,7 @@
   (make <jsobject-provider>
     :provider  (let1 key (gensym)
                  (lambda ()
-                   (window-context-slot-atomic-ref 'global-jsobject-table
+                   (window-context-slot-atomic-ref (window-context) 'global-jsobject-table
                      (lambda (tbl)
                        (or (hash-table-get tbl key #f)
                            (rlet1 jsobj (parameterize ((disable-async-wait #t))
@@ -1637,15 +1638,15 @@
 
 ;;;
 
-(define (decode-value-list in)
-  (port-map values (cut decode-value in)))
+(define (decode-value-list ctx in)
+  (port-map values (cut decode-value ctx in)))
 
-(define (decode-received-binary-data data)
+(define (decode-received-binary-data ctx data)
   (call-with-input-string (u8vector->string data)
     (lambda (in)
-      (let1 notification-id (decode-value in)
-        (notify-values notification-id (lambda ()
-                                         (decode-value-list in)))))))
+      (let1 notification-id (decode-value ctx in)
+        (notify-values ctx notification-id (lambda ()
+                                             (decode-value-list ctx in)))))))
 
 (register-binary-handler! decode-received-binary-data)
 
@@ -1660,7 +1661,7 @@
 (define-window-context-slot notification-manager (make <notification-manager>))
 
 (define (allocate-notification-id receiver)
-  (window-context-slot-atomic-ref 'notification-manager
+  (window-context-slot-atomic-ref (window-context) 'notification-manager
     (lambda (notification-manager)
       (with-slots (notification-vector offset) notification-manager
           (let loop ((counter 0))
@@ -1682,16 +1683,16 @@
                    (log-framework-debug "Allocated notification ID: ~a for ~s" index receiver)
                    (set! offset (modulo (+ offset counter 1) vec-len)))))))))))
 
-(define (free-notification-id id)
-  (window-context-slot-atomic-ref 'notification-manager
+(define (free-notification-id id :optional (ctx (window-context)))
+  (window-context-slot-atomic-ref ctx 'notification-manager
     (lambda (notification-manager)
       (with-slots (notification-vector offset) notification-manager
         (vector-set! notification-vector id #f)
         (set! offset id)
         (log-framework-debug "Freed notification ID: ~a" id)))))
 
-(define (notify-values notification-id arg-creator)
-  (window-context-slot-atomic-ref 'notification-manager
+(define (notify-values ctx notification-id arg-creator)
+  (window-context-slot-atomic-ref ctx 'notification-manager
     (lambda (notification-manager)
       (with-slots (notification-vector offset) notification-manager
         (let1 receiver (vector-ref notification-vector notification-id)
@@ -1700,7 +1701,7 @@
              (log-framework-debug "notification ID: ~a received. Set values to grv-promise: ~s" notification-id gpromise)
              (grv-promise-set-thunk! gpromise arg-creator)
              ;; We can free this notification-id because grv-promise is an one-time object.
-             (free-notification-id notification-id))
+             (free-notification-id notification-id ctx))
             ((? worker-callback? callback)
              (log-framework-debug "notification ID: ~a received. Invoke callback: ~s" notification-id callback)
              (invoke-worker-callback callback arg-creator))
@@ -1710,7 +1711,7 @@
 (define-window-context-slot callback->id-table (make-hash-table 'equal?))
 
 (define (link-callback callback)
-  (window-context-slot-atomic-ref 'callback->id-table
+  (window-context-slot-atomic-ref (window-context) 'callback->id-table
     (lambda (tbl)
       (or (hash-table-get tbl callback #f)
           (rlet1 id (allocate-notification-id callback)
@@ -1718,7 +1719,7 @@
             (log-framework-debug "Linked callback: ~s (notification ID: ~a)" callback id))))))
 
 (define (unlink-callback callback)
-  (window-context-slot-atomic-ref 'callback->id-table
+  (window-context-slot-atomic-ref (window-context) 'callback->id-table
     (lambda (tbl)
       (and-let1 id (hash-table-get tbl callback #f)
         (jslet ((id))
@@ -1729,7 +1730,7 @@
 
 (define (unlink-procedure proc)
   (for-each unlink-callback
-            (window-context-slot-atomic-ref 'callback->id-table
+            (window-context-slot-atomic-ref (window-context) 'callback->id-table
               (lambda (tbl)
                 (rlet1 result '()
                   (hash-table-for-each tbl (lambda (callback id)
