@@ -100,8 +100,16 @@
 
 ;;;
 
-(define current-worker (make-parameter #f))
-(define current-priority (make-parameter #f))
+(define %current-worker (make-thread-local #f))
+
+(define (current-worker)
+  (tlref %current-worker))
+
+(define %current-priority (make-thread-local 'default))
+
+(define (current-priority)
+  (tlref %current-priority))
+
 (define worker-event-wait-timeout (make-parameter #f))
 (define-window-context-slot workers '())
 
@@ -120,9 +128,10 @@
 
 (define (worker-process-event timeout)
   (define (invoke-thunk priority thunk)
-    (parameterize ((current-priority priority))
-      (reset
-        (thunk))))
+    (reset
+      (tlset! %current-priority priority)
+      (thunk))
+    (tlset! %current-priority 'default))
 
   (let1 worker (current-worker)
     (run-hook worker-process-event-start-hook)
@@ -160,8 +169,7 @@
 (define (worker-run-event-loop worker thunk)
   (guard (e (else (report-error e)
                   (app-exit 70)))
-    (current-worker worker)
-    (current-priority 'default)
+    (tlset! %current-worker worker)
     (run-hook worker-start-hook)
 
     (reset
@@ -411,22 +419,13 @@
 (define-method object-equal? ((callback1 <event-callback>) (callback2 <event-callback>))
   (every (^x (equal? (~ callback1 x) (~ callback2 x))) '(worker event-name)))
 
-(define-syntax worker-shift
-  (syntax-rules ()
-    ((_ cont expr ...)
-     (let ((worker (current-worker))
-           (priority (current-priority)))
-       (shift cont
-         (parameterize ((current-worker worker)
-                        (current-priority priority))
-           expr ...))))))
-
 (define-syntax shift-callback
   (syntax-rules ()
     ((_ callback expr ...)
-     (worker-shift cont
-       (let1 callback (worker-callback cont)
-         expr ...)))))
+     (let1 priority (current-priority)
+       (shift cont
+         (let1 callback (worker-callback cont :priority priority)
+           expr ...))))))
 
 (define-method worker-call-event ((worker <worker>) event :rest args)
   (shift-callback callback
