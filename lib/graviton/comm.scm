@@ -94,40 +94,38 @@
 
 ;;;
 
-(define %client-request-output (make-parameter #f))
+(define %client-request-output (make-thread-local #f))
 
 (define (client-request-output)
-  (or (%client-request-output)
+  (or (tlref %client-request-output)
       (begin
-        (%client-request-output (open-output-uvector))
-        (%client-request-output))))
-
-(define (init-client-request-output)
-  (%client-request-output (open-output-uvector)))
+        (tlset! %client-request-output (open-output-uvector))
+        (tlref %client-request-output))))
 
 (define (flush-client-request)
   (window-context-slot-atomic-ref (window-context) 'websocket-output-port
     (lambda (wout)
       (let1 data (get-output-uvector (client-request-output) :shared #t)
         (when (< 0 (u8vector-length data))
-          (%client-request-output (open-output-uvector))
+          (tlset! %client-request-output (open-output-uvector))
           (send-binary-frame wout data))))))
 
 (define (discard-client-request)
-  (%client-request-output (open-output-uvector)))
+  (tlset! %client-request-output (open-output-uvector)))
 
 (define (with-client-request thunk)
-  (parameterize ((%client-request-output (open-output-uvector)))
+  (let1 out (tlref %client-request-output)
     (dynamic-wind
         (lambda ()
-          #f)
+          (tlset! %client-request-output (open-output-uvector)))
         (lambda ()
           (guard (e (else (discard-client-request)
                           (raise e)))
             (thunk)))
-        flush-client-request)))
+        (lambda ()
+          (flush-client-request)
+          (tlset! %client-request-output out)))))
 
-(add-hook! worker-start-hook init-client-request-output)
 (add-hook! worker-process-event-start-hook flush-client-request)
 
 ;;;
