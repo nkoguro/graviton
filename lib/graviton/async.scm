@@ -44,7 +44,6 @@
 
   (export current-worker
           current-priority
-          worker-event-wait-timeout
           worker-process-event-start-hook
           worker-start-hook
           <worker>
@@ -110,7 +109,6 @@
 (define (current-priority)
   (tlref %current-priority))
 
-(define worker-event-wait-timeout (make-parameter #f))
 (define-window-context-slot workers '())
 
 (define-class <worker> ()
@@ -119,7 +117,8 @@
    (event-loop-hook :init-form (make-hook))
    (name :init-keyword :name
          :init-value #f)
-   (threads :init-value '())))
+   (threads :init-value '())
+   (worker-event-wait-timeout :init-value #f)))
 
 (define-method write-object ((obj <worker>) port)
   (format port "#<worker ~s>" (~ obj'name)))
@@ -174,7 +173,7 @@
 
     (reset
       (thunk))
-    (while (worker-process-event (worker-event-wait-timeout))
+    (while (worker-process-event (~ worker'worker-event-wait-timeout))
       #t)))
 
 (define (make-worker ctx thunk :key (name #f) (size 1))
@@ -503,9 +502,10 @@
    ;; schedule := (time-in-sec callback interval-in-sec)
    (let1 schedule-list '()
      (define (update-event-wait-timeout!)
-       (worker-event-wait-timeout (if (null? schedule-list)
-                                     #f
-                                     (max 0 (- (first (car schedule-list)) (now-seconds))))))
+       (set! (~ (current-worker)'worker-event-wait-timeout)
+             (if (null? schedule-list)
+               #f
+               (max 0 (- (first (car schedule-list)) (now-seconds))))))
 
      (define (add-schedule! time-in-sec callback interval-in-sec)
        (set! schedule-list (sort (cons (list time-in-sec callback interval-in-sec)
