@@ -328,14 +328,6 @@
   (enqueue-task! worker (task-priority->value priority) (cons priority thunk))
   (log-framework-debug "Enqueued thunk: ~s for worker: ~s with priority: ~a" thunk worker priority))
 
-(define (worker-yield!)
-  ;; Get the current worker and current priority before shift. shift exits (parameterize ...), so
-  ;; current-worker and current-priority will not work in shift.
-  (let ((worker (current-worker))
-        (priority (current-priority)))
-    (shift cont
-      (worker-submit-task worker cont :priority priority))))
-
 (define (run-concurrent thunk)
   (worker-submit-task (current-worker) thunk :priority (current-priority)))
 
