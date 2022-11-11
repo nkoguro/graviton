@@ -168,7 +168,7 @@
    (mutex :init-form (make-mutex))
    (slot-table :init-form (make-hash-table 'eq?))))
 
-(define %window-context (make-thread-local-inheritable #f))
+(define %window-context (make-thread-local #f #t))
 
 (define (window-context :rest args)
   (match args
