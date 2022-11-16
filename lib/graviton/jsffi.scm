@@ -168,10 +168,9 @@
 
 (define print-string (with-module rfc.json print-string))
 
-(define *unary-op-table* (make-hash-table))
-(define *infix-op-table* (make-hash-table))
 (define *statement-table* (make-hash-table))
 (define *macro-table* (make-hash-table))
+(define *expr-table* (make-hash-table))
 
 (define-syntax define-jsmacro
   (syntax-rules ()
@@ -370,15 +369,158 @@
   ((var delta)
    (compile-jsise-stmt env `(set! ,var (- ,var ,delta)))))
 
+(define-syntax define-jsexpr
+  (syntax-rules ()
+    ((_ alias name)
+     (hash-table-put! *expr-table* 'alias (hash-table-get *expr-table* 'name)))
+    ((_ name env (pat body ...) ...)
+     (hash-table-put! *expr-table*
+                      'name
+                      (lambda (env args)
+                        (match args
+                          (pat body ...) ...
+                          (x (errorf "Invalid syntax for expr '~a': ~s" 'name (cons 'name x)))))))))
+
+(define-jsexpr vector env
+  ((vals ...)
+   (list "[" (intersperse "," (map (cut compile-jsise-expr env <>) vals)) "]")))
+
+(define-jsexpr json env
+  ((obj)
+   (list (construct-json-string obj))))
+
+(define-jsexpr object env
+  (((key . val) ...)
+   (list "{"
+         (intersperse "," (map (lambda (k v)
+                                 (unless (string? k)
+                                   (errorf "The key of the object must be string, but got ~s" k))
+                                 (list (with-output-to-string
+                                         (lambda ()
+                                           (print-string k)))
+                                       ":"
+                                       (compile-jsise-expr env v)))
+                               key val))
+         "}")))
+
+(define-jsexpr js-code env
+  ((body ...)
+   (letrec ((traverse (lambda (body)
+                        (map (^x (match x
+                                   ((? symbol? var)
+                                    (resolve-js-var env var))
+                                   ((? list? body)
+                                    (traverse body))
+                                   (_
+                                    x)))
+                             body))))
+     (traverse body))))
+
+(define-jsexpr ref env
+  ((expr attrs ...)
+   (list (compile-jsise-expr env expr) (map (lambda (attr)
+                                              (match attr
+                                                (('quote sym)
+                                                 (list "." (symbol->string sym)))
+                                                (_
+                                                 (list "[" (compile-jsise-expr env attr) "]"))))
+                                            attrs))))
+
+(define-jsexpr ~ ref)
+
+(define-jsexpr begin env
+  ((expr ...)
+   (list "(" (intersperse "," (map (cut compile-jsise-expr env <>) expr)) ")")))
+
+(define-jsexpr let env
+  ((form body ...)
+   (let ((vars (map (cut list-ref <> 0) form))
+         (inits (map (cut list-ref <> 1) form)))
+     (compile-jsise-expr env `((lambda ,vars ,@body) ,@inits)))))
+
+(define-jsexpr lambda env
+  ((args stmt ...)
+   (let1 env (make-env env args)
+     (list "(" "(" (intersperse ","
+                                (let loop ((args args)
+                                           (js-args '()))
+                                  (match args
+                                    (()
+                                     (reverse js-args))
+                                    ((? symbol? arg)
+                                     (loop '() (cons (format "...~a" (resolve-js-var env arg)) js-args)))
+                                    ((arg . rest)
+                                     (loop rest (cons (resolve-js-var env arg) js-args))))))
+           ")" "=>" "{"
+           (map (cut compile-jsise-stmt env <>) stmt)
+           "}" ")"))))
+
+(define-jsexpr if env
+  ((expr then)
+   (compile-jsise-expr env `(if ,expr ,then undefined)))
+  ((expr then else)
+   (list "(" (compile-jsise-expr env expr) "?"
+         (compile-jsise-expr env then) ":"
+         (compile-jsise-expr env else) ")")))
+
+(define-jsexpr set! env
+  ((lvar expr)
+   (list "(" (compile-jsise-expr env lvar) "=" (compile-jsise-expr env expr) ")")))
+
+(define-jsexpr vector-ref env
+  ((var i)
+   (list (compile-jsise-expr env var) "[" (compile-jsise-expr env i) "]")))
+
+(define-jsexpr vector-set! env
+  ((var i v)
+   (list "(" (resolve-js-var env var) "[" (compile-jsise-expr env i) "]=" (compile-jsise-expr env v) ")")))
+
+(define-jsexpr make env
+  ((klass args ...)
+   (list "(" "new " klass "(" (intersperse "," (map (cut compile-jsise-expr env <>) args)) ")" ")")))
+
+(define-jsexpr new make)
+
+(define-jsexpr pre++ env
+  ((var)
+   (list "(" "++" (resolve-js-var env var) ")")))
+
+(define-jsexpr pre-- env
+  ((var)
+   (list "(" "--" (resolve-js-var env var) ")")))
+
+(define-jsexpr post++ env
+  ((var)
+   (list "(" (resolve-js-var env var) "++" ")")))
+
+(define-jsexpr post-- env
+  ((var)
+   (list "(" (resolve-js-var env var) "--" ")")))
+
+(define-jsexpr is-a? env
+  ((expr klass)
+   (list "(" (compile-jsise-expr env expr) " instanceof " klass ")")))
+
+(define-jsexpr json-value env
+  ((obj rule)
+   (compile-jsise-expr env `(Graviton.convertObject ,obj ,rule)))
+  ((obj)
+   (compile-jsise-expr env `(Graviton.convertObject ,obj))))
+
+
 (define-syntax define-jsise-unary
   (syntax-rules ()
     ((_ op js-op)
-     (hash-table-put! *unary-op-table* 'op js-op))))
+     (define-jsexpr op env
+       ((arg)
+        (list "(" js-op (compile-jsise-expr env arg) ")"))))))
 
 (define-syntax define-jsise-infix
   (syntax-rules ()
     ((_ op js-op)
-     (hash-table-put! *infix-op-table* 'op js-op))))
+     (define-jsexpr op env
+       ((args (... ...))
+        (list "(" (intersperse js-op (map (cut compile-jsise-expr env <>) args)) ")"))))))
 
 (define-jsise-unary not "!")
 (define-jsise-unary lognot "~")
@@ -401,123 +543,34 @@
 (define-jsise-infix modulo "%")
 
 (define (compile-jsise-expr env expr)
-  (match expr
-    ((? real? num)
-     (list num))
-    ((? string? str)
+  (define identifiers '((#t "true") (#f "false") (null "null") (undefined "undefined")))
+  (cond
+    ((list? expr)
+     (let1 lsym (car expr)
+       (cond
+         ((is-macro? lsym)
+          (let1 translator (hash-table-get *macro-table* lsym)
+            (compile-jsise-expr env (translator (cdr expr)))))
+         ((hash-table-get *expr-table* lsym #f)
+          => (lambda (proc)
+               (proc env (cdr expr))))
+         (else
+          (list (compile-jsise-expr env lsym) "(" (intersperse "," (map (cut compile-jsise-expr env <>) (cdr expr))) ")")))))
+    ((real? expr)
+     (list expr))
+    ((string? expr)
      (list (with-output-to-string
              (lambda ()
-               (print-string str)))))
-    (#t
-     '("true"))
-    (#f
-     '("false"))
-    ('null
-     '("null"))
-    ('undefined
+               (print-string expr)))))
+    ((symbol? expr)
+     (list (resolve-js-var env expr)))
+    ((vector? expr)
+     (list "[" (intersperse "," (map (cut compile-jsise-expr env <>) expr)) "]"))
+    ((undefined? expr)
      '("undefined"))
-    ((? undefined? undef)
-     '("undefined"))
-    ((? symbol? var)
-     (list (resolve-js-var env var)))
-    ((? vector? vec)
-     (list "[" (intersperse "," (map (cut compile-jsise-expr env <>) vec)) "]"))
-
-    (((? is-macro? macro) args ...)
-     (let1 translator (hash-table-get *macro-table* macro)
-       (compile-jsise-expr env (translator (cdr expr)))))
-
-    (('vector vals ...)
-     (list "[" (intersperse "," (map (cut compile-jsise-expr env <>) vals)) "]"))
-    (('json obj)
-     (list (construct-json-string obj)))
-    (('object (key . val) ...)
-     (list "{"
-           (intersperse "," (map (lambda (k v)
-                                   (unless (string? k)
-                                     (errorf "The key of the object must be string, but got ~s" k))
-                                   (list (with-output-to-string
-                                           (lambda ()
-                                             (print-string k)))
-                                         ":"
-                                         (compile-jsise-expr env v)))
-                                 key val))
-           "}"))
-    (('js-code body ...)
-     (letrec ((traverse (lambda (body)
-                          (map (^x (match x
-                                     ((? symbol? var)
-                                      (resolve-js-var env var))
-                                     ((? list? body)
-                                      (traverse body))
-                                     (_
-                                      x)))
-                               body))))
-       (traverse body)))
-    (((or 'ref '~) expr attrs ...)
-     (list (compile-jsise-expr env expr) (map (lambda (attr)
-                                                (match attr
-                                                  (('quote sym)
-                                                   (list "." (symbol->string sym)))
-                                                  (_
-                                                   (list "[" (compile-jsise-expr env attr) "]"))))
-                                              attrs)))
-    (('begin expr ...)
-     (list "(" (intersperse "," (map (cut compile-jsise-expr env <>) expr)) ")"))
-    (('let form body ...)
-     (let ((vars (map (cut list-ref <> 0) form))
-           (inits (map (cut list-ref <> 1) form)))
-       (compile-jsise-expr env `((lambda ,vars ,@body) ,@inits))))
-    (('lambda args stmt ...)
-     (let1 env (make-env env args)
-       (list "(" "(" (intersperse ","
-                                  (let loop ((args args)
-                                             (js-args '()))
-                                    (match args
-                                      (()
-                                       (reverse js-args))
-                                      ((? symbol? arg)
-                                       (loop '() (cons (format "...~a" (resolve-js-var env arg)) js-args)))
-                                      ((arg . rest)
-                                       (loop rest (cons (resolve-js-var env arg) js-args))))))
-             ")" "=>" "{"
-             (map (cut compile-jsise-stmt env <>) stmt)
-             "}" ")")))
-    (('if expr then)
-     (compile-jsise-expr env `(if ,expr ,then undefined)))
-    (('if expr then else)
-     (list "(" (compile-jsise-expr env expr) "?"
-           (compile-jsise-expr env then) ":"
-           (compile-jsise-expr env else) ")"))
-    (('set! lvar expr)
-     (list "(" (compile-jsise-expr env lvar) "=" (compile-jsise-expr env expr) ")"))
-    (('vector-ref var i)
-     (list (compile-jsise-expr env var) "[" (compile-jsise-expr env i) "]"))
-    (('vector-set! (? symbol? var) i v)
-     (list "(" (resolve-js-var env var) "[" (compile-jsise-expr env i) "]=" (compile-jsise-expr env v) ")"))
-    (((or 'new 'make) klass args ...)
-     (list "(" "new " klass "(" (intersperse "," (map (cut compile-jsise-expr env <>) args)) ")" ")"))
-    (('pre++ (? symbol? var))
-     (list "(" "++" (resolve-js-var env var) ")"))
-    (('pre-- (? symbol? var))
-     (list "(" "--" (resolve-js-var env var) ")"))
-    (('post++ (? symbol? var))
-     (list "(" (resolve-js-var env var) "++" ")"))
-    (('post-- (? symbol? var))
-     (list "(" (resolve-js-var env var) "--" ")"))
-    (('is-a? expr (? symbol? klass))
-     (list "(" (compile-jsise-expr env expr) " instanceof " klass ")"))
-    (('json-value obj rule)
-     (compile-jsise-expr env `(Graviton.convertObject ,obj ,rule)))
-    (('json-value obj)
-     (compile-jsise-expr env `(Graviton.convertObject ,obj)))
-    (((? (cut hash-table-contains? *unary-op-table* <>) op) arg)
-     (list "(" (hash-table-get *unary-op-table* op) (compile-jsise-expr env arg) ")"))
-    (((? (cut hash-table-contains? *infix-op-table* <>) op) args ...)
-     (list "(" (intersperse (hash-table-get *infix-op-table* op) (map (cut compile-jsise-expr env <>) args)) ")"))
-    ((f args ...)
-     (list (compile-jsise-expr env f) "(" (intersperse "," (map (cut compile-jsise-expr env <>) args)) ")"))
-    (_
+    ((assoc-ref identifiers expr #f)
+     => values)
+    (else
      (errorf "Invalid expression: ~s" expr))))
 
 (define (scheme->js-main-module-name scheme-module-name)
