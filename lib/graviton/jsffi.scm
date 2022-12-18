@@ -438,22 +438,38 @@
          (inits (map (cut list-ref <> 1) form)))
      (compile-jsise-expr env `((lambda ,vars ,@body) ,@inits)))))
 
+;; Parse the arguments of lambda for jsffi.
+;; Returns (arg1 arg2 ...) and (restarg). If restarg doesn't exist, the restarg list will be nil.
+(define (parse-lambda-args jsargs)
+  (let loop ((args '())
+             (restargs '())
+             (jsargs jsargs))
+    (match jsargs
+      (()
+       (values (reverse args) (reverse restargs)))
+      ((:rest (? symbol? jsrestarg))
+       (loop jsarg (list jsrestarg) '()))
+      ((? symbol? jsrestarg)
+       (loop jsarg (list jsrestarg) '()))
+      (((? symbol? jsarg) rest ...)
+       (loop (cons jsarg args) restargs rest))
+      (_
+       (errorf "Invalid arg spec for jsffi lambda: ~s" jsargs)))))
+
 (define-jsexpr lambda env
-  ((args stmt ...)
-   (let1 env (make-env env args)
-     (list "(" "(" (intersperse ","
-                                (let loop ((args args)
-                                           (js-args '()))
-                                  (match args
-                                    (()
-                                     (reverse js-args))
-                                    ((? symbol? arg)
-                                     (loop '() (cons (format "...~a" (resolve-js-var env arg)) js-args)))
-                                    ((arg . rest)
-                                     (loop rest (cons (resolve-js-var env arg) js-args))))))
-           ")" "=>" "{"
-           (map (cut compile-jsise-stmt env <>) stmt)
-           "}" ")"))))
+  ((jsargs stmt ...)
+   (receive (args restargs) (parse-lambda-args jsargs)
+     (let1 env (make-env env (append args restargs))
+       (list "(" "(" (intersperse ","
+                                  (append (map (lambda (arg)
+                                                 (resolve-js-var env arg))
+                                               args)
+                                          (map (lambda (restarg)
+                                                 (format "...~a" (resolve-js-var env restarg)))
+                                               restargs)))
+             ")" "=>" "{"
+             (map (cut compile-jsise-stmt env <>) stmt)
+             "}" ")")))))
 
 (define-jsexpr if env
   ((expr then)
