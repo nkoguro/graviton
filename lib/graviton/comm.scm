@@ -211,7 +211,7 @@
                 (reset-context! ctx)
                 (case cont-opcode
                   ((1)
-                   (receive-json (u8vector->string (apply u8vector-append (reverse cont-frames)))))
+                   (receive-json ctx (u8vector->string (apply u8vector-append (reverse cont-frames)))))
                   ((2)
                    (receive-binary ctx (apply u8vector-append (reverse cont-frames)))))))
              (else
@@ -219,7 +219,7 @@
           ((1)
            (cond
              (fin?
-              (receive-json (u8vector->string payload-data)))
+              (receive-json ctx (u8vector->string payload-data)))
              (else
               (slot-set! ctx 'continuation-opcode opcode)
               (slot-set! ctx 'continuation-frames (list payload-data)))))
@@ -251,7 +251,7 @@
     ((true) #t)
     (else sym)))
 
-(define (receive-json json-str)
+(define (receive-json ctx json-str)
   (let* ((params (vector->list (parameterize ((json-special-handler handle-json-special))
                                  (parse-json-string json-str))))
          (cmd (car params))
@@ -259,7 +259,7 @@
          (proc (hash-table-get json-command-table cmd #f)))
     (cond
       (proc
-       (worker-submit-task (main-worker) (cut apply proc args)))
+       (worker-submit-task (main-worker ctx) (cut apply proc args)))
       (else
        (log-error "Invalid data received: ~s" params)))))
 
