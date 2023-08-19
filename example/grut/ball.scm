@@ -5,7 +5,7 @@
 (use graviton.misc)
 (use text.console)
 
-(import-js ("https://cdn.skypack.dev/three" :as THREE))
+(import-js ("https://unpkg.com/three@0.154.0/build/three.module.js" :as THREE))
 
 (define-jsvar camera)
 (define-jsvar scene)
@@ -150,26 +150,26 @@
        (force-browser? "browser" #f)
        (force-server? "server" #f))
     (grv-config :mode (cond
-                        (force-player? 'player)
-                        (force-browser? 'browser)
-                        (force-server? 'server)
-                        (else #f)))
+                       (force-player? 'player)
+                       (force-browser? 'browser)
+                       (force-server? 'server)
+                       (else #f)))
     (with-window (grut-text+canvas-window 1024 768 :font-size "24px" :padding "5px")
-        (text-console canvas)
-      (on-jsevent window "keyup" (key)
-        (when (equal? key "Escape")
-          (close-window)))
+                 (text-console canvas)
+                 (on-jsevent window "keyup" (key)
+                   (when (equal? key "Escape")
+                     (close-window)))
 
-      (on-jsevent audio-context "statechange" ()
-        (update-text text-console))
+                 (on-jsevent audio-context "statechange" ()
+                   (update-text text-console))
 
-      (*ball* (make <ball>))
+                 (*ball* (make <ball>))
 
-      (setup-camera (/. (~ canvas'width) (~ canvas'height)))
-      (setup-scene)
-      (setup-renderer (lambda (t)
-                        (update-ball-position!)
-                        (draw-ball)))
+                 (setup-camera (/. (~ canvas'width) (~ canvas'height)))
+                 (setup-scene)
+                 (setup-renderer (lambda (t)
+                                   (update-ball-position!)
+                                   (draw-ball)))
 
-      (update-text text-console))))
+                 (update-text text-console))))
 
