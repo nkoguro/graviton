@@ -248,7 +248,7 @@
 
 (define-http-handler #/\/_r\/(.*)/
   (lambda (req app)
-    (let1 res-id ((slot-ref req 'path-rxmatch) 1)
+    (let1 res-id ((slot-ref req 'path-match) 1)
       (match-let1 (content-type body) (hash-table-get *id->resource-body-table* res-id '(#f #f))
         (cond
           ((and content-type body)
@@ -599,46 +599,47 @@
     (when (and (global-variable-bound? (current-module) 'IPPROTO_TCP)
                (global-variable-bound? (current-module) 'TCP_NODELAY))
       (socket-setsockopt (request-socket req) IPPROTO_TCP TCP_NODELAY 1))
-    (let* ((in (request-iport req))
-           (out (request-oport req))
-           (path (or ((~ req'path-rxmatch) 1) "/"))
-           (win-controller (lookup-window-controller path))
-           (thunk (and win-controller (~ win-controller'thunk))))
-      (let-params req ((upgrade "h")
-                       (connection "h")
-                       (sec-websocket-key "h")
-                       (sec-websocket-version "h")
-                       (req-user-agent "h:user-agent"))
-        (cond
-          ((not thunk)
-           (respond/ng req 404))
-          ((and (string-contains-ci upgrade "websocket")
-                (string-contains-ci connection "upgrade")
-                sec-websocket-key
-                (equal? sec-websocket-version "13"))
-           (format out
-                   "HTTP/~a 101 Switching Protocols\r\n"
-                   (ref req 'http-version))
-           (format out "Host: ~a\r\n" (ref req 'server-host))
-           (format out "Upgrade: websocket\r\n")
-           (format out "Connection: Upgrade\r\n")
-           (format out
-                   "Sec-WebSocket-Accept: ~a\r\n"
-                   (base64-encode-string
-                     (sha1-digest-string
-                       (string-append sec-websocket-key
-                                      "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))))
-           (format out "\r\n")
-           (flush out)
-           (log-framework-debug "WebSocket connected")
-           (when (~ win-controller'temporary?)
-             (delete-window-controller path))
-           (let1 ctx (make-window-context)
-             (window-parameter-set! ctx query-parameters (~ req'params))
-             (start-websocket-dispatcher! ctx (request-socket req) in out req-user-agent thunk))
-           req)
-          (else
-           (respond/ng req 400)))))))
+    (guard (e (else (report-error e)))
+      (let* ((in (request-iport req))
+             (out (request-oport req))
+             (path (or ((~ req'path-match) 1) "/"))
+             (win-controller (lookup-window-controller path))
+             (thunk (and win-controller (~ win-controller'thunk))))
+        (let-params req ((upgrade "h")
+                         (connection "h")
+                         (sec-websocket-key "h")
+                         (sec-websocket-version "h")
+                         (req-user-agent "h:user-agent"))
+          (cond
+            ((not thunk)
+             (respond/ng req 404))
+            ((and (string-contains-ci upgrade "websocket")
+                  (string-contains-ci connection "upgrade")
+                  sec-websocket-key
+                  (equal? sec-websocket-version "13"))
+             (format out
+                     "HTTP/~a 101 Switching Protocols\r\n"
+                     (ref req 'http-version))
+             (format out "Host: ~a\r\n" (ref req 'server-host))
+             (format out "Upgrade: websocket\r\n")
+             (format out "Connection: Upgrade\r\n")
+             (format out
+                     "Sec-WebSocket-Accept: ~a\r\n"
+                     (base64-encode-string
+                       (sha1-digest-string
+                         (string-append sec-websocket-key
+                                        "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))))
+             (format out "\r\n")
+             (flush out)
+             (log-framework-debug "WebSocket connected")
+             (when (~ win-controller'temporary?)
+               (delete-window-controller path))
+             (let1 ctx (make-window-context)
+               (window-parameter-set! ctx query-parameters (~ req'params))
+               (start-websocket-dispatcher! ctx (request-socket req) in out req-user-agent thunk))
+             req)
+            (else
+             (respond/ng req 400))))))))
 
 (define-http-handler #/.+/
   (lambda (req app)
